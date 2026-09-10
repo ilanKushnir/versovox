@@ -2,7 +2,10 @@ import { type AppContext } from '../context.js';
 import {
   claimNextJob,
   finishJob,
-  HEAVY_JOB_TYPES,
+  laneOf,
+  requeueJob,
+  type JobRow,
+  type Lane,
   LEASE_MS,
   LeaseLostError,
   makeLeaseGuard,
@@ -28,16 +31,17 @@ export interface WorkerHandle {
 }
 
 /**
- * Two lanes: `concurrency` slots for heavy jobs (multi-hour whisper runs) and
- * one always-available slot for light jobs (scans, indexing, pairing, model
- * downloads), so a transcription can never hold the library hostage.
+ * Three lanes: `concurrency` slots for heavy jobs (multi-hour whisper runs),
+ * one slot for model downloads (gigabytes over the network), and one slot for
+ * everything light (scans, indexing, pairing), so neither a transcription nor
+ * a download can hold the library hostage.
  */
 export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle {
-  let runningHeavy = 0;
-  let runningLight = 0;
+  const running: Record<Lane, number> = { heavy: 0, download: 0, light: 0 };
+  const capacity: Record<Lane, number> = { heavy: concurrency, download: 1, light: 1 };
+  const runningTotal = () => running.heavy + running.download + running.light;
   let stopped = false;
   let staleSweepAt = 0;
-  const isHeavy = (type: string) => (HEAVY_JOB_TYPES as readonly string[]).includes(type);
 
   const tick = () => {
     if (stopped) return;
@@ -51,27 +55,26 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
         ctx.log.error(`Stale job sweep failed: ${(err as Error).message}`);
       }
     }
+    // Each pass offers every lane with a free slot one job; stop when a full
+    // pass claims nothing.
     for (;;) {
-      const lane =
-        runningHeavy < concurrency
-          ? runningLight < 1
-            ? 'any'
-            : 'heavy'
-          : runningLight < 1
-            ? 'light'
-            : null;
-      if (!lane) return;
-      let job;
+      const free = (['heavy', 'light', 'download'] as Lane[]).filter(
+        (l) => running[l] < capacity[l],
+      );
+      if (free.length === 0) return;
+      let job: JobRow | null = null;
       try {
-        job = claimNextJob(ctx.db, { lane });
+        for (const lane of free) {
+          job = claimNextJob(ctx.db, { lane });
+          if (job) break;
+        }
       } catch (err) {
         ctx.log.error(`Job claim failed: ${(err as Error).message}`);
         return;
       }
       if (!job) return;
-      const heavy = isHeavy(job.type);
-      if (heavy) runningHeavy += 1;
-      else runningLight += 1;
+      const jobLane = laneOf(job.type);
+      running[jobLane] += 1;
 
       // Shared ownership guard: the background heartbeat renews through it,
       // and the SAME guard travels into the handler so every side effect is
@@ -93,7 +96,12 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
       const done = (error?: string, skipFinish = false) => {
         clearInterval(heartbeat);
         try {
-          if (
+          // A job that dies while we are shutting down (whisper killed by the
+          // container stop) goes back to the queue instead of counting as
+          // failed; the next start resumes it.
+          if (error && stopped && !guard.isLost() && requeueJob(ctx.db, job.id, job.lease_token)) {
+            ctx.log.warn(`Job ${job.id} (${job.type}) interrupted by shutdown — re-queued`);
+          } else if (
             !skipFinish &&
             !guard.isLost() &&
             !finishJob(ctx.db, job.id, job.lease_token, error)
@@ -103,8 +111,7 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
         } catch (err) {
           ctx.log.error(`Failed to finish job ${job.id}: ${(err as Error).message}`);
         }
-        if (heavy) runningHeavy -= 1;
-        else runningLight -= 1;
+        running[jobLane] -= 1;
       };
       const handler = JOB_HANDLERS[job.type];
       if (!handler) {
@@ -140,7 +147,7 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
       clearInterval(interval);
       // Give in-flight jobs a moment to checkpoint.
       const deadline = Date.now() + 5000;
-      while (runningHeavy + runningLight > 0 && Date.now() < deadline) {
+      while (runningTotal() > 0 && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 100));
       }
     },

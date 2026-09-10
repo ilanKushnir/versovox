@@ -82,9 +82,28 @@ export function proxyAuthUser(
 
   const { db } = ctx;
   const existing = db
-    .prepare('SELECT id, username, role FROM users WHERE username = ?')
-    .get(username) as SessionUser | undefined;
-  if (existing) return existing;
+    .prepare(
+      'SELECT id, username, role, display_name, status, last_login_at FROM users WHERE username = ?',
+    )
+    .get(username) as
+    | (SessionUser & { display_name: string | null; status: string; last_login_at: string | null })
+    | undefined;
+  if (existing) {
+    // Disabled accounts stay out even when the proxy lets them through.
+    if (existing.status !== 'active') return null;
+    // "Last seen" for People: proxied users never hit /login, so touch it
+    // here, at most every 15 minutes.
+    const last = existing.last_login_at ? Date.parse(existing.last_login_at) : 0;
+    if (Date.now() - last > 15 * 60_000) {
+      db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(nowIso(), existing.id);
+    }
+    return {
+      id: existing.id,
+      username: existing.username,
+      role: existing.role,
+      displayName: existing.display_name,
+    };
+  }
 
   const wantsAdmin = proxyAuthAdmins.some((a) => a.toLowerCase() === username.toLowerCase());
   const id = newId('user');

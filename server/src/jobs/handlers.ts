@@ -153,9 +153,16 @@ export function requeueAlignmentsWaitingFor(ctx: AppContext, modelIds?: string[]
   const ids = modelIds ?? MODELS.filter((m) => isInstalled(config.modelsDir, m)).map((m) => m.id);
   let n = 0;
   for (const id of ids) {
+    const spec = MODELS.find((m) => m.id === id);
     const waiting = db
-      .prepare(`SELECT id FROM jobs WHERE type = 'align' AND state = 'failed' AND error LIKE ?`)
-      .all(`model-missing:%:${id}|%`) as { id: string }[];
+      .prepare(
+        `SELECT id FROM jobs WHERE type = 'align' AND state = 'failed'
+           AND (error LIKE ? OR error LIKE ?)`,
+      )
+      // Current format, plus the pre-0.3 "Whisper model not found: <path>" wording.
+      .all(`model-missing:%:${id}|%`, `Whisper model not found: %${spec?.file ?? id}`) as {
+      id: string;
+    }[];
     for (const w of waiting) if (retryJob(db, w.id)) n += 1;
   }
   if (n) ctx.log.info(`Re-queued ${n} alignment(s) whose speech model is now installed`);

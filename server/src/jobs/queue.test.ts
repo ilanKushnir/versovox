@@ -178,3 +178,36 @@ describe('lease guard (handler-side ownership revalidation)', () => {
     expect(() => guard.assertHeld()).toThrow(LeaseLostError);
   });
 });
+
+describe('lanes', () => {
+  it('claims per lane so downloads and alignments never block light work', async () => {
+    const {
+      claimNextJob: claim,
+      enqueueJob: enqueue,
+      requeueJob,
+      laneOf,
+    } = await import('./queue.js');
+    enqueue(db, 'align', { pairId: 'p1' }, {});
+    enqueue(db, 'model-download', { modelId: 'm1' }, {});
+    enqueue(db, 'scan', {}, {});
+    expect(laneOf('align')).toBe('heavy');
+    expect(laneOf('model-download')).toBe('download');
+    expect(laneOf('index-ebook')).toBe('light');
+
+    const light = claim(db, { lane: 'light' })!;
+    expect(light.type).toBe('scan');
+    expect(claim(db, { lane: 'light' })).toBeNull();
+    const dl = claim(db, { lane: 'download' })!;
+    expect(dl.type).toBe('model-download');
+    const heavy = claim(db, { lane: 'heavy' })!;
+    expect(heavy.type).toBe('align');
+    expect(claim(db, { lane: 'any' })).toBeNull();
+
+    // Shutdown hands a running job back to the queue without a failure mark.
+    expect(requeueJob(db, heavy.id, heavy.lease_token)).toBe(true);
+    expect(requeueJob(db, heavy.id, 'not-the-lease')).toBe(false);
+    const again = claim(db, { lane: 'heavy' })!;
+    expect(again.id).toBe(heavy.id);
+    expect(again.attempts).toBe(2);
+  });
+});

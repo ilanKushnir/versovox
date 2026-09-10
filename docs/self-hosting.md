@@ -89,7 +89,9 @@ account there first if you want a break-glass path.
 
 ## Resource and concurrency controls
 
-- `VX_JOB_CONCURRENCY` (default 2) bounds simultaneous background jobs.
+- `VX_JOB_CONCURRENCY` (default 2) bounds simultaneous transcriptions; scans,
+  indexing, pairing and model downloads run in their own lanes beside them.
+  A job interrupted by a container restart is re-queued, not failed.
 - The compose file sets container memory limits; adjust to taste.
 - Alignment/transcription is CPU-bound only if you enable the experimental
   `whisper-cli` provider; the default install does no heavy compute.

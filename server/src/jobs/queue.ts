@@ -66,21 +66,31 @@ export function enqueueJob(
   }
 }
 
-/** Job types that run for hours on the CPU (whisper). Everything else is light. */
+/** Job types that run for hours on the CPU (whisper). */
 export const HEAVY_JOB_TYPES = ['align'] as const;
+/** Long network transfers (gigabyte model files) — cheap on CPU, slow on the clock. */
+export const DOWNLOAD_JOB_TYPES = ['model-download'] as const;
+export type Lane = 'heavy' | 'download' | 'light';
 
-export function claimNextJob(
-  db: DB,
-  opts: { lane?: 'heavy' | 'light' | 'any' } = {},
-): JobRow | null {
+export function laneOf(type: string): Lane {
+  if ((HEAVY_JOB_TYPES as readonly string[]).includes(type)) return 'heavy';
+  if ((DOWNLOAD_JOB_TYPES as readonly string[]).includes(type)) return 'download';
+  return 'light';
+}
+
+export function claimNextJob(db: DB, opts: { lane?: Lane | 'any' } = {}): JobRow | null {
   const lane = opts.lane ?? 'any';
-  const heavy = HEAVY_JOB_TYPES.map((t) => `'${t}'`).join(',');
+  const quote = (ts: readonly string[]) => ts.map((t) => `'${t}'`).join(',');
+  const heavy = quote(HEAVY_JOB_TYPES);
+  const downloads = quote(DOWNLOAD_JOB_TYPES);
   const where =
     lane === 'heavy'
       ? `AND type IN (${heavy})`
-      : lane === 'light'
-        ? `AND type NOT IN (${heavy})`
-        : '';
+      : lane === 'download'
+        ? `AND type IN (${downloads})`
+        : lane === 'light'
+          ? `AND type NOT IN (${heavy}, ${downloads})`
+          : '';
   const candidate = db
     .prepare(
       `SELECT id FROM jobs WHERE state = 'queued' ${where} ORDER BY priority DESC, created_at LIMIT 1`,
@@ -165,6 +175,23 @@ export function cancelJob(db: DB, id: string): boolean {
       `UPDATE jobs SET state = 'cancelled', finished_at = ? WHERE id = ? AND state = 'queued'`,
     )
     .run(nowIso(), id);
+  return Number(res.changes) > 0;
+}
+
+/**
+ * Hand a running job back to the queue without burning its attempt as a
+ * failure — used when the process is shutting down under a job (a container
+ * restart mid-transcription is not the job's fault). Only the lease holder
+ * may do this.
+ */
+export function requeueJob(db: DB, id: string, leaseToken: string | null): boolean {
+  const res = db
+    .prepare(
+      `UPDATE jobs SET state = 'queued', error = NULL, started_at = NULL, finished_at = NULL,
+         lease_token = NULL, lease_expires_at = NULL
+       WHERE id = ? AND state = 'running' AND lease_token IS ? AND attempts < ?`,
+    )
+    .run(id, leaseToken, MAX_ATTEMPTS);
   return Number(res.changes) > 0;
 }
 
