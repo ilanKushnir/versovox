@@ -77,18 +77,23 @@ export async function api<T>(
   url: string,
   opts: { method?: string; body?: unknown; signal?: AbortSignal; keepalive?: boolean } = {},
 ): Promise<T> {
+  const method = opts.method ?? 'GET';
+  // Mutations always carry an explicit JSON body (`{}` when the call has
+  // none): some proxies attach a content type to body-less POSTs, which a
+  // strict server turns into 415 — an empty JSON object is unambiguous.
+  const hasBody = opts.body !== undefined || (method !== 'GET' && method !== 'HEAD');
   let res: Response;
   try {
     res = await fetch(url, {
-      method: opts.method ?? 'GET',
+      method,
       credentials: 'same-origin',
       signal: opts.signal,
       keepalive: opts.keepalive,
       headers: {
         'x-vx-csrf': '1',
-        ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...(hasBody ? { 'content-type': 'application/json' } : {}),
       },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      body: hasBody ? JSON.stringify(opts.body ?? {}) : undefined,
     });
   } catch (err) {
     throw new ApiError(0, 'network', (err as Error).message);

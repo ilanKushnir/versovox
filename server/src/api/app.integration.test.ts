@@ -208,6 +208,22 @@ describe('Versovox API', () => {
     expect(unknown.statusCode).toBe(404);
   });
 
+  it('body-less POSTs survive a proxy-added content type (regression: 415 on Link editions)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/library/rescan',
+      headers: { cookie, 'x-vx-csrf': '1', 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    expect(res.statusCode).toBe(200);
+    const nonEmpty = await app.inject({
+      method: 'POST',
+      url: '/api/library/rescan',
+      headers: { cookie, 'x-vx-csrf': '1', 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'a=junk',
+    });
+    expect(nonEmpty.statusCode).toBe(415);
+  });
+
   it('library query parameters are validated (no 500 on arrays)', async () => {
     const res = await authed({ url: '/api/library?query=a&query=b' });
     expect(res.statusCode).toBe(400);

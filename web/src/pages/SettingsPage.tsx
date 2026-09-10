@@ -7,6 +7,7 @@ import { IconAlert, IconCheck, IconDownload, IconTrash } from '../components/ico
 import { formatBytes, formatDate } from '../lib/format';
 import { storageEstimate } from '../offline/downloads';
 import { type ModelInfo, type ModelsResponse } from '../lib/types';
+import { applyAppThemeColor } from '../lib/themeColor';
 
 interface SettingsResponse {
   settings: Settings;
@@ -53,6 +54,7 @@ export function SettingsPage() {
     if (appTheme === 'auto') root.removeAttribute('data-app-theme');
     else root.setAttribute('data-app-theme', appTheme);
     localStorage.setItem('vx-app-theme', appTheme);
+    applyAppThemeColor();
   }, [appTheme]);
 
   // Deep link from the pairing page: /settings#speech-models
@@ -166,6 +168,7 @@ export function SettingsPage() {
         onLanguageModel={(code, modelId) =>
           void save({ languageModels: { ...s.languageModels, [code]: modelId } })
         }
+        onAutoDefault={(v) => void save({ autoDownloadDefaultModel: v })}
       />
 
       <section className="settings-section" aria-label="Alignment">
@@ -362,12 +365,14 @@ function SpeechModelsSection({
   pinned,
   onProviderChange,
   onLanguageModel,
+  onAutoDefault,
 }: {
   settings: Settings;
   isAdmin: boolean;
   pinned: (k: string) => boolean;
   onProviderChange: (v: Settings['transcribeProvider']) => void;
   onLanguageModel: (code: string, modelId: string) => void;
+  onAutoDefault: (v: boolean) => void;
 }) {
   const toast = useToast();
   const [models, setModels] = useState<ModelsResponse | null>(null);
@@ -432,6 +437,20 @@ function SpeechModelsSection({
         large-v3-turbo unless you choose otherwise. Models are downloaded once from Hugging Face
         into <code>{models?.modelsDir ?? 'the models directory'}</code>.
       </p>
+      <p className="settings-section__lede">
+        <strong>Nothing downloads on its own except the multilingual default</strong> (it covers
+        English) on a fresh install — every other language is your click.
+      </p>
+      <label className="rs-toggle" style={{ maxWidth: 560 }}>
+        <span>Fetch the default model automatically on a fresh install</span>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={settings.autoDownloadDefaultModel}
+          disabled={!isAdmin}
+          onChange={(e) => onAutoDefault(e.target.checked)}
+        />
+      </label>
       <div className="field">
         <label htmlFor="set-provider">
           Transcription {pinned('transcribeProvider') && <em>(set by environment)</em>}

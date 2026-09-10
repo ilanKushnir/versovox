@@ -17,6 +17,8 @@ export interface ReaderPrefs {
   columns: 'auto' | 'one' | 'two';
   /** 0.35–1: page dimming for night reading (1 = no dimming). */
   brightness: number;
+  /** Bottom progress indicator: full (slider + details), compact (one thin line), or hidden. */
+  progressBar: 'full' | 'compact' | 'hidden';
 }
 
 export type ReaderFont =
@@ -34,6 +36,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   mode: 'paginated',
   columns: 'auto',
   brightness: 1,
+  progressBar: 'full',
 };
 
 export const SIZE_MIN = 14;

@@ -43,6 +43,7 @@ import {
   type ReaderPrefs,
 } from './prefs';
 import { formatDuration, formatPct } from '../lib/format';
+import { applyAppThemeColor, setThemeColor } from '../lib/themeColor';
 
 type SheetKind = 'none' | 'toc' | 'settings' | 'search' | 'note';
 
@@ -82,6 +83,8 @@ export function ReaderPage() {
     y: number;
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
+  /** Mirror of currentOffsetRef for rendering: page turns set it, scroll updates it live. */
+  const [liveOffset, setLiveOffset] = useState(0);
 
   const [systemDark, setSystemDark] = useState(
     () => typeof matchMedia === 'function' && matchMedia(DARK_MQ).matches,
@@ -314,6 +317,7 @@ export function ReaderPage() {
         });
         if (off !== null) {
           currentOffsetRef.current = off;
+          setLiveOffset(off);
           // A page turn is a deliberate act: the first one after this surface
           // (re)gained focus is recorded as an explicit intent so this
           // session holds the progress claim again (heartbeats from a
@@ -388,6 +392,7 @@ export function ReaderPage() {
       if (off !== null) charOffset = off;
     }
     currentOffsetRef.current = charOffset;
+    setLiveOffset(charOffset);
 
     if (prefs.mode === 'paginated' && layoutRef.current) {
       // Find the page containing charOffset (transition-safe measurement).
@@ -482,14 +487,10 @@ export function ReaderPage() {
   const theme = effectiveTheme(prefs.theme, systemDark);
 
   // Standalone iPhone: the status bar takes the page's theme-color, so the
-  // reader paints it in its own theme and restores the app colors on exit.
+  // reader paints it in its own theme and restores the app colour on exit.
   useEffect(() => {
-    const metas = Array.from(
-      document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'),
-    );
-    const saved = metas.map((m) => m.content);
-    for (const m of metas) m.content = THEME_BG[theme];
-    return () => metas.forEach((m, i) => (m.content = saved[i] ?? ''));
+    setThemeColor(THEME_BG[theme]);
+    return () => applyAppThemeColor();
   }, [theme]);
 
   // Lifecycle persistence: expose the LIVE reading position so backgrounding
@@ -516,7 +517,20 @@ export function ReaderPage() {
     const scroller = scrollerRef.current;
     if (!scroller || !manifest) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let footerTimer: ReturnType<typeof setTimeout> | null = null;
     const onScroll = () => {
+      // Footer: cheap, throttled to ~12 updates/s (a timer, not rAF, so a
+      // backgrounded tab still lands on the right value when it returns).
+      if (!footerTimer) {
+        footerTimer = setTimeout(() => {
+          footerTimer = null;
+          const map = textMapRef.current;
+          if (!map) return;
+          const off = firstVisibleOffset(map, scroller.getBoundingClientRect());
+          if (off !== null) setLiveOffset(off);
+        }, 80);
+      }
+      // Progress checkpoint: debounced.
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         const map = textMapRef.current;
@@ -533,6 +547,7 @@ export function ReaderPage() {
     return () => {
       scroller.removeEventListener('scroll', onScroll);
       if (timer) clearTimeout(timer);
+      if (footerTimer) clearTimeout(footerTimer);
     };
   }, [prefs.mode, manifest, sentences, spineIdx, id, html]);
 
@@ -780,7 +795,12 @@ export function ReaderPage() {
     manifest?.toc.find((t) => t.spineIdx === spineIdx)?.title ??
     manifest?.title ??
     '';
-  const bookPct = manifest ? pctFor(manifest, spineIdx, currentOffsetRef.current) : 0;
+  const bookPct = manifest ? pctFor(manifest, spineIdx, liveOffset) : 0;
+  const chapterPct = (() => {
+    const ch = manifest?.chapters[spineIdx];
+    if (!ch || ch.charCount === 0) return 0;
+    return Math.min(1, Math.max(0, liveOffset / ch.charCount));
+  })();
   const margins = MARGINS[prefs.margin];
   const pagesLeft = Math.max(0, pageCount - page - 1);
 
@@ -951,38 +971,58 @@ export function ReaderPage() {
         </div>
       )}
 
-      <div className="immersive-chrome immersive-chrome--bottom">
-        <input
-          className="slider"
-          style={{ color: 'var(--rd-link)' }}
-          type="range"
-          min={0}
-          max={1000}
-          value={Math.round(bookPct * 1000)}
-          aria-label="Book position"
-          onChange={(e) => {
-            if (!manifest) return;
-            const pct = Number(e.target.value) / 1000;
-            const targetChars = pct * manifest.totalChars;
-            let s = 0;
-            for (const c of manifest.chapters) {
-              if (c.cumChars <= targetChars) s = c.idx;
-              else break;
-            }
-            const within = Math.max(0, Math.floor(targetChars - manifest.chapters[s]!.cumChars));
-            gotoChapter(s, within);
-          }}
-        />
+      <div
+        className={`immersive-chrome immersive-chrome--bottom immersive-chrome--bar-${prefs.progressBar}`}
+      >
+        {prefs.progressBar === 'full' && (
+          <input
+            className="slider"
+            style={{ color: 'var(--rd-link)' }}
+            type="range"
+            min={0}
+            max={1000}
+            value={Math.round(bookPct * 1000)}
+            aria-label="Book position"
+            onChange={(e) => {
+              if (!manifest) return;
+              const pct = Number(e.target.value) / 1000;
+              const targetChars = pct * manifest.totalChars;
+              let s = 0;
+              for (const c of manifest.chapters) {
+                if (c.cumChars <= targetChars) s = c.idx;
+                else break;
+              }
+              const within = Math.max(0, Math.floor(targetChars - manifest.chapters[s]!.cumChars));
+              gotoChapter(s, within);
+            }}
+          />
+        )}
         <div className="reader-footer-row">
-          <span>
-            {prefs.mode === 'paginated'
-              ? pagesLeft === 0
-                ? pageCount === 1
-                  ? 'Whole chapter on this page'
-                  : 'Last page in chapter'
-                : `${pagesLeft} ${pagesLeft === 1 ? 'page' : 'pages'} left in chapter`
-              : chapterTitle}
-          </span>
+          {prefs.progressBar === 'full' && (
+            <span>
+              {prefs.mode === 'paginated'
+                ? pagesLeft === 0
+                  ? pageCount === 1
+                    ? 'Whole chapter on this page'
+                    : 'Last page in chapter'
+                  : `${pagesLeft} ${pagesLeft === 1 ? 'page' : 'pages'} left in chapter`
+                : chapterTitle}
+            </span>
+          )}
+          {prefs.progressBar === 'compact' && (
+            <span
+              className="reader-minibar"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(bookPct * 100)}
+              aria-label="Book position"
+              title={`${chapterTitle} · chapter ${formatPct(chapterPct)}`}
+            >
+              <span style={{ width: `${bookPct * 100}%` }} />
+              <i style={{ insetInlineStart: `${bookPct * 100}%` }} aria-hidden="true" />
+            </span>
+          )}
           <span className="grow" />
           {detail?.book.pair && detail.book.pair.status !== 'candidate' && (
             <button
@@ -1002,7 +1042,7 @@ export function ReaderPage() {
               </span>
             </button>
           )}
-          <span>{formatPct(bookPct)}</span>
+          {prefs.progressBar !== 'hidden' && <span>{formatPct(bookPct)}</span>}
         </div>
       </div>
 
@@ -1317,6 +1357,20 @@ function ReaderSettingsSheet({
           <button aria-pressed={prefs.mode === 'scroll'} onClick={() => set('mode', 'scroll')}>
             Scroll
           </button>
+        </div>
+        <div className="rs-label" style={{ marginTop: 12 }}>
+          Progress bar
+        </div>
+        <div className="segmented" role="group" aria-label="Progress bar">
+          {(['full', 'compact', 'hidden'] as const).map((v) => (
+            <button
+              key={v}
+              aria-pressed={prefs.progressBar === v}
+              onClick={() => set('progressBar', v)}
+            >
+              {v === 'full' ? 'Full' : v === 'compact' ? 'Compact' : 'Hidden'}
+            </button>
+          ))}
         </div>
         {prefs.mode === 'paginated' && (
           <div className="segmented" role="group" aria-label="Columns" style={{ marginTop: 8 }}>

@@ -17,6 +17,7 @@ const DEFAULTS: Settings = {
   autoPairThreshold: 0.92,
   storageBudgetMb: 0,
   languageModels: {},
+  autoDownloadDefaultModel: true,
 };
 
 /** Settings keys that can be pinned by env vars, mapped to config fields. */

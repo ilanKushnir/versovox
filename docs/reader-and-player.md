@@ -26,6 +26,10 @@ Implemented:
 - Table of contents (EPUB 3 nav with NCX fallback, including sub-chapter
   fragment entries), footnote and internal fragment links, in-book search
   with jump-to-result, book-position slider, "N pages left in chapter".
+- Progress indicator in three flavours (Reading settings → Progress bar): **Full**
+  (slider, pages left, percentage), **Compact** (one thin line with a
+  percentage, no chapter text), or **Hidden**. It tracks live in scroll mode
+  as well as page mode.
 - Themes: Auto (follows the system appearance), Paper, Sepia, Night, High
   contrast — independent of the app theme; the iPhone status bar follows the
   reader theme in standalone mode. A page-dimming slider (screen brightness
@@ -117,6 +121,9 @@ progress history.
 
 ## Offline packages
 
+Downloads start from the download icon on the book page, which first explains
+what will be stored (size, offline behaviour, removal on sign-out) and asks
+for confirmation; the same icon shows progress and later manages removal.
 Per-title downloads verify every entry (byte size + SHA-256 from the
 server's offline manifest) before caching, include every referenced derived
 asset (illustrations), and only mark the package complete after everything

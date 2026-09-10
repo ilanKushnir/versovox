@@ -124,6 +124,53 @@ h3 {
   padding: 0;
   border-radius: var(--radius-pill);
 }
+.offline-btn {
+  background: transparent;
+  color: var(--vx-interactive);
+  border-color: var(--vx-border-strong);
+}
+.offline-btn:hover {
+  background: var(--vx-surface);
+}
+.offline-btn.is-done {
+  background: var(--vx-primary);
+  border-color: var(--vx-primary);
+  color: var(--vx-on-primary);
+}
+.offline-btn__ring {
+  --pct: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(
+    var(--vx-interactive) calc(var(--pct) * 1%),
+    color-mix(in srgb, var(--vx-interactive) 20%, transparent) 0
+  );
+}
+.offline-btn__pct {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--vx-surface-raised);
+  color: var(--vx-text);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.sheet__lede {
+  margin: 0 0 var(--sp-4);
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--vx-text);
+}
+.sheet__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
 
 .input {
   width: 100%;

@@ -20,10 +20,13 @@ import { storeAlignment } from '../alignment/service.js';
 import { detectLanguage, getProvider } from '../transcription/providers.js';
 import {
   anyMultilingualModel,
+  DEFAULT_MODEL_ID,
+  isInstalled,
   languageByCode,
   modelById,
   modelPath,
   ModelMissingError,
+  MODELS,
   resolveModelForLanguage,
 } from '../transcription/models.js';
 import { languageCode } from '../pairing/score.js';
@@ -137,13 +140,45 @@ export async function runModelDownload(
   guard.assertHeld();
   fs.renameSync(part, dest);
   jobProgress(db, job.id, job.lease_token, 1, `${spec.label}: installed (${fmt(size)})`);
-  // Alignments that failed only because this model was missing can go again.
-  const waiting = db
-    .prepare(`SELECT id FROM jobs WHERE type = 'align' AND state = 'failed' AND error LIKE ?`)
-    .all(`model-missing:%:${spec.id}|%`) as { id: string }[];
-  for (const w of waiting) retryJob(db, w.id);
-  if (waiting.length)
-    ctx.log.info(`Re-queued ${waiting.length} alignment(s) waiting for ${spec.id}`);
+  requeueAlignmentsWaitingFor(ctx, [spec.id]);
+}
+
+/**
+ * Alignments that failed only because a speech model was missing go again
+ * once that model is installed — whether it arrived through the in-app
+ * download, the CLI, or a file dropped into the models volume.
+ */
+export function requeueAlignmentsWaitingFor(ctx: AppContext, modelIds?: string[]): number {
+  const { db, config } = ctx;
+  const ids = modelIds ?? MODELS.filter((m) => isInstalled(config.modelsDir, m)).map((m) => m.id);
+  let n = 0;
+  for (const id of ids) {
+    const waiting = db
+      .prepare(`SELECT id FROM jobs WHERE type = 'align' AND state = 'failed' AND error LIKE ?`)
+      .all(`model-missing:%:${id}|%`) as { id: string }[];
+    for (const w of waiting) if (retryJob(db, w.id)) n += 1;
+  }
+  if (n) ctx.log.info(`Re-queued ${n} alignment(s) whose speech model is now installed`);
+  return n;
+}
+
+/**
+ * First-start convenience: fetch ONLY the multilingual default model when
+ * transcription is on and nothing is installed yet. Every other language is
+ * a deliberate click in Settings → Speech models.
+ */
+export function ensureDefaultModel(ctx: AppContext): void {
+  const { db, config } = ctx;
+  const { values } = resolveSettings(db, config);
+  if (values.transcribeProvider !== 'whisper-cli' || !values.autoDownloadDefaultModel) return;
+  if (MODELS.some((m) => m.languages === '*' && isInstalled(config.modelsDir, m))) return;
+  const id = enqueueJob(
+    db,
+    'model-download',
+    { modelId: DEFAULT_MODEL_ID },
+    { dedupeKey: `model:${DEFAULT_MODEL_ID}` },
+  );
+  if (id) ctx.log.info(`No speech model installed — fetching the default (${DEFAULT_MODEL_ID})`);
 }
 
 export async function runScan(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {

@@ -159,6 +159,9 @@ export function resolveModelForLanguage(
   throw new ModelMissingError(lang?.code ?? language, candidates[0]!);
 }
 
+/** The one model Versovox may fetch on its own; every other download is a user click. */
+export const DEFAULT_MODEL_ID = 'large-v3-turbo';
+
 /** Any installed multilingual model (for language detection). */
 export function anyMultilingualModel(modelsDir: string): { spec: ModelSpec; path: string } | null {
   for (const id of ['large-v3-turbo', 'large-v3', 'small']) {

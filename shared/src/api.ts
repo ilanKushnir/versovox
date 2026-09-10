@@ -153,5 +153,7 @@ export const settingsSchema = z.object({
   storageBudgetMb: z.number().int().min(0),
   /** Per-language speech model preference (language code → catalog model id). */
   languageModels: z.record(z.string().max(8), z.string().max(64)).default({}),
+  /** Fetch the multilingual default (large-v3-turbo) on first start; other languages are always manual. */
+  autoDownloadDefaultModel: z.boolean().default(true),
 });
 export type Settings = z.infer<typeof settingsSchema>;

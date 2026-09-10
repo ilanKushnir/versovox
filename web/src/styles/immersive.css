@@ -208,6 +208,45 @@
   color: var(--rd-soft);
   font-variant-numeric: tabular-nums;
 }
+/* Compact: one thin line — bar, (optional) listen pill, percentage. */
+.immersive-chrome--bar-compact {
+  padding-block-start: 6px;
+}
+.immersive-chrome--bar-hidden {
+  background: transparent;
+  border-block-start: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding-block-start: 0;
+}
+.immersive-chrome--bar-hidden .reader-footer-row:empty {
+  display: none;
+}
+.reader-minibar {
+  position: relative;
+  flex: 1 1 120px;
+  max-width: 320px;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--rd-text) 16%, transparent);
+  overflow: visible;
+}
+.reader-minibar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--rd-link);
+  transition: width 120ms linear;
+}
+.reader-minibar > i {
+  position: absolute;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  margin-inline-start: -4px;
+  border-radius: 50%;
+  background: var(--rd-link);
+}
 .reader-footer-row .grow {
   flex: 1;
 }

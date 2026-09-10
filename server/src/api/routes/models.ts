@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { type FastifyInstance } from 'fastify';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';
+import { requeueAlignmentsWaitingFor } from '../../jobs/handlers.js';
 import {
   isInstalled,
   LANGUAGES,
@@ -31,6 +32,13 @@ export function registerModelRoutes(app: FastifyInstance, ctx: AppContext): void
       .all() as { payload_json: string; error: string | null }[];
 
   app.get('/api/models', async () => {
+    // A model may have appeared outside the app (CLI, file copy): unblock
+    // any alignment that was waiting for it.
+    try {
+      requeueAlignmentsWaitingFor(ctx);
+    } catch {
+      /* best effort */
+    }
     const active = new Map<string, { state: string; progress: number; detail: string | null }>();
     for (const j of activeDownloads()) {
       const { modelId } = JSON.parse(j.payload_json) as { modelId: string };

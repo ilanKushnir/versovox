@@ -1,6 +1,6 @@
 {
   "name": "@versovox/web",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@versovox/shared": "0.3.1",
+    "@versovox/shared": "0.3.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-router-dom": "7.18.3",

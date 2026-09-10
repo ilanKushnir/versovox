@@ -8,6 +8,7 @@ import { type AppContext } from './context.js';
 import { startWorker } from './jobs/worker.js';
 import { enqueueJob } from './jobs/queue.js';
 import { compactProgressHistory } from './progress/service.js';
+import { ensureDefaultModel, requeueAlignmentsWaitingFor } from './jobs/handlers.js';
 import { pruneLoginThrottle } from './auth/sessions.js';
 
 const config = loadConfig();
@@ -43,6 +44,15 @@ if (config.inlineWorker) {
 const hasUsers = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c > 0;
 if (hasUsers && (config.ebookDirs.length || config.audiobookDirs.length)) {
   enqueueJob(db, 'scan', {}, { dedupeKey: 'scan' });
+}
+
+// Speech models: fetch only the default one on a fresh install, and let
+// alignments that were waiting for a model (installed by any route) run.
+try {
+  if (hasUsers) ensureDefaultModel(ctx);
+  requeueAlignmentsWaitingFor(ctx);
+} catch (err) {
+  ctx.log.error(`Model bootstrap failed: ${(err as Error).message}`);
 }
 
 // Periodic rescan so titles added to Calibre/Audiobookshelf/plain folders

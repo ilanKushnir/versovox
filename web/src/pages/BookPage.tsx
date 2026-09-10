@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { type AudioLocator, type EbookLocator } from '@versovox/shared';
 import { api } from '../api/client';
 import { type Annotation, type BookDetail, type ResolveResponse } from '../lib/types';
-import { Cover, EmptyState, useToast } from '../components/ui';
+import { Cover, EmptyState, Sheet, useToast } from '../components/ui';
 import {
   IconAlert,
   IconBookmark,
@@ -11,6 +11,7 @@ import {
   IconDownload,
   IconHeadphones,
   IconLink,
+  IconOffline,
   IconSwitch,
   IconTrash,
 } from '../components/icons';
@@ -38,6 +39,7 @@ export function BookPage() {
   const [dl, setDl] = useState<DownloadState | null>(null);
   const [ambient, setAmbient] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [offlineSheet, setOfflineSheet] = useState(false);
   const autoSwitched = useRef(false);
 
   const load = useCallback(async () => {
@@ -253,16 +255,7 @@ export function BookPage() {
                 <IconHeadphones size={18} /> {pct > 0.001 ? 'Continue listening' : 'Listen'}
               </Link>
             )}
-            <DownloadButton
-              dl={dl}
-              onDownload={() => void download()}
-              onCancel={() => cancelDownload(id)}
-              onRemove={async () => {
-                await removeDownload(id);
-                setDl(await getDownloadState(id));
-                toast.show('Offline copy removed');
-              }}
-            />
+            <OfflineIconButton dl={dl} onClick={() => setOfflineSheet(true)} />
           </div>
         </div>
       </div>
@@ -387,41 +380,154 @@ export function BookPage() {
           This book has no chapter metadata; you can still {isEbook ? 'read' : 'listen'} normally.
         </EmptyState>
       )}
+      {offlineSheet && (
+        <OfflineSheet
+          book={{ title: book.title, kind: book.kind, sizeBytes: book.sizeBytes }}
+          dl={dl}
+          onClose={() => setOfflineSheet(false)}
+          onDownload={() => {
+            setOfflineSheet(false);
+            void download();
+          }}
+          onCancel={() => {
+            cancelDownload(id);
+            setOfflineSheet(false);
+          }}
+          onRemove={async () => {
+            await removeDownload(id);
+            setDl(await getDownloadState(id));
+            setOfflineSheet(false);
+            toast.show('Offline copy removed');
+          }}
+        />
+      )}
     </main>
   );
 }
 
-function DownloadButton({
+function OfflineIconButton({ dl, onClick }: { dl: DownloadState | null; onClick: () => void }) {
+  const downloading = dl?.status === 'downloading';
+  const done = dl?.status === 'done';
+  const pctDone = downloading && dl.totalUrls ? Math.round((dl.doneUrls / dl.totalUrls) * 100) : 0;
+  return (
+    <button
+      className={`btn btn--icon offline-btn ${done ? 'is-done' : ''} ${downloading ? 'is-busy' : ''}`}
+      onClick={onClick}
+      aria-label={
+        done
+          ? 'Available offline — manage'
+          : downloading
+            ? `Downloading for offline, ${pctDone}%`
+            : 'Download for offline'
+      }
+      title={
+        done
+          ? 'Available offline'
+          : downloading
+            ? `Downloading ${pctDone}%`
+            : 'Download for offline'
+      }
+    >
+      {downloading ? (
+        <span className="offline-btn__ring" style={{ '--pct': pctDone } as React.CSSProperties}>
+          <span className="offline-btn__pct">{pctDone}</span>
+        </span>
+      ) : done ? (
+        <IconOffline size={20} />
+      ) : dl?.status === 'error' ? (
+        <IconAlert size={20} />
+      ) : (
+        <IconDownload size={20} />
+      )}
+    </button>
+  );
+}
+
+/**
+ * One sheet for the whole offline lifecycle: explain + confirm the download,
+ * show progress with a cancel, or offer removal once the copy is complete.
+ */
+function OfflineSheet({
+  book,
   dl,
+  onClose,
   onDownload,
   onCancel,
   onRemove,
 }: {
+  book: { title: string; kind: 'ebook' | 'audio'; sizeBytes: number };
   dl: DownloadState | null;
+  onClose: () => void;
   onDownload: () => void;
   onCancel: () => void;
   onRemove: () => void;
 }) {
-  if (dl?.status === 'downloading') {
-    const pctDone = dl.totalUrls ? dl.doneUrls / dl.totalUrls : 0;
-    return (
-      <button className="btn btn--secondary" onClick={onCancel} aria-live="polite">
-        <span className="spinner" style={{ width: 16, height: 16 }} />
-        {Math.round(pctDone * 100)}% · {formatBytes(dl.storedBytes)} — Cancel
-      </button>
-    );
-  }
-  if (dl?.status === 'done') {
-    return (
-      <button className="btn btn--danger" onClick={onRemove} title="Remove offline copy">
-        <IconTrash size={17} /> Offline · {formatBytes(dl.storedBytes)}
-      </button>
-    );
-  }
+  const downloading = dl?.status === 'downloading';
+  const done = dl?.status === 'done';
+  const isEbook = book.kind === 'ebook';
   return (
-    <button className="btn btn--secondary" onClick={onDownload}>
-      {dl?.status === 'error' ? <IconAlert size={17} /> : <IconDownload size={17} />}
-      {dl?.status === 'error' ? 'Retry download' : 'Download for offline'}
-    </button>
+    <Sheet
+      title={done ? 'Available offline' : downloading ? 'Downloading' : 'Download for offline?'}
+      onClose={onClose}
+    >
+      {done ? (
+        <>
+          <p className="sheet__lede">
+            <strong>{book.title}</strong> is stored on this device ({formatBytes(dl.storedBytes)}).
+            You can {isEbook ? 'read' : 'listen to'} it with no connection; progress syncs when you
+            are back online.
+          </p>
+          <div className="sheet__actions">
+            <button className="btn btn--danger" onClick={onRemove}>
+              <IconTrash size={16} /> Remove offline copy
+            </button>
+            <button className="btn btn--secondary" onClick={onClose}>
+              Keep
+            </button>
+          </div>
+        </>
+      ) : downloading ? (
+        <>
+          <p className="sheet__lede">
+            {dl.doneUrls} of {dl.totalUrls} parts · {formatBytes(dl.storedBytes)} so far. You can
+            keep using the app meanwhile.
+          </p>
+          <span className="progressbar" aria-hidden="true" style={{ height: 6 }}>
+            <span style={{ width: `${dl.totalUrls ? (dl.doneUrls / dl.totalUrls) * 100 : 0}%` }} />
+          </span>
+          <div className="sheet__actions">
+            <button className="btn btn--secondary" onClick={onCancel}>
+              Cancel download
+            </button>
+            <button className="btn btn--ghost" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="sheet__lede">
+            Keep <strong>{book.title}</strong> on this device for flights and dead zones — about{' '}
+            <strong>{formatBytes(book.sizeBytes)}</strong>
+            {isEbook ? ' including images' : ' of audio'}. {isEbook ? 'Reading' : 'Listening'} works
+            fully offline and your position syncs back when you reconnect. Signing out removes
+            offline copies.
+          </p>
+          {dl?.status === 'error' && (
+            <div className="banner banner--error" role="alert">
+              <IconAlert size={15} /> Last attempt failed: {dl.error ?? 'unknown error'}
+            </div>
+          )}
+          <div className="sheet__actions">
+            <button className="btn" onClick={onDownload}>
+              <IconDownload size={16} /> {dl?.status === 'error' ? 'Retry download' : 'Download'}
+            </button>
+            <button className="btn btn--secondary" onClick={onClose}>
+              Not now
+            </button>
+          </div>
+        </>
+      )}
+    </Sheet>
   );
 }

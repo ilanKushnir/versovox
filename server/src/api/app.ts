@@ -74,6 +74,16 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
 
   app.register(fastifyCookie);
 
+  // Body-less mutations (confirm/unlink/align/…) may arrive through proxies
+  // that add a content type; an unknown type with an EMPTY body is harmless
+  // and must not be a 415. Non-empty bodies of unknown types stay rejected.
+  app.addContentTypeParser('*', { parseAs: 'buffer' }, (req, body, done) => {
+    if ((body as Buffer).length === 0) return done(null, undefined);
+    const err = new Error('Unsupported Media Type') as Error & { statusCode?: number };
+    err.statusCode = 415;
+    done(err, undefined);
+  });
+
   app.addHook('onRequest', async (req, reply) => {
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'same-origin');
