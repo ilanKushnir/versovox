@@ -486,7 +486,10 @@ export function SetupWizard({
           <InitStep
             hasRoots={ebookDirs.length + audioDirs.length > 0}
             onEnter={() => {
-              localStorage.removeItem(SKIP_KEY);
+              // Finishing with no folders is a deliberate skip: don't bounce
+              // straight back into the wizard.
+              if (ebookDirs.length + audioDirs.length > 0) localStorage.removeItem(SKIP_KEY);
+              else localStorage.setItem(SKIP_KEY, '1');
               if (createdUser) setUser(createdUser);
               else void refresh().then(() => onDone?.());
             }}

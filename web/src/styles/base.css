@@ -2221,11 +2221,15 @@ select.input {
   margin: 0 0 var(--sp-2);
   padding: 0;
   display: grid;
+  /* A long absolute path must never widen the card: grid items default to
+     min-width:auto, which lets nowrap text push the track past its container. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 .folders__row {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: var(--sp-3);
   padding: 8px 10px 8px 12px;
   border-radius: 10px;

@@ -270,8 +270,8 @@ export function LibraryPage() {
             </EmptyState>
           ) : (
             <EmptyState icon={<IconLibrary size={44} />} title="Your library is empty">
-              Versovox reads existing ebook and audiobook folders without changing them. Mount your
-              libraries (VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS) and run a scan.
+              Versovox reads ebook and audiobook folders you already have, and never writes to them.
+              Choose those folders in Settings → Libraries; each one is tested before it is saved.
             </EmptyState>
           )
         ) : (

@@ -126,7 +126,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         logout,
         setUser: (u) => {
           setUser(u);
-          if (u) setPhase('ready');
+          if (u) {
+            setPhase('ready');
+            // Pick up server-side setup state (needsLibraries) that only
+            // /api/auth/me reports — otherwise a fresh sign-in lands on an
+            // empty library instead of the unfinished wizard.
+            void refresh();
+          }
         },
       }}
     >
