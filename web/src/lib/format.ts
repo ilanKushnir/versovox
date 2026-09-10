@@ -34,3 +34,18 @@ export function formatDate(iso: string): string {
     return iso;
   }
 }
+
+/**
+ * A rough span in words, for time estimates: "about 3 h", "about 2 days".
+ * Deliberately coarse — these come from a measured average, not a promise.
+ */
+export function formatSpan(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return 'unknown';
+  const mins = ms / 60_000;
+  if (mins < 1) return 'under a minute';
+  if (mins < 90) return `about ${Math.round(mins)} min`;
+  const hours = mins / 60;
+  if (hours < 36) return `about ${Math.round(hours)} h`;
+  const days = hours / 24;
+  return days < 10 ? `about ${days.toFixed(1)} days` : `about ${Math.round(days)} days`;
+}

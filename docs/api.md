@@ -73,6 +73,14 @@ header. Schemas are zod-validated; canonical types live in
 | POST   | `/api/pairs/:id/align`                           | queue alignment                                             |
 | POST   | `/api/pairs/:id/resolve`                         | `{from: Locator}` → `{to, resolution}` — the two-way switch |
 
+## Processing
+
+| Method | Path                    | Notes                                                                          |
+| ------ | ----------------------- | ------------------------------------------------------------------------------ |
+| POST   | `/api/pairs/:id/align`  | curator; forces the full transcription regardless of `processingMode`          |
+| POST   | `/api/pairs/align-many` | curator; `{pairIds: []}` — the "Start all" / multi-select action               |
+| GET    | `/api/pairs`            | also returns `summary`: pending pairs, pending audio, measured speed, estimate |
+
 ## Jobs & settings
 
 | Method  | Path                              | Notes                                                                                 |

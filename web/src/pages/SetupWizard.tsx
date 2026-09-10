@@ -20,15 +20,18 @@ import { folderApi, LibraryFolders } from '../components/LibraryFolders';
 
 export type WizardMode = 'first-run' | 'libraries';
 
-type StepId = 'welcome' | 'admin' | 'libraries' | 'language' | 'review' | 'init';
+type StepId = 'welcome' | 'admin' | 'libraries' | 'language' | 'processing' | 'review' | 'init';
 const ALL_STEPS: { id: StepId; label: string }[] = [
   { id: 'welcome', label: 'Welcome' },
   { id: 'admin', label: 'Admin' },
   { id: 'libraries', label: 'Libraries' },
   { id: 'language', label: 'Language' },
+  { id: 'processing', label: 'Processing' },
   { id: 'review', label: 'Review' },
   { id: 'init', label: 'Ready' },
 ];
+
+type ProcessingMode = 'auto' | 'verify' | 'manual';
 
 /** Remembered when an admin chooses "Skip for now", so it stops asking. */
 const SKIP_KEY = 'vx-setup-libraries-skipped';
@@ -68,6 +71,7 @@ export function SetupWizard({
   const [ebookDirs, setEbookDirs] = useState<string[]>([]);
   const [audioDirs, setAudioDirs] = useState<string[]>([]);
   const [language, setLanguage] = useState('en');
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>('verify');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdUser, setCreatedUser] = useState<User | null>(null);
@@ -164,6 +168,7 @@ export function SetupWizard({
             ...(pinned.ebookDirs ? {} : { ebookDirs }),
             ...(pinned.audiobookDirs ? {} : { audiobookDirs: audioDirs }),
             defaultLanguage: language,
+            processingMode,
           },
         });
         await api('/api/library/rescan', { method: 'POST' }).catch(() => {});
@@ -180,6 +185,7 @@ export function SetupWizard({
           ebookDirs,
           audiobookDirs: audioDirs,
           defaultLanguage: language,
+          processingMode,
         },
       });
       setCreatedUser(res.user);
@@ -428,6 +434,62 @@ export function SetupWizard({
               <button type="button" className="btn btn--ghost" onClick={() => setStep('libraries')}>
                 Back
               </button>
+              <button type="button" className="btn" onClick={() => setStep('processing')}>
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'processing' && (
+          <div className="wizard__body">
+            <h1>How much should run on its own?</h1>
+            <p className="lede">
+              Matching an audiobook to its ebook means transcribing the narration, and that is slow:
+              expect <strong>two to three hours of computing per hour of audio</strong> on a home
+              server. Versovox always checks a match with two short clips first, which takes
+              minutes. What you choose here is what happens once that check passes.
+            </p>
+            <div className="role-picker" role="radiogroup" aria-label="Processing">
+              {(
+                [
+                  [
+                    'verify',
+                    'Verify, then ask me',
+                    'Check every strong match automatically and link the ones that pass, but wait for you before the long transcription. Recommended for a large library.',
+                  ],
+                  [
+                    'auto',
+                    'Do everything automatically',
+                    'Verified matches go straight into full transcription, one at a time, for as long as it takes. Good for a small library or an idle server.',
+                  ],
+                  [
+                    'manual',
+                    'Do nothing without me',
+                    'No checking and no transcription until you press Start on a pair. The quietest option.',
+                  ],
+                ] as [ProcessingMode, string, string][]
+              ).map(([value, label, blurb]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={processingMode === value}
+                  className={`role-picker__opt ${processingMode === value ? 'is-on' : ''}`}
+                  onClick={() => setProcessingMode(value)}
+                >
+                  <strong>{label}</strong>
+                  <span>{blurb}</span>
+                </button>
+              ))}
+            </div>
+            <p className="hint" style={{ marginTop: 12 }}>
+              You can change this later, and start, queue or stop any book from the Pairing page.
+            </p>
+            <div className="wizard__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => setStep('language')}>
+                Back
+              </button>
               <button type="button" className="btn" onClick={() => setStep('review')}>
                 Continue
               </button>
@@ -465,12 +527,22 @@ export function SetupWizard({
                 <dt>Default language</dt>
                 <dd>{status?.languages?.find((l) => l.code === language)?.label ?? language}</dd>
               </div>
+              <div>
+                <dt>Processing</dt>
+                <dd>
+                  {processingMode === 'auto'
+                    ? 'Verify and transcribe automatically'
+                    : processingMode === 'manual'
+                      ? 'Nothing without me'
+                      : 'Verify automatically, ask before transcribing'}
+                </dd>
+              </div>
             </dl>
             <div className="wizard__actions">
               <button
                 type="button"
                 className="btn btn--ghost"
-                onClick={() => setStep('language')}
+                onClick={() => setStep('processing')}
                 disabled={busy}
               >
                 Back

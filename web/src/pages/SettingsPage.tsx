@@ -12,9 +12,23 @@ import { Link } from 'react-router-dom';
 import { folderApi, LibraryFolders } from '../components/LibraryFolders';
 import { ROLE_LABELS, type Role } from '@versovox/shared';
 
+interface DashboardStats {
+  ebooks: number;
+  audiobooks: number;
+  booksIndexing: number;
+  pairsLinked: number;
+  pairsCandidate: number;
+  pairsAligned: number;
+  jobsRunning: number;
+  jobsQueued: number;
+  jobsFailed: number;
+  users: number;
+}
+
 interface SettingsResponse {
   settings: Settings;
   envPinned: string[];
+  stats?: DashboardStats;
   paths: {
     dataDir: string;
     cacheDir: string;
@@ -37,6 +51,9 @@ export function SettingsPage() {
     () => localStorage.getItem('vx-app-theme') ?? 'auto',
   );
   const isAdmin = user?.role === 'admin';
+  const stats = data?.stats ?? null;
+  /** Installed speech models, for the overview card. */
+  const [modelsInstalled, setModelsInstalled] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +68,12 @@ export function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void api<ModelsResponse>('/api/models')
+      .then((m) => setModelsInstalled(m.models.filter((x) => x.installed).length))
+      .catch(() => setModelsInstalled(null));
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -109,29 +132,82 @@ export function SettingsPage() {
   const dirty = Object.keys(draft).length > 0;
 
   return (
-    <main className="app-main settings-page" style={{ maxWidth: 820 }}>
+    <main className="app-main settings-page" style={{ maxWidth: 900 }}>
       <header className="page-head">
         <h1>Settings</h1>
-        <p>Library, appearance, speech models, and this server's background work.</p>
+        <p>Everything this server is doing, and everything you can change about it.</p>
       </header>
 
-      {isAdmin && (
-        <section className="settings-section settings-section--people" aria-label="People">
-          <div className="people-teaser">
-            <div>
-              <h2>People</h2>
-              <p className="settings-section__lede" style={{ margin: 0 }}>
-                Accounts, roles and invitations. Everyone keeps their own progress and bookmarks.
-              </p>
-            </div>
-            <Link className="btn btn--secondary" to="/settings/people">
-              Manage people
-            </Link>
-          </div>
+      {stats && (
+        <section className="dash" aria-label="Overview">
+          <DashCard
+            to="#libraries"
+            label="Library"
+            value={`${stats.ebooks + stats.audiobooks}`}
+            unit="titles"
+            detail={
+              stats.booksIndexing > 0
+                ? `${stats.booksIndexing} still indexing`
+                : `${stats.ebooks} ebooks · ${stats.audiobooks} audiobooks`
+            }
+            busy={stats.booksIndexing > 0}
+          />
+          <DashCard
+            to="/pairs"
+            label="Pairs"
+            value={`${stats.pairsLinked}`}
+            unit="linked"
+            detail={
+              stats.pairsCandidate > 0
+                ? `${stats.pairsCandidate} awaiting review`
+                : `${stats.pairsAligned} transcribed`
+            }
+          />
+          <DashCard
+            to="/pairs"
+            label="Processing"
+            value={stats.jobsRunning > 0 ? `${stats.jobsRunning}` : '—'}
+            unit={stats.jobsRunning > 0 ? 'running' : 'idle'}
+            detail={
+              stats.jobsQueued > 0
+                ? `${stats.jobsQueued} waiting`
+                : stats.jobsFailed > 0
+                  ? `${stats.jobsFailed} failed`
+                  : (MODE_LABEL[s.processingMode] ?? 'Ready')
+            }
+            busy={stats.jobsRunning > 0}
+            warn={stats.jobsRunning === 0 && stats.jobsFailed > 0}
+          />
+          <DashCard
+            to="#speech-models"
+            label="Speech models"
+            value={`${modelsInstalled ?? '—'}`}
+            unit="installed"
+            detail={
+              modelsInstalled === 0 ? 'None yet — alignment cannot run' : 'Per language, your pick'
+            }
+            warn={modelsInstalled === 0}
+          />
+          {isAdmin && (
+            <DashCard
+              to="/settings/people"
+              label="People"
+              value={`${stats.users}`}
+              unit={stats.users === 1 ? 'account' : 'accounts'}
+              detail="Roles and invitations"
+            />
+          )}
+          <DashCard
+            to="#offline"
+            label="Offline"
+            value={storage ? formatBytes(storage.usage) : '—'}
+            unit="on this device"
+            detail={storage ? `of about ${formatBytes(storage.quota)}` : 'Not reported'}
+          />
         </section>
       )}
 
-      <section className="settings-section" aria-label="Libraries">
+      <section className="settings-section" aria-label="Libraries" id="libraries">
         <h2>Libraries</h2>
         <p className="settings-section__lede">
           Folders are only ever read — Versovox never writes into them. New titles are picked up by
@@ -199,8 +275,55 @@ export function SettingsPage() {
         onAutoDefault={(v) => void save({ autoDownloadDefaultModel: v })}
       />
 
-      <section className="settings-section" aria-label="Alignment">
-        <h2>Alignment</h2>
+      <section className="settings-section" aria-label="Processing" id="processing">
+        <h2>Processing</h2>
+        <p className="settings-section__lede">
+          Transcribing narration is the slow part: roughly two to three hours of computing per hour
+          of audio. A quick two-clip check confirms a match first; this decides what happens after
+          it passes.
+          {s.transcribeSpeedRatio > 0 && (
+            <>
+              {' '}
+              Measured here: {(s.transcribeSpeedRatio * 60).toFixed(0)} minutes of audio per hour of
+              computing.
+            </>
+          )}
+        </p>
+        <div className="role-picker" role="radiogroup" aria-label="Processing mode">
+          {(
+            [
+              [
+                'verify',
+                'Verify, then ask me',
+                'Check and link strong matches automatically; wait before transcribing.',
+              ],
+              [
+                'auto',
+                'Do everything automatically',
+                'Verified matches transcribe on their own, one at a time.',
+              ],
+              [
+                'manual',
+                'Do nothing without me',
+                'Every check and transcription is started by hand.',
+              ],
+            ] as [Settings['processingMode'], string, string][]
+          ).map(([value, label, blurb]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={s.processingMode === value}
+              disabled={!isAdmin}
+              className={`role-picker__opt ${s.processingMode === value ? 'is-on' : ''}`}
+              onClick={() => void save({ processingMode: value })}
+            >
+              <strong>{label}</strong>
+              <span>{blurb}</span>
+            </button>
+          ))}
+        </div>
+        <h3 className="settings-h3">Alignment</h3>
         <div className="field">
           <label htmlFor="set-lang">
             Default language {pinned('defaultLanguage') && <em>(env)</em>}
@@ -296,7 +419,7 @@ export function SettingsPage() {
         <p style={{ color: 'var(--vx-text-soft)', fontSize: 13 }}>{data.precedence}</p>
       </section>
 
-      <section className="settings-section" aria-label="Offline storage">
+      <section className="settings-section" aria-label="Offline storage" id="offline">
         <h2>Offline storage</h2>
         {storage ? (
           <p style={{ fontSize: 14.5 }}>
@@ -540,6 +663,57 @@ function AccountSelfService({ via }: { via: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+const MODE_LABEL: Record<string, string> = {
+  auto: 'Runs unattended',
+  verify: 'Verifies, then asks',
+  manual: 'Nothing without you',
+};
+
+/**
+ * One number with its meaning, linking to the section or page that explains
+ * it. Anchors scroll within Settings; paths navigate.
+ */
+function DashCard({
+  to,
+  label,
+  value,
+  unit,
+  detail,
+  busy,
+  warn,
+}: {
+  to: string;
+  label: string;
+  value: string;
+  unit: string;
+  detail: string;
+  busy?: boolean;
+  warn?: boolean;
+}) {
+  const body = (
+    <>
+      <span className="dash__label">
+        {label}
+        {busy && <span className="dash__pulse" aria-hidden="true" />}
+      </span>
+      <span className="dash__value">
+        {value} <small>{unit}</small>
+      </span>
+      <span className="dash__detail">{detail}</span>
+    </>
+  );
+  const cls = `dash__card ${warn ? 'is-warn' : ''}`;
+  return to.startsWith('#') ? (
+    <a className={cls} href={to}>
+      {body}
+    </a>
+  ) : (
+    <Link className={cls} to={to}>
+      {body}
+    </Link>
   );
 }
 

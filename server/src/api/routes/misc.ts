@@ -112,11 +112,31 @@ export function registerJobRoutes(app: FastifyInstance, ctx: AppContext): void {
 export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db, config } = ctx;
 
+  /** One cheap round trip for the settings dashboard's overview cards. */
+  const dashboardStats = () => {
+    const count = (sql: string) => Number((db.prepare(sql).get() as { c: number }).c);
+    return {
+      ebooks: count("SELECT COUNT(*) AS c FROM books WHERE kind = 'ebook'"),
+      audiobooks: count("SELECT COUNT(*) AS c FROM books WHERE kind = 'audio'"),
+      booksIndexing: count(
+        "SELECT COUNT(*) AS c FROM books WHERE scan_state IN ('discovered','indexing')",
+      ),
+      pairsLinked: count("SELECT COUNT(*) AS c FROM pairs WHERE status IN ('auto','confirmed')"),
+      pairsCandidate: count("SELECT COUNT(*) AS c FROM pairs WHERE status = 'candidate'"),
+      pairsAligned: count('SELECT COUNT(DISTINCT pair_id) AS c FROM alignments'),
+      jobsRunning: count("SELECT COUNT(*) AS c FROM jobs WHERE state = 'running'"),
+      jobsQueued: count("SELECT COUNT(*) AS c FROM jobs WHERE state = 'queued'"),
+      jobsFailed: count("SELECT COUNT(*) AS c FROM jobs WHERE state = 'failed'"),
+      users: count("SELECT COUNT(*) AS c FROM users WHERE status = 'active'"),
+    };
+  };
+
   app.get('/api/settings', async () => {
     const { values, envPinned } = resolveSettings(db, config);
     return {
       settings: values,
       envPinned,
+      stats: dashboardStats(),
       paths: {
         dataDir: config.dataDir,
         cacheDir: config.cacheDir,
@@ -135,8 +155,13 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
       return reply.code(400).send({ error: 'invalid', detail: parsed.error.issues[0]?.message });
     }
     const { envPinned } = resolveSettings(db, config);
+    // `.partial()` does NOT stop zod from filling in `.default()` values for
+    // keys the caller never sent, so parsed.data always contains every
+    // defaulted field. Writing those would silently reset unrelated settings —
+    // library folders included. Persist only what was actually sent.
+    const sent = new Set(Object.keys((req.body ?? {}) as Record<string, unknown>));
     const patch = Object.fromEntries(
-      Object.entries(parsed.data).filter(([k]) => !envPinned.includes(k)),
+      Object.entries(parsed.data).filter(([k]) => sent.has(k) && !envPinned.includes(k)),
     );
     // A web admin may only point the worker at executables/models that the
     // operator placed inside the models volume — never at arbitrary paths

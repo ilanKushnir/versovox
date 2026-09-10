@@ -20,7 +20,23 @@ const DEFAULTS: Settings = {
   autoDownloadDefaultModel: true,
   ebookDirs: [],
   audiobookDirs: [],
+  processingMode: 'verify',
+  transcribeSpeedRatio: 0,
 };
+
+/**
+ * Remember how fast this machine actually transcribes, so time estimates come
+ * from measurement rather than a guess. Exponential moving average over
+ * whisper runs; ignores samples too short to be meaningful.
+ */
+export function recordTranscribeSpeed(db: DB, audioMs: number, wallMs: number): void {
+  if (audioMs < 30_000 || wallMs < 5_000) return;
+  const sample = audioMs / wallMs;
+  if (!Number.isFinite(sample) || sample <= 0 || sample > 20) return;
+  const stored = getStoredSettings(db).transcribeSpeedRatio ?? 0;
+  const next = stored > 0 ? stored * 0.7 + sample * 0.3 : sample;
+  saveSettings(db, { transcribeSpeedRatio: Math.round(next * 1000) / 1000 });
+}
 
 /** Settings keys that can be pinned by env vars, mapped to config fields. */
 const ENV_MAP: Partial<Record<keyof Settings, keyof EnvConfig>> = {
@@ -65,7 +81,14 @@ export function getStoredSettings(db: DB): Partial<Settings> {
     }
   }
   const parsed = settingsSchema.partial().safeParse(out);
-  return parsed.success ? parsed.data : {};
+  if (!parsed.success) return {};
+  // Same zod caveat as the settings route: `.partial()` still materialises
+  // defaults for missing keys. Report only what the database really holds, so
+  // callers can tell "unset" from "set to the default".
+  const storedKeys = new Set(Object.keys(out));
+  return Object.fromEntries(
+    Object.entries(parsed.data).filter(([k]) => storedKeys.has(k)),
+  ) as Partial<Settings>;
 }
 
 export function resolveSettings(db: DB, env: EnvConfig): { values: Settings; envPinned: string[] } {

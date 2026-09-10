@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LANGUAGES, languageLabel } from '@versovox/shared';
 import { api } from '../api/client';
-import { type BookSummary, type PairDto } from '../lib/types';
+import { type BookSummary, type PairDto, type ProcessingSummary } from '../lib/types';
 import { Cover, EmptyState, Sheet, useToast } from '../components/ui';
 import { useSession } from '../state/session';
 import {
@@ -15,7 +15,7 @@ import {
   IconLink,
   IconSwitch,
 } from '../components/icons';
-import { formatDuration, formatPct } from '../lib/format';
+import { formatDuration, formatPct, formatSpan } from '../lib/format';
 import { PipelineDiagram, ProcessingQueue } from '../components/Processing';
 import { MANUAL_LINK_NOTE, UNALIGNED_PAIR_NOTE } from '../lib/pairLabel';
 
@@ -24,6 +24,9 @@ type PairAction = 'confirm' | 'reject' | 'unlink' | 'align';
 export function PairsPage() {
   const { user } = useSession();
   const [pairs, setPairs] = useState<PairDto[] | null>(null);
+  const [summary, setSummary] = useState<ProcessingSummary | null>(null);
+  /** Multi-select for bulk "start transcription". */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -34,8 +37,9 @@ export function PairsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await api<{ pairs: PairDto[] }>('/api/pairs');
+      const res = await api<{ pairs: PairDto[]; summary?: ProcessingSummary }>('/api/pairs');
       setPairs(res.pairs);
+      setSummary(res.summary ?? null);
       setError(null);
     } catch {
       setError('Could not load pairing data.');
@@ -128,6 +132,39 @@ export function PairsPage() {
   const linked = (pairs ?? []).filter((p) => p.status === 'auto' || p.status === 'confirmed');
   const rejected = (pairs ?? []).filter((p) => p.status === 'rejected');
 
+  /** Linked, not transcribed yet, and not already queued: what Start acts on. */
+  const startable = (pairs ?? []).filter(
+    (p) =>
+      (p.status === 'auto' || p.status === 'confirmed') &&
+      !p.alignment &&
+      !(p.lastAlignJob && ['queued', 'running'].includes(p.lastAlignJob.state)),
+  );
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const startMany = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    try {
+      const res = await api<{ queued: number; skipped: number }>('/api/pairs/align-many', {
+        method: 'POST',
+        body: { pairIds: ids },
+      });
+      toast.show(
+        res.queued > 0
+          ? `Queued ${res.queued} book${res.queued === 1 ? '' : 's'} for transcription`
+          : 'Nothing new to queue',
+      );
+      setSelected(new Set());
+      await load();
+    } catch {
+      toast.show('Could not queue those pairs');
+    }
+  };
+
   return (
     <main className="app-main">
       <header className="page-head page-head--row">
@@ -157,6 +194,48 @@ export function PairsPage() {
         </section>
       )}
       <ProcessingQueue canManage={isAdmin} onChange={() => void load()} />
+
+      {isAdmin && summary && startable.length > 0 && (
+        <section className="worksum" aria-label="Transcription work">
+          <div className="worksum__body">
+            <h2 className="worksum__title">
+              {startable.length} verified {startable.length === 1 ? 'book is' : 'books are'} ready
+              to transcribe
+            </h2>
+            <p className="worksum__lede">
+              {summary.estimatedMs != null ? (
+                <>
+                  {formatSpan(summary.estimatedMs)} of computing in total, measured from this
+                  server&rsquo;s own speed ({(summary.speedRatio * 60).toFixed(0)} minutes of audio
+                  per hour). They run one at a time and you can stop any of them.
+                </>
+              ) : (
+                <>
+                  {formatDuration(summary.pendingAudioMs)} of audio in total. The first run will
+                  measure how fast this server transcribes, and the estimate appears here.
+                </>
+              )}
+            </p>
+          </div>
+          <div className="worksum__actions">
+            {selected.size > 0 && (
+              <button className="btn btn--ghost" onClick={() => setSelected(new Set())}>
+                Clear {selected.size}
+              </button>
+            )}
+            <button
+              className="btn"
+              onClick={() =>
+                void startMany(selected.size > 0 ? [...selected] : startable.map((p) => p.id))
+              }
+            >
+              {selected.size > 0
+                ? `Start ${selected.size} selected`
+                : `Start all ${startable.length}`}
+            </button>
+          </div>
+        </section>
+      )}
       {linkOpen && (
         <ManualLinkSheet
           onClose={() => setLinkOpen(false)}
@@ -194,6 +273,9 @@ export function PairsPage() {
                   onAction={act}
                   onLanguage={setLanguage}
                   onDownloadModel={downloadModel}
+                  selectable={startable.some((s) => s.id === p.id)}
+                  selected={selected.has(p.id)}
+                  onSelect={toggleSelected}
                 />
               ))}
             </section>
@@ -212,6 +294,9 @@ export function PairsPage() {
                   onAction={act}
                   onLanguage={setLanguage}
                   onDownloadModel={downloadModel}
+                  selectable={startable.some((s) => s.id === p.id)}
+                  selected={selected.has(p.id)}
+                  onSelect={toggleSelected}
                 />
               ))}
             </section>
@@ -230,6 +315,9 @@ export function PairsPage() {
                   onAction={act}
                   onLanguage={setLanguage}
                   onDownloadModel={downloadModel}
+                  selectable={startable.some((s) => s.id === p.id)}
+                  selected={selected.has(p.id)}
+                  onSelect={toggleSelected}
                 />
               ))}
             </section>
@@ -298,6 +386,9 @@ function PairCard({
   onAction,
   onLanguage,
   onDownloadModel,
+  selectable,
+  selected,
+  onSelect,
 }: {
   pair: PairDto;
   busy: boolean;
@@ -305,6 +396,10 @@ function PairCard({
   onAction: (id: string, a: PairAction) => void;
   onLanguage: (id: string, language: string | null) => void;
   onDownloadModel: (modelId: string, language: string) => void;
+  /** Verified, not transcribed yet: offer it for bulk starting. */
+  selectable?: boolean;
+  selected?: boolean;
+  onSelect?: (id: string) => void;
 }) {
   const e = pair.evidence;
   const notes = (e.notes ?? []).flatMap((n): { text: string; done: boolean }[] => {
@@ -344,7 +439,21 @@ function PairCard({
             : 'unknown — will be detected';
 
   return (
-    <article id={`pair-${pair.id}`} className={`pair-card pair-card--${pair.status}`}>
+    <article
+      id={`pair-${pair.id}`}
+      className={`pair-card pair-card--${pair.status} ${selected ? 'is-selected' : ''}`}
+    >
+      {selectable && onSelect && (
+        <label className="pair-card__pick">
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={() => onSelect(pair.id)}
+            aria-label={`Select ${pair.ebook?.title ?? 'this pair'} for transcription`}
+          />
+          <span>Select</span>
+        </label>
+      )}
       <div className="pair-card__editions">
         <EditionTile book={pair.ebook} kind="ebook" />
         <span className="pair-card__link" aria-hidden="true">

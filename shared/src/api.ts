@@ -234,7 +234,13 @@ export const setupSchema = z.object({
   ebookDirs: dirListSchema.optional(),
   audiobookDirs: dirListSchema.optional(),
   defaultLanguage: z.string().min(2).max(16).optional(),
+  /** How much the server may start on its own; see settingsSchema. */
+  processingMode: z.enum(['auto', 'verify', 'manual']).optional(),
 });
+export const alignManySchema = z.object({
+  pairIds: z.array(z.string().min(1).max(64)).min(1).max(500),
+});
+
 export const testPathsSchema = z.object({
   paths: dirListSchema,
   /** What the folder is expected to hold; drives the file-count hint. */
@@ -268,5 +274,19 @@ export const settingsSchema = z.object({
   /** Library roots (read-only). Env vars VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS pin these. */
   ebookDirs: dirListSchema.default([]),
   audiobookDirs: dirListSchema.default([]),
+  /**
+   * How much work a library scan may start on its own.
+   *  - `auto`   verify a strong match, then transcribe it in full, unattended
+   *  - `verify` verify and link, then wait for you before the long transcription
+   *  - `manual` touch nothing automatically; every pair is started by hand
+   * Verification is two 90-second clips; full transcription is hours per book.
+   */
+  processingMode: z.enum(['auto', 'verify', 'manual']).default('verify'),
+  /**
+   * Measured transcription throughput: seconds of audio handled per second of
+   * wall clock (0.4 means a 1-hour book takes ~2.5 hours). Written by the
+   * worker from real runs, never guessed; 0 means "not measured yet".
+   */
+  transcribeSpeedRatio: z.number().min(0).max(20).default(0),
 });
 export type Settings = z.infer<typeof settingsSchema>;

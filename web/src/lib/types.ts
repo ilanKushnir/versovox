@@ -102,6 +102,17 @@ export interface PairDto {
   } | null;
 }
 
+/** Outstanding transcription work, with an estimate measured on this server. */
+export interface ProcessingSummary {
+  pendingPairs: number;
+  pendingAudioMs: number;
+  candidatePairs: number;
+  /** Seconds of audio per second of wall clock; 0 until measured. */
+  speedRatio: number;
+  estimatedMs: number | null;
+  processingMode: 'auto' | 'verify' | 'manual';
+}
+
 export interface SwitchAnchorDto {
   sentenceId: string;
   confidence: number;

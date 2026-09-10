@@ -44,11 +44,31 @@ path to a file containing the secret (Docker secrets friendly), e.g.
 ## In-app settings (Settings page)
 
 `defaultLanguage`, `transcribeProvider`, `whisperBin`, `whisperModel`,
-`jobConcurrency`, `ebookDirs`, `audiobookDirs` (all env-pinnable), plus
+`jobConcurrency`, `ebookDirs`, `audiobookDirs` (all env-pinnable),
+`processingMode` (see below), plus
 `languageModels` / `autoDownloadDefaultModel` (Settings → Speech models),
 `autoPairThreshold` (default 0.92 — candidates below it always require
 manual review) and `storageBudgetMb` (reserved for future server-side
 caches).
+
+## How much runs on its own
+
+`processingMode` decides what a library scan may start without being asked.
+Transcription is the expensive step — budget two to three hours of computing
+per hour of audio on a typical home server — so verification and transcription
+are separated:
+
+| Mode               | Verification (two 90-second clips) | Full transcription            |
+| ------------------ | ---------------------------------- | ----------------------------- |
+| `auto`             | automatic                          | automatic, one book at a time |
+| `verify` (default) | automatic                          | waits for you                 |
+| `manual`           | never                              | never                         |
+
+Verified pairs are linked and usable for browsing either way; only the
+sentence-exact switch needs the full transcription. Start them from the
+Pairing page, individually or with multi-select, or use "Start all".
+Time estimates there come from `transcribeSpeedRatio`, which the worker
+measures from its own runs rather than guessing.
 
 ## First run
 

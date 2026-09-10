@@ -2558,3 +2558,152 @@ select.input {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Folders the container config mounts from the host: the only ones that exist
+   for a containerised server, so the picker calls them out. */
+.pill-mount {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--vx-primary) 16%, transparent);
+  color: var(--vx-primary);
+}
+.picker__row.is-mounted .grow {
+  font-weight: 600;
+}
+.picker__hint {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--vx-text-soft);
+  border-block-end: 1px solid var(--vx-border);
+}
+.picker__hint .pill-mount {
+  margin-inline-end: 4px;
+}
+
+/* ---------------------------------------------------------------- work summary */
+.worksum {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5);
+  margin-block-end: var(--sp-5);
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--vx-accent) 40%, var(--vx-border));
+  background: color-mix(in srgb, var(--vx-accent) 8%, var(--vx-surface-raised));
+}
+.worksum__body {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.worksum__title {
+  margin: 0;
+  font-size: 17px;
+}
+.worksum__lede {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: var(--vx-text-soft);
+  max-width: 68ch;
+}
+.worksum__actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.pair-card__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-block-end: var(--sp-3);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vx-text-soft);
+  cursor: pointer;
+}
+.pair-card__pick input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--vx-primary);
+}
+.pair-card.is-selected {
+  border-color: var(--vx-primary);
+  box-shadow: 0 0 0 1px var(--vx-primary);
+}
+.pair-card.is-selected .pair-card__pick {
+  color: var(--vx-primary);
+}
+
+/* ---------------------------------------------------------------- settings dashboard */
+.dash {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--sp-3);
+  margin-block-end: var(--sp-6);
+}
+.dash__card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-4);
+  border-radius: 14px;
+  border: 1px solid var(--vx-border);
+  background: var(--vx-surface-raised);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color var(--vx-duration-base) var(--vx-ease),
+    transform var(--vx-duration-base) var(--vx-ease);
+}
+.dash__card:hover {
+  border-color: var(--vx-border-strong);
+  transform: translateY(-1px);
+}
+.dash__card.is-warn {
+  border-color: color-mix(in srgb, var(--vx-danger) 45%, var(--vx-border));
+}
+.dash__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vx-text-soft);
+}
+.dash__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--vx-primary);
+  animation: vx-pulse 1.8s ease-out infinite;
+}
+.dash__value {
+  font-family: var(--vx-font-reading);
+  font-size: 26px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.dash__value small {
+  font-family: var(--vx-font-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--vx-text-soft);
+  margin-inline-start: 4px;
+}
+.dash__detail {
+  font-size: 12.5px;
+  color: var(--vx-text-soft);
+}
+.settings-page .settings-section {
+  scroll-margin-top: 80px;
+}

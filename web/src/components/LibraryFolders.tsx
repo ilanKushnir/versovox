@@ -18,7 +18,15 @@ export interface FolderCheckApi {
 export interface BrowseResponse {
   path: string;
   parent: string | null;
-  entries: { name: string; path: string; books: number }[];
+  entries: {
+    name: string;
+    path: string;
+    books: number;
+    /** A volume the container config mounts from the host. */
+    mounted?: boolean;
+    /** Mounted volumes below this folder. */
+    mountsInside?: number;
+  }[];
 }
 
 /** API bound to the setup token (wizard) or the session (settings). */
@@ -232,12 +240,26 @@ function FolderPicker({
         </button>
       </div>
       {error && <p className="folders__meta">{error}</p>}
+      {!cur?.path && cur?.entries.some((e) => e.mounted || e.mountsInside) && (
+        <p className="picker__hint">
+          <span className="pill-mount">mounted</span> marks a folder your container config maps in
+          from the host. Only those, and what is inside them, exist for this server.
+        </p>
+      )}
       <ul className="picker__list">
         {cur?.entries.length === 0 && <li className="folders__meta">No sub-folders here.</li>}
         {cur?.entries.map((e) => (
           <li key={e.path}>
-            <button type="button" className="picker__row" onClick={() => void go(e.path)}>
+            <button
+              type="button"
+              className={`picker__row ${e.mounted ? 'is-mounted' : ''}`}
+              onClick={() => void go(e.path)}
+            >
               <span className="grow">{e.name}</span>
+              {e.mounted && <span className="pill-mount">mounted</span>}
+              {!e.mounted && !!e.mountsInside && (
+                <span className="soft">{e.mountsInside} mounted inside</span>
+              )}
               {e.books > 0 && <span className="soft">{e.books} books</span>}
             </button>
           </li>

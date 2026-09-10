@@ -30,7 +30,7 @@ import {
   resolveModelForLanguage,
 } from '../transcription/models.js';
 import { languageCode } from '../pairing/score.js';
-import { libraryRoots, resolveSettings } from '../domain/settings.js';
+import { libraryRoots, recordTranscribeSpeed, resolveSettings } from '../domain/settings.js';
 import {
   enqueueJob,
   jobCheckpoint,
@@ -822,7 +822,13 @@ export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuar
         `INSERT INTO pairs (id, ebook_id, audio_id, status, score, evidence_json, created_at)
          VALUES (?, ?, ?, 'candidate', ?, ?, ?)`,
       ).run(pairId, String(e.id), String(a.id), score, JSON.stringify(evidence), nowIso());
-      if (autoEligible && settings.transcribeProvider !== 'none') {
+      // `manual` starts nothing on its own; the other modes run the cheap
+      // two-clip verification and differ only in what happens after it passes.
+      if (
+        autoEligible &&
+        settings.transcribeProvider !== 'none' &&
+        settings.processingMode !== 'manual'
+      ) {
         enqueueJob(db, 'align', { pairId }, { dedupeKey: `align:${pairId}`, priority: -2 });
       }
     }
@@ -831,7 +837,10 @@ export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuar
 
 export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {
   const { db, config } = ctx;
-  const { pairId } = JSON.parse(job.payload_json) as { pairId: string };
+  // `force` is set when a person pressed Start on this pair: it means "run the
+  // long transcription too", whatever the server-wide processing mode says.
+  const payload = JSON.parse(job.payload_json) as { pairId: string; force?: boolean };
+  const { pairId } = payload;
   const { values: settings } = resolveSettings(db, config);
   const pair = db.prepare('SELECT * FROM pairs WHERE id = ?').get(pairId) as
     Record<string, unknown> | undefined;
@@ -951,6 +960,8 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
       return { path: trackPaths[idx]!, startMs: abs - Number(trackRows[idx]!.start_ms_absolute) };
     };
     const scores: number[] = [];
+    const probeStartedAt = Date.now();
+    const PROBE_CLIP_SECONDS = 90;
     for (const [i, frac] of [0.25, 0.6].entries()) {
       jobProgress(
         db,
@@ -966,13 +977,24 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
         language,
         clip.path,
         clip.startMs,
-        90,
+        PROBE_CLIP_SECONDS,
         path.join(config.cacheDir, 'whisper-work'),
       );
       guard.assertHeld();
       const candidates = words.map((w) => w.w).filter((w) => w.length > 3);
       const hits = candidates.filter((w) => ebookTokens.has(w)).length;
       scores.push(candidates.length >= 20 ? hits / candidates.length : 0);
+    }
+    // Two known-length clips are the first real measurement of this machine's
+    // transcription speed, available long before any full run finishes.
+    try {
+      recordTranscribeSpeed(
+        db,
+        scores.length * PROBE_CLIP_SECONDS * 1000,
+        Date.now() - probeStartedAt,
+      );
+    } catch {
+      /* ignore */
     }
     const probeScore = scores.reduce((a, b) => a + b, 0) / Math.max(1, scores.length);
     const evidence = JSON.parse(String(pair.evidence_json ?? '{}'));
@@ -996,6 +1018,19 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
         `UPDATE pairs SET status = 'auto', decided_at = ? WHERE id = ? AND status = 'candidate'`,
       ).run(nowIso(), pairId);
       pair.status = 'auto';
+      // Verified and linked. The hours-long part is opt-in unless this server
+      // was told to run unattended — the job that starts it is the same one,
+      // requested per pair from the Pairing page.
+      if (settings.processingMode !== 'auto' && !payload.force) {
+        jobProgress(
+          db,
+          job.id,
+          job.lease_token,
+          1,
+          'Verified and linked — start the transcription when you want it',
+        );
+        return;
+      }
     } else {
       jobProgress(db, job.id, job.lease_token, 1, 'Probe did not pass — waiting for your decision');
       return;
@@ -1017,6 +1052,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     model = String(cached.model);
   } else {
     jobProgress(db, job.id, job.lease_token, 0.2, `Transcribing via ${provider.name}`);
+    const transcribeStartedAt = Date.now();
     const checkpoint = job.checkpoint_json ? JSON.parse(job.checkpoint_json) : undefined;
     const result = await provider.transcribe({
       trackPaths,
@@ -1050,6 +1086,13 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     });
     words = result.words;
     model = result.model;
+    // What this machine can actually do, for honest time estimates.
+    try {
+      const audioMs = trackRows.reduce((a, t) => a + Number(t.duration_ms ?? 0), 0);
+      recordTranscribeSpeed(db, audioMs, Date.now() - transcribeStartedAt);
+    } catch {
+      /* estimates are a nicety; never fail a finished transcription for them */
+    }
     guard.assertHeld();
     fs.mkdirSync(transcriptsDir(ctx), { recursive: true });
     const filePath = path.join(transcriptsDir(ctx), `${newId('tr')}.json`);

@@ -1,7 +1,8 @@
 import { type FastifyInstance } from 'fastify';
-import { locatorSchema } from '@versovox/shared';
+import { alignManySchema, locatorSchema } from '@versovox/shared';
 import { z } from 'zod';
 import { requireRole } from '../../auth/roles.js';
+import { resolveSettings } from '../../domain/settings.js';
 import { type AppContext, activeDerivedDir } from '../../context.js';
 import { nowIso } from '../../db/index.js';
 import { stableId } from '../../util/ids.js';
@@ -121,13 +122,47 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
     return { pair: pairDto(row) };
   });
 
+  /**
+   * How much transcription work is outstanding, and roughly how long it would
+   * take on THIS machine. The ratio is measured from real runs
+   * (settings.transcribeSpeedRatio); before any measurement exists the
+   * estimate is reported as unknown rather than guessed.
+   */
+  const processingSummary = () => {
+    const { values: settings } = resolveSettings(db, ctx.config);
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS pairs, COALESCE(SUM(b.duration_ms), 0) AS audio_ms
+           FROM pairs p
+           JOIN books b ON b.id = p.audio_id
+          WHERE p.status IN ('auto', 'confirmed')
+            AND NOT EXISTS (SELECT 1 FROM alignments a WHERE a.pair_id = p.id)`,
+      )
+      .get() as { pairs: number; audio_ms: number };
+    const waiting = db
+      .prepare(`SELECT COUNT(*) AS c FROM pairs WHERE status = 'candidate'`)
+      .get() as { c: number };
+    const ratio = settings.transcribeSpeedRatio;
+    return {
+      /** Linked pairs with no alignment yet: the work "Start all" would queue. */
+      pendingPairs: Number(row.pairs),
+      pendingAudioMs: Number(row.audio_ms),
+      /** Suggestions still waiting for a decision. */
+      candidatePairs: Number(waiting.c),
+      /** Seconds of audio per second of wall clock, measured. 0 = not yet known. */
+      speedRatio: ratio,
+      estimatedMs: ratio > 0 ? Math.round(Number(row.audio_ms) / ratio) : null,
+      processingMode: settings.processingMode,
+    };
+  };
+
   app.get('/api/pairs', async () => {
     const rows = db
       .prepare(
         `SELECT * FROM pairs ORDER BY CASE status WHEN 'candidate' THEN 0 WHEN 'auto' THEN 1 WHEN 'confirmed' THEN 2 ELSE 3 END, score DESC`,
       )
       .all() as Record<string, unknown>[];
-    return { pairs: rows.map(pairDto) };
+    return { pairs: rows.map(pairDto), summary: processingSummary() };
   });
 
   app.get('/api/pairs/:id', async (req, reply) => {
@@ -214,8 +249,45 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
     const row = db.prepare('SELECT * FROM pairs WHERE id = ?').get(id) as
       Record<string, unknown> | undefined;
     if (!row) return reply.code(404).send({ error: 'not-found' });
-    const jobId = enqueueJob(db, 'align', { pairId: id }, { dedupeKey: `align:${id}` });
+    // Asked for by a person: run the full transcription even when this server
+    // is set to verify-and-wait.
+    const jobId = enqueueJob(
+      db,
+      'align',
+      { pairId: id, force: true },
+      { dedupeKey: `align:${id}` },
+    );
     return { jobId, queued: jobId !== null };
+  });
+
+  /**
+   * Start transcription for several pairs at once — the "Start all" and
+   * multi-select actions. Each becomes an ordinary queued job, so the same
+   * one-at-a-time lane and the same live progress apply.
+   */
+  app.post('/api/pairs/align-many', async (req, reply) => {
+    if (!requireRole(req, reply, 'curator')) return reply;
+    const parsed = alignManySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid' });
+    let queued = 0;
+    let skipped = 0;
+    for (const id of parsed.data.pairIds) {
+      const row = db.prepare('SELECT status FROM pairs WHERE id = ?').get(id) as
+        { status: string } | undefined;
+      if (!row || !['auto', 'confirmed', 'candidate'].includes(row.status)) {
+        skipped += 1;
+        continue;
+      }
+      const jobId = enqueueJob(
+        db,
+        'align',
+        { pairId: id, force: true },
+        { dedupeKey: `align:${id}` },
+      );
+      if (jobId) queued += 1;
+      else skipped += 1;
+    }
+    return { queued, skipped };
   });
 
   /** Resolve a locator across media: the two-way switch. */

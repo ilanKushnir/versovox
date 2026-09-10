@@ -83,6 +83,45 @@ export interface BrowseEntry {
   path: string;
   /** Rough hint for the picker: does it look like a library root? */
   books: number;
+  /** This exact path is a volume mounted into the container. */
+  mounted: boolean;
+  /** How many mounted volumes live below this path. */
+  mountsInside: number;
+}
+
+/**
+ * Directories this container has mounted from the host, read from the kernel
+ * rather than guessed. In a container these are the only places that can hold
+ * anything Versovox can see, so the picker points straight at them and the UI
+ * marks them. Returns [] where mountinfo is unavailable (plain host runs).
+ */
+export function containerMounts(
+  exclude: string[] = [],
+  mountinfoPath = '/proc/self/mountinfo',
+): string[] {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(mountinfoPath, 'utf8');
+  } catch {
+    return [];
+  }
+  const skip = /^\/(proc|sys|dev|run)(\/|$)/;
+  const excluded = exclude.map((e) => path.resolve(e));
+  const out = new Set<string>();
+  for (const line of raw.split('\n')) {
+    // mountinfo field 5 is the mount point inside this namespace.
+    const target = line.split(' ')[4];
+    if (!target || target === '/' || skip.test(target)) continue;
+    if (excluded.some((e) => target === e || target.startsWith(`${e}/`))) continue;
+    // The runtime also bind-mounts single files (/etc/hosts, /etc/resolv.conf).
+    try {
+      if (!fs.statSync(target).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    out.add(target);
+  }
+  return [...out].sort();
 }
 
 const ROOT_CANDIDATES = [
@@ -99,26 +138,51 @@ const ROOT_CANDIDATES = [
   '/Users',
 ];
 
-/** Directory listing for the folder picker (directories only, capped). */
-export function browseDirectories(p: string | undefined): {
+/**
+ * Directory listing for the folder picker (directories only, capped).
+ * `appDirs` are the server's own data/cache/model volumes: they are mounts
+ * too, but offering them as a library would be a footgun, so they are hidden.
+ */
+export function browseDirectories(
+  p: string | undefined,
+  appDirs: string[] = [],
+): {
   path: string;
   parent: string | null;
   entries: BrowseEntry[];
 } {
+  const mounts = containerMounts(appDirs);
+  const isMount = (dir: string) => mounts.includes(dir);
+  const mountsInside = (dir: string) =>
+    mounts.filter((m) => m !== dir && m.startsWith(`${dir.replace(/\/$/, '')}/`)).length;
+
   if (!p) {
-    const entries = ROOT_CANDIDATES.filter((c) => {
+    // Start from what the container actually has mounted, plus the parents
+    // that group them (a compose file mounting /library/ebooks and
+    // /library/audiobooks should offer /library), then the usual suspects.
+    const parents = new Set(
+      mounts.map((m) => path.dirname(m)).filter((d) => d !== '/' && mountsInside(d) > 1),
+    );
+    const seen = new Set<string>();
+    const entries: BrowseEntry[] = [];
+    for (const c of [...parents, ...mounts, ...ROOT_CANDIDATES]) {
+      if (seen.has(c)) continue;
+      seen.add(c);
       try {
-        return fs.statSync(c).isDirectory();
+        if (!fs.statSync(c).isDirectory()) continue;
       } catch {
-        return false;
+        continue;
       }
-    });
-    if (entries.length === 0) return browseDirectories('/');
-    return {
-      path: '',
-      parent: null,
-      entries: entries.map((e) => ({ name: e, path: e, books: quickCount(e) })),
-    };
+      entries.push({
+        name: c,
+        path: c,
+        books: quickCount(c),
+        mounted: isMount(c),
+        mountsInside: mountsInside(c),
+      });
+    }
+    if (entries.length === 0) return browseDirectories('/', appDirs);
+    return { path: '', parent: null, entries };
   }
   const abs = path.resolve(p);
   const parent = path.dirname(abs) === abs ? null : path.dirname(abs);
@@ -134,7 +198,13 @@ export function browseDirectories(p: string | undefined): {
     .slice(0, 300)
     .map((d) => {
       const full = path.join(abs, d.name);
-      return { name: d.name, path: full, books: quickCount(full) };
+      return {
+        name: d.name,
+        path: full,
+        books: quickCount(full),
+        mounted: isMount(full),
+        mountsInside: mountsInside(full),
+      };
     });
   return { path: abs, parent, entries };
 }

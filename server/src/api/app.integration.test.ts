@@ -174,6 +174,7 @@ describe('Versovox API', () => {
           username: 'astra',
           password: 'correct-horse-battery-staple',
           setupToken: SETUP_TOKEN,
+          processingMode: 'auto',
         },
       }),
       app.inject({
@@ -184,6 +185,7 @@ describe('Versovox API', () => {
           username: 'mallory',
           password: 'mallory-password-123',
           setupToken: SETUP_TOKEN,
+          processingMode: 'auto',
         },
       }),
     ]);
@@ -775,6 +777,40 @@ describe('Versovox API', () => {
     ).json() as { pair: { status: string } };
     expect(relink.pair.status).toBe('confirmed');
     await drainJobs();
+  });
+
+  it('saving one setting never resets the others (zod partial + defaults)', async () => {
+    const read = async () =>
+      ((await authed({ url: '/api/settings' })).json() as { settings: Record<string, unknown> })
+        .settings;
+    const before = await read();
+    expect(before.ebookDirs).toBeDefined();
+    const put = await authed({
+      method: 'PUT',
+      url: '/api/settings',
+      payload: { autoPairThreshold: 0.97 },
+    });
+    expect(put.statusCode).toBe(200);
+    const after = await read();
+    expect(after.autoPairThreshold).toBe(0.97);
+    // Everything the caller did NOT send must survive untouched. This used to
+    // wipe the library folders on every save.
+    for (const key of ['ebookDirs', 'audiobookDirs', 'processingMode', 'languageModels']) {
+      expect(after[key]).toEqual(before[key]);
+    }
+    await authed({ method: 'PUT', url: '/api/settings', payload: { autoPairThreshold: 0.92 } });
+  });
+
+  it('keeps the choices the setup wizard made', async () => {
+    const res = (await authed({ url: '/api/settings' })).json() as {
+      settings: { processingMode: string };
+      stats: { ebooks: number; audiobooks: number };
+    };
+    // Both racing setup requests asked for unattended processing; the winner's
+    // choice must survive (it used to be dropped by the schema).
+    expect(res.settings.processingMode).toBe('auto');
+    expect(res.stats.ebooks).toBeGreaterThan(0);
+    expect(res.stats.audiobooks).toBeGreaterThan(0);
   });
 
   it('manages people: roles, invites, disabling, self-service password', async () => {
