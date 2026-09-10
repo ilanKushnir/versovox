@@ -203,6 +203,19 @@ describe('lanes', () => {
     expect(heavy.type).toBe('align');
     expect(claim(db, { lane: 'any' })).toBeNull();
 
+    // Re-queueing a FAILED job whose equivalent is already pending must not
+    // throw: the dedupe index only covers queued/running rows, and the work
+    // is scheduled either way. (This crashed a finished model download.)
+    const { retryJob, finishJob: finish } = await import('./queue.js');
+    enqueue(db, 'align', { pairId: 'dup' }, { dedupeKey: 'align:dup' });
+    const first = claim(db, { lane: 'heavy' })!;
+    finish(db, first.id, first.lease_token, 'model missing');
+    enqueue(db, 'align', { pairId: 'dup' }, { dedupeKey: 'align:dup' });
+    expect(retryJob(db, first.id)).toBe(false);
+    expect(
+      (db.prepare('SELECT state FROM jobs WHERE id = ?').get(first.id) as { state: string }).state,
+    ).toBe('failed');
+
     // Shutdown hands a running job back to the queue without a failure mark.
     expect(requeueJob(db, heavy.id, heavy.lease_token)).toBe(true);
     expect(requeueJob(db, heavy.id, 'not-the-lease')).toBe(false);

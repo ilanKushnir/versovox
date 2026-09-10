@@ -31,11 +31,14 @@ function iconSvg(size, { pad = 0, bg = '#F6F1E8', ink = '#B4532A' } = {}) {
   const inner = size - pad * 2;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
   <rect width="${size}" height="${size}" fill="${bg}"/>
-  <g transform="translate(${pad} ${pad}) scale(${inner / 24})">
-    <path d="M12 6.2C10.6 4.9 8.6 4.2 6.3 4.2H3.4c-.5 0-.9.4-.9.9v12.6c0 .5.4.9.9.9h2.9c2.3 0 4.3.7 5.7 2V6.2z" fill="${ink}"/>
-    <path d="M5.4 8.3h4M5.4 11.3h4M5.4 14.3h2.6" stroke="${bg}" stroke-width="1.3" stroke-linecap="round"/>
-    <path d="M14.4 12.8v3.6M17 10.2v8.2M19.6 12v4.6M22 13.4v2.2" stroke="${ink}" stroke-width="2.1" stroke-linecap="round"/>
-    <path d="M12 6.2v14.4" stroke="${ink}" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
+  <g transform="translate(${pad} ${pad}) scale(${inner / 24})" fill="none" stroke="${ink}" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke-width="1.35">
+      <path d="M12 7.6C10.4 6.2 8 5.5 5.2 5.5H3.9C3.2 5.5 2.7 6 2.7 6.7V16.8C2.7 17.4 3.2 18 3.9 18H5.2C8 18 10.4 18.7 12 20.1"/>
+      <path d="M12 7.6C13.6 6.2 16 5.5 18.8 5.5H20.1C20.8 5.5 21.3 6 21.3 6.7V16.8C21.3 17.4 20.8 18 20.1 18H18.8C16 18 13.6 18.7 12 20.1"/>
+      <path d="M12 7.6V20.1"/>
+    </g>
+    <path d="M5.8 10.2H9.4M5.8 12.8H9.4M5.8 15.4H8.2" stroke-width="1.3"/>
+    <path d="M14.5 11.0V14.6M16.1 9.4V16.2M17.7 10.1V15.5M19.3 11.4V14.2" stroke-width="1.3"/>
   </g>
 </svg>`;
 }

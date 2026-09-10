@@ -75,6 +75,13 @@ export async function runModelDownload(
   const { modelId } = JSON.parse(job.payload_json) as { modelId: string };
   const spec = modelById(modelId);
   if (!spec) throw new Error(`Unknown model: ${modelId}`);
+  // Already on disk (installed by an earlier run, the CLI, or a file dropped
+  // into the volume): nothing to fetch. Makes Retry harmless.
+  if (isInstalled(config.modelsDir, spec)) {
+    jobProgress(db, job.id, job.lease_token, 1, `${spec.label}: already installed`);
+    requeueAlignmentsWaitingFor(ctx, [spec.id]);
+    return;
+  }
   fs.mkdirSync(config.modelsDir, { recursive: true });
   const dest = modelPath(config.modelsDir, spec);
   const part = `${dest}.part`;
@@ -140,7 +147,16 @@ export async function runModelDownload(
   guard.assertHeld();
   fs.renameSync(part, dest);
   jobProgress(db, job.id, job.lease_token, 1, `${spec.label}: installed (${fmt(size)})`);
-  requeueAlignmentsWaitingFor(ctx, [spec.id]);
+  // The model IS installed at this point. Re-queuing the alignments that were
+  // waiting for it is bookkeeping — never let it turn a successful download
+  // into a failed job.
+  try {
+    requeueAlignmentsWaitingFor(ctx, [spec.id]);
+  } catch (err) {
+    ctx.log.error(
+      `Model installed, but re-queueing waiting alignments failed: ${(err as Error).message}`,
+    );
+  }
 }
 
 /**
@@ -163,7 +179,13 @@ export function requeueAlignmentsWaitingFor(ctx: AppContext, modelIds?: string[]
       .all(`model-missing:%:${id}|%`, `Whisper model not found: %${spec?.file ?? id}`) as {
       id: string;
     }[];
-    for (const w of waiting) if (retryJob(db, w.id)) n += 1;
+    for (const w of waiting) {
+      try {
+        if (retryJob(db, w.id)) n += 1;
+      } catch (err) {
+        ctx.log.warn(`Could not re-queue alignment ${w.id}: ${(err as Error).message}`);
+      }
+    }
   }
   if (n) ctx.log.info(`Re-queued ${n} alignment(s) whose speech model is now installed`);
   return n;
@@ -1011,9 +1033,17 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
           job.id,
           job.lease_token,
           0.2 + 0.4 * done,
-          `Transcribing ${info.trackCount > 1 ? `part ${info.track + 1} of ${info.trackCount} · ` : ''}${info.trackPct}%${
-            whisperModel ? ` · ${path.basename(whisperModel).replace(/^ggml-|\.bin$/g, '')}` : ''
-          }`,
+          [
+            info.trackCount > 1
+              ? `Transcribing part ${info.track + 1} of ${info.trackCount}`
+              : 'Transcribing narration',
+            // whisper.cpp only prints a percentage once it has processed a
+            // chunk; "0%" for the first minutes reads as stuck.
+            info.trackPct > 0 ? `${info.trackPct}% of this part` : 'listening…',
+            whisperModel ? path.basename(whisperModel).replace(/^ggml-|\.bin$/g, '') : null,
+          ]
+            .filter(Boolean)
+            .join(' · '),
         );
       },
       onCheckpoint: (cp) => jobCheckpoint(db, job.id, job.lease_token, cp),

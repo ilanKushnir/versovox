@@ -1,19 +1,27 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { type Job } from '@versovox/shared';
+import { LANGUAGES, type Job } from '@versovox/shared';
 import { api, ApiError } from '../api/client';
 import { useSession, type User } from '../state/session';
 import { IconBookOpen, IconCheck, IconHeadphones, VersoMark } from '../components/icons';
 import { folderApi, LibraryFolders } from '../components/LibraryFolders';
 
 /**
- * First-run wizard. Six short steps, each one screen: Welcome (setup token)
- * → Admin account → Libraries (with folder tests) → Language → Review →
- * Initialising (live progress of the first scan). Nothing is written until
- * "Finish" on the review step; every earlier step is just local state.
+ * Setup wizard, in two modes.
+ *
+ * `first-run` — nobody exists yet: Welcome (bootstrap token) → Admin account
+ * → Libraries → Language → Review → Initialising.
+ *
+ * `libraries` — an admin already exists but no library folders are set. This
+ * is the normal path behind reverse-proxy SSO, where the first user is
+ * provisioned automatically and never sees a first-run screen: the same
+ * wizard resumes at Libraries, authenticated by the session instead of the
+ * token. Nothing is written until the last step in either mode.
  */
 
+export type WizardMode = 'first-run' | 'libraries';
+
 type StepId = 'welcome' | 'admin' | 'libraries' | 'language' | 'review' | 'init';
-const STEPS: { id: StepId; label: string }[] = [
+const ALL_STEPS: { id: StepId; label: string }[] = [
   { id: 'welcome', label: 'Welcome' },
   { id: 'admin', label: 'Admin' },
   { id: 'libraries', label: 'Libraries' },
@@ -21,6 +29,9 @@ const STEPS: { id: StepId; label: string }[] = [
   { id: 'review', label: 'Review' },
   { id: 'init', label: 'Ready' },
 ];
+
+/** Remembered when an admin chooses "Skip for now", so it stops asking. */
+const SKIP_KEY = 'vx-setup-libraries-skipped';
 
 interface SetupStatus {
   needsSetup: boolean;
@@ -34,10 +45,20 @@ interface SetupStatus {
   defaultLanguage: string | null;
 }
 
-export function SetupWizard() {
-  const { setUser } = useSession();
+export function SetupWizard({
+  mode = 'first-run',
+  onDone,
+}: {
+  mode?: WizardMode;
+  onDone?: () => void;
+} = {}) {
+  const { setUser, refresh } = useSession();
+  const firstRun = mode === 'first-run';
+  const STEPS = firstRun
+    ? ALL_STEPS
+    : ALL_STEPS.filter((s) => s.id !== 'welcome' && s.id !== 'admin');
   const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [step, setStep] = useState<StepId>('welcome');
+  const [step, setStep] = useState<StepId>(firstRun ? 'welcome' : 'libraries');
   const [token, setToken] = useState('');
   const [tokenOk, setTokenOk] = useState(false);
   const [displayName, setDisplayName] = useState('');
@@ -52,17 +73,49 @@ export function SetupWizard() {
   const [createdUser, setCreatedUser] = useState<User | null>(null);
 
   useEffect(() => {
-    void api<SetupStatus>('/api/setup/status')
+    if (firstRun) {
+      void api<SetupStatus>('/api/setup/status')
+        .then((s) => {
+          setStatus(s);
+          setEbookDirs(s.libraries?.ebookDirs ?? []);
+          setAudioDirs(s.libraries?.audiobookDirs ?? []);
+          setLanguage(s.defaultLanguage ?? 'en');
+        })
+        .catch(() => setError('Could not reach the server.'));
+      return;
+    }
+    // Already signed in: the settings endpoint knows the roots and which of
+    // them the environment pins.
+    void api<{
+      settings: { defaultLanguage: string };
+      envPinned: string[];
+      paths: { ebookDirs: string[]; audiobookDirs: string[] };
+    }>('/api/settings')
       .then((s) => {
-        setStatus(s);
-        setEbookDirs(s.libraries?.ebookDirs ?? []);
-        setAudioDirs(s.libraries?.audiobookDirs ?? []);
-        setLanguage(s.defaultLanguage ?? 'en');
+        setStatus({
+          needsSetup: false,
+          setupTokenSource: null,
+          libraries: {
+            ebookDirs: s.paths.ebookDirs,
+            audiobookDirs: s.paths.audiobookDirs,
+            envPinned: {
+              ebookDirs: s.envPinned.includes('ebookDirs'),
+              audiobookDirs: s.envPinned.includes('audiobookDirs'),
+            },
+          },
+          languages: LANGUAGES.map((l) => ({ code: l.code, label: l.label })),
+          defaultLanguage: s.settings.defaultLanguage,
+        });
+        setEbookDirs(s.paths.ebookDirs);
+        setAudioDirs(s.paths.audiobookDirs);
+        setLanguage(s.settings.defaultLanguage);
       })
       .catch(() => setError('Could not reach the server.'));
-  }, []);
+  }, [firstRun]);
 
-  const folders = useMemo(() => folderApi(token.trim()), [token]);
+  // First run authorises the folder probes with the bootstrap token; an
+  // admin session needs no token.
+  const folders = useMemo(() => folderApi(firstRun ? token.trim() : undefined), [firstRun, token]);
   const stepIdx = STEPS.findIndex((s) => s.id === step);
 
   const verifyToken = async (e: FormEvent) => {
@@ -100,6 +153,23 @@ export function SetupWizard() {
     setBusy(true);
     setError(null);
     try {
+      if (!firstRun) {
+        const pinned = status?.libraries?.envPinned ?? {
+          ebookDirs: false,
+          audiobookDirs: false,
+        };
+        await api('/api/settings', {
+          method: 'PUT',
+          body: {
+            ...(pinned.ebookDirs ? {} : { ebookDirs }),
+            ...(pinned.audiobookDirs ? {} : { audiobookDirs: audioDirs }),
+            defaultLanguage: language,
+          },
+        });
+        await api('/api/library/rescan', { method: 'POST' }).catch(() => {});
+        setStep('init');
+        return;
+      }
       const res = await api<{ user: User }>('/api/setup', {
         method: 'POST',
         body: {
@@ -262,7 +332,7 @@ export function SetupWizard() {
           </form>
         )}
 
-        {step === 'libraries' && tokenOk && (
+        {step === 'libraries' && (tokenOk || !firstRun) && (
           <div className="wizard__body">
             <h1>Where are your books?</h1>
             <p className="lede">
@@ -299,11 +369,31 @@ export function SetupWizard() {
               }
             />
             <div className="wizard__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => setStep('admin')}>
-                Back
-              </button>
-              <button type="button" className="btn" onClick={() => setStep('language')}>
-                {ebookDirs.length + audioDirs.length === 0 ? 'Skip for now' : 'Continue'}
+              {firstRun ? (
+                <button type="button" className="btn btn--ghost" onClick={() => setStep('admin')}>
+                  Back
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    localStorage.setItem(SKIP_KEY, '1');
+                    onDone?.();
+                  }}
+                >
+                  Skip for now
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setStep('language')}
+                disabled={!firstRun && ebookDirs.length + audioDirs.length === 0}
+              >
+                {firstRun && ebookDirs.length + audioDirs.length === 0
+                  ? 'Skip for now'
+                  : 'Continue'}
               </button>
             </div>
           </div>
@@ -350,13 +440,15 @@ export function SetupWizard() {
             <h1>Ready to go</h1>
             <p className="lede">Here is what will be set up. Nothing has been written yet.</p>
             <dl className="review">
-              <div>
-                <dt>Admin</dt>
-                <dd>
-                  {displayName.trim() ? `${displayName.trim()} · ` : ''}
-                  <code>{username}</code>
-                </dd>
-              </div>
+              {firstRun && (
+                <div>
+                  <dt>Admin</dt>
+                  <dd>
+                    {displayName.trim() ? `${displayName.trim()} · ` : ''}
+                    <code>{username}</code>
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt>Ebook folders</dt>
                 <dd>
@@ -390,10 +482,14 @@ export function SetupWizard() {
           </div>
         )}
 
-        {step === 'init' && createdUser && (
+        {step === 'init' && (createdUser || !firstRun) && (
           <InitStep
             hasRoots={ebookDirs.length + audioDirs.length > 0}
-            onEnter={() => setUser(createdUser)}
+            onEnter={() => {
+              localStorage.removeItem(SKIP_KEY);
+              if (createdUser) setUser(createdUser);
+              else void refresh().then(() => onDone?.());
+            }}
           />
         )}
       </div>

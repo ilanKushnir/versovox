@@ -16,6 +16,8 @@ export type AuthVia = 'session' | 'proxy';
 interface SessionCtx {
   user: User | null;
   via: AuthVia;
+  /** Signed in as an admin, but no library folders configured yet. */
+  needsLibraries: boolean;
   /** 'loading' | 'setup' | 'login' | 'ready' | 'offline' */
   phase: 'loading' | 'setup' | 'login' | 'ready' | 'offline';
   refresh: () => Promise<void>;
@@ -26,6 +28,7 @@ interface SessionCtx {
 const Ctx = createContext<SessionCtx>({
   user: null,
   via: 'session',
+  needsLibraries: false,
   phase: 'loading',
   refresh: async () => {},
   setUser: () => {},
@@ -36,13 +39,15 @@ export const useSession = () => useContext(Ctx);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [via, setVia] = useState<AuthVia>('session');
+  const [needsLibraries, setNeedsLibraries] = useState(false);
   const [phase, setPhase] = useState<SessionCtx['phase']>('loading');
 
   const refresh = useCallback(async () => {
     try {
-      const me = await api<{ user: User; via?: AuthVia }>('/api/auth/me');
+      const me = await api<{ user: User; via?: AuthVia; needsLibraries?: boolean }>('/api/auth/me');
       setUser(me.user);
       setVia(me.via ?? 'session');
+      setNeedsLibraries(me.needsLibraries === true);
       setPhase('ready');
       return;
     } catch (err) {
@@ -115,6 +120,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         via,
+        needsLibraries,
         phase,
         refresh,
         logout,

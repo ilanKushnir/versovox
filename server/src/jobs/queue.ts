@@ -196,13 +196,21 @@ export function requeueJob(db: DB, id: string, leaseToken: string | null): boole
 }
 
 export function retryJob(db: DB, id: string): boolean {
-  const res = db
-    .prepare(
-      `UPDATE jobs SET state = 'queued', error = NULL, finished_at = NULL, lease_token = NULL, lease_expires_at = NULL
-       WHERE id = ? AND state IN ('failed','cancelled')`,
-    )
-    .run(id);
-  return Number(res.changes) > 0;
+  try {
+    const res = db
+      .prepare(
+        `UPDATE jobs SET state = 'queued', error = NULL, finished_at = NULL, lease_token = NULL, lease_expires_at = NULL
+         WHERE id = ? AND state IN ('failed','cancelled')`,
+      )
+      .run(id);
+    return Number(res.changes) > 0;
+  } catch (err) {
+    // The dedupe index only covers queued/running rows, so re-queueing a
+    // failed job whose equivalent is ALREADY pending trips it. That is not an
+    // error: the work is scheduled either way.
+    if (String(err).includes('UNIQUE')) return false;
+    throw err;
+  }
 }
 
 /**

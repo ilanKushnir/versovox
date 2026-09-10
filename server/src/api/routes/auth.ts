@@ -238,6 +238,20 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   app.get('/api/auth/me', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ error: 'unauthorized' });
-    return { user: req.user, via: req.authVia ?? 'session' };
+    const roots = libraryRoots(db, config);
+    return {
+      user: req.user,
+      via: req.authVia ?? 'session',
+      // An admin who has not pointed the server at any library yet still has
+      // setup to finish. This is the normal path behind reverse-proxy SSO,
+      // where the first user is provisioned automatically and never sees the
+      // first-run screen: the wizard resumes at the Libraries step.
+      needsLibraries:
+        req.user.role === 'admin' &&
+        roots.ebookDirs.length === 0 &&
+        roots.audiobookDirs.length === 0,
+      librariesEnvPinned:
+        config.envPinned.includes('ebookDirs') || config.envPinned.includes('audiobookDirs'),
+    };
   });
 }

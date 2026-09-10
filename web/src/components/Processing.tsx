@@ -8,17 +8,48 @@ import { useToast } from './ui';
 
 const ACTIVE = new Set(['queued', 'running']);
 
+/** Keys are the server's real job types (server/src/jobs/handlers.ts). */
 const TYPE_LABEL: Record<string, string> = {
   align: 'Transcribe & align',
   'model-download': 'Model download',
   scan: 'Library scan',
   'index-ebook': 'Index ebook',
-  'probe-audio': 'Inspect audiobook',
-  'detect-pairs': 'Find pairs',
+  'index-audio': 'Index audiobook',
+  'pair-scan': 'Look for pairs',
 };
 
 function typeLabel(t: string): string {
-  return TYPE_LABEL[t] ?? t.replace(/[-_]/g, ' ');
+  const known = TYPE_LABEL[t];
+  if (known) return known;
+  const words = t.replace(/[-_]/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Which of the three scheduler lanes a job waits in. */
+function laneLabel(t: string): string {
+  if (t === 'align') return 'transcription';
+  if (t === 'model-download') return 'download';
+  return 'library';
+}
+
+function elapsed(fromIso: string | null): string | null {
+  if (!fromIso) return null;
+  const s = Math.max(0, (Date.now() - Date.parse(fromIso)) / 1000);
+  if (s < 60) return `${Math.round(s)}s`;
+  const h = Math.floor(s / 3600);
+  const m = Math.round((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** Rough remaining time from linear progress — only once there is real signal. */
+function eta(startedAt: string | null, progress: number): string | null {
+  if (!startedAt || progress <= 0.08 || progress >= 0.995) return null;
+  const spent = Date.now() - Date.parse(startedAt);
+  if (spent < 60_000) return null;
+  const mins = Math.round(((spent / progress) * (1 - progress)) / 60_000);
+  if (mins < 1) return 'less than a minute left';
+  if (mins < 90) return `about ${mins} min left`;
+  return `about ${Math.round(mins / 60)} h left`;
 }
 
 function ago(iso: string | null): string {
@@ -112,14 +143,15 @@ export function ProcessingQueue({
             Processing
             {!idle && (
               <span className="section-title__count">
-                {running.length} running · {queued.length} waiting
+                {running.length} running
+                {queued.length > 0 ? ` · ${queued.length} waiting` : ''}
               </span>
             )}
           </h2>
           <p className="queue__lede">
             {idle
-              ? 'Nothing is being processed right now. Confirming a pair or downloading a model adds work here.'
-              : 'Transcription runs one book at a time so the server stays responsive; everything else waits its turn.'}
+              ? 'Nothing is being processed right now. Confirming a pair or downloading a speech model adds work here.'
+              : 'Three lanes run side by side: one transcription, one model download, one library task — so a long alignment never blocks a scan.'}
           </p>
         </div>
         <span className={`queue__dot ${idle ? '' : 'is-live'}`} aria-hidden="true" />
@@ -178,6 +210,11 @@ function JobRow({
       : null;
   const Icon =
     job.type === 'align' ? IconHeadphones : job.type === 'model-download' ? IconBookOpen : null;
+  // Housekeeping jobs (library scan, pair scan) have no subject of their own:
+  // name them once instead of printing the same words twice.
+  const title = subject?.title ?? typeLabel(job.type);
+  const spent = live ? elapsed(job.startedAt) : null;
+  const remaining = live ? eta(job.startedAt, job.progress) : null;
   return (
     <div className={`jobrow ${live ? 'jobrow--live' : ''} jobrow--${job.state}`}>
       <div className="jobrow__lead">
@@ -196,17 +233,21 @@ function JobRow({
       <div className="jobrow__body">
         <div className="jobrow__title">
           {target && target.startsWith('/') ? (
-            <Link to={target}>{subject?.title ?? typeLabel(job.type)}</Link>
+            <Link to={target}>{title}</Link>
           ) : target ? (
-            <a href={target}>{subject?.title ?? typeLabel(job.type)}</a>
+            <a href={target}>{title}</a>
           ) : (
-            (subject?.title ?? typeLabel(job.type))
+            title
           )}
-          <span className="jobrow__type">{typeLabel(job.type)}</span>
+          {subject?.title && <span className="jobrow__type">{typeLabel(job.type)}</span>}
         </div>
         <div className="jobrow__meta">
-          {live && job.detail ? job.detail : null}
-          {!live && job.state === 'queued' ? (subject?.sub ?? 'Waiting for a free slot') : null}
+          {live
+            ? [job.detail, spent ? `running ${spent}` : null, remaining]
+                .filter(Boolean)
+                .join(' · ') || 'Starting…'
+            : null}
+          {!live && job.state === 'queued' ? `Waiting for the ${laneLabel(job.type)} lane` : null}
           {!live && job.state !== 'queued' ? (
             <>
               {job.state === 'done' ? 'Finished' : job.state === 'failed' ? 'Failed' : 'Cancelled'}{' '}
@@ -244,7 +285,7 @@ function JobRow({
           </button>
         )}
         {modelMissing && (
-          <Link className="btn btn--ghost btn--sm" to="/settings#models">
+          <Link className="btn btn--ghost btn--sm" to="/settings#speech-models">
             Get model
           </Link>
         )}
@@ -311,8 +352,10 @@ export function PipelineDiagram() {
       ))}
       <p className="pipeline__foot">
         Models are chosen per language in{' '}
-        <Link to="/settings#models">Settings → Speech models</Link>. Only the English default is
-        fetched automatically; the rest are yours to pick.
+        <Link to="/settings#speech-models">Settings → Speech models</Link>. Only the multilingual
+        default is fetched automatically; every other language is yours to pick. Steps 1 and 2 are
+        the slow part — hours for a full-length book — which is why they run one at a time and
+        report live progress above.
       </p>
     </div>
   );

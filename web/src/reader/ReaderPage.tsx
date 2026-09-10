@@ -812,6 +812,12 @@ export function ReaderPage() {
         body,
       });
       setAnnotations((a) => [...a, res.annotation]);
+      // Show WHICH line was marked: the sentence lights up for a moment, so
+      // the bookmark is never an invisible event.
+      if (sent && map) {
+        handoffCleanupRef.current?.();
+        handoffCleanupRef.current = paintHandoff(map, sent.start, sent.end);
+      }
       toast.show(
         prefs.mode === 'paginated' ? `Bookmarked page ${page + 1}` : 'Bookmarked this passage',
         {

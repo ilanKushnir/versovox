@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   createBrowserRouter,
   Link,
@@ -24,8 +24,11 @@ import { SettingsPage } from './pages/SettingsPage';
 import './styles/immersive.css';
 
 function Shell() {
-  const { phase } = useSession();
+  const { phase, needsLibraries } = useSession();
   const location = useLocation();
+  const [setupSkipped, setSetupSkipped] = useState(
+    () => localStorage.getItem('vx-setup-libraries-skipped') === '1',
+  );
 
   useEffect(() => startProgressLifecycle(), []);
 
@@ -39,6 +42,11 @@ function Shell() {
   if (phase === 'setup') return <SetupWizard />;
   const join = /^\/join\/([A-Za-z0-9_-]+)$/.exec(location.pathname);
   if (phase === 'login') return join ? <JoinPage token={join[1]!} /> : <LoginPage />;
+  // Signed in as an admin with no libraries configured — finish setup. Behind
+  // reverse-proxy SSO this is the first thing the first user ever sees.
+  if (phase === 'ready' && needsLibraries && !setupSkipped) {
+    return <SetupWizard mode="libraries" onDone={() => setSetupSkipped(true)} />;
+  }
   // 'offline' still renders the app: downloaded titles remain readable, and
   // privileged actions surface their own errors until reconnect.
 
