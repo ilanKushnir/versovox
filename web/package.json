@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@versovox/shared": "0.3.2",
+    "@versovox/shared": "0.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-router-dom": "7.18.3",
