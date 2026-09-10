@@ -1,0 +1,104 @@
+# TandemLeaf
+
+**Read and listen in perfect tandem.**
+
+TandemLeaf is a self-hosted, open-source (AGPL-3.0) reading layer for the
+libraries you already have. It mounts your existing ebook and audiobook
+folders **read-only** and gives you a calm, installable app with a serious
+EPUB reader, a resilient audiobook player, conservative edition pairing, and
+— where alignment allows — **exact sentence-level switching between reading
+and listening**.
+
+It deliberately is _not_ another library manager. Calibre / Calibre-Web
+Automated, Kavita, Audiobookshelf, and Shelfmark keep doing what they do;
+TandemLeaf coexists with all of them (or with plain folders) and owns only
+its own state: derived reading indexes, pair decisions, alignment data,
+progress, annotations, and offline packages. (Synchronized text+audio
+production itself isn't new — Storyteller pioneered self-hosted alignment
+with EPUB Media Overlays; TandemLeaf's angle is being a **non-destructive
+overlay** over unmodified existing libraries, with strict pairing review and
+loss-resistant progress.)
+
+## Highlights
+
+- **Unified library** over read-only mounts: EPUB + m4b/mp3/m4a (flac/ogg/
+  opus detected too), multi-file audiobooks, covers, search/filter/sort,
+  continue rail, honest per-book scan states.
+- **EPUB reader**: paginated & scroll modes, TOC, in-book search, four
+  themes, bundled Literata + typography controls (size/weight/leading/
+  margins/justify/hyphenation), bookmarks/highlights/notes, RTL support,
+  calm hideable chrome. Publisher CSS is intentionally not applied in V1
+  (see docs/reader-and-player.md for exact limitations).
+- **Audiobook player**: chapters (embedded or per-file), scrubber with
+  elapsed/remaining, ±15/30s, 0.75–2× speed with pitch preserved, sleep
+  timer, bookmarks, Media Session, one-handed layout.
+- **Pairing review**: explainable evidence (title/author/identifiers/
+  language/length/content overlap), automatic linking only above a
+  conservative threshold, manual link/unlink, edition-mismatch warnings,
+  alignment coverage & per-minute confidence.
+- **Exact two-way switching** on aligned pairs: reader ⇄ player at the same
+  sentence, with a temporary handoff marker, degrading honestly (sentence →
+  paragraph → refusal with a reason).
+- **Loss-resistant progress**: IndexedDB-first idempotent events, append-only
+  server history with revisions, explicit-intent reconciliation — a stale
+  background tab can never override your deliberate rewind.
+- **Installable PWA**: offline app shell, explicit per-title downloads with
+  real progress/size/removal, offline reading & listening of downloaded
+  titles, iPhone standalone polish (safe areas, no browser chrome).
+- **No cloud required, no bundled speech model**: alignment consumes sidecar
+  word-timestamp transcripts (deterministic) or an experimental local
+  whisper.cpp adapter — your choice, documented honestly in
+  docs/alignment.md.
+
+## Quick start
+
+```bash
+cp .env.example .env    # set TL_SESSION_SECRET (openssl rand -hex 32)
+docker compose up -d --build
+# open http://localhost:8383 — create the admin account (no defaults)
+```
+
+The stock compose file mounts a bundled sample library — original short
+stories with synthetic narration and a pre-aligned pair — so the reader,
+player, pairing review, and sentence-exact switching are demonstrable
+immediately. Point the mounts at your real folders when ready. Full guide:
+[docs/self-hosting.md](docs/self-hosting.md) (reverse proxy/HTTPS for PWA
+install, backups, upgrades, PUID/PGID, troubleshooting).
+
+## From source
+
+Node ≥ 22.5 and ffmpeg:
+
+```bash
+npm ci && npm run build
+TL_EBOOK_DIRS=fixtures/library/ebooks \
+TL_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
+TL_TRANSCRIBE_PROVIDER=fixture node server/dist/index.js
+```
+
+## Documentation
+
+|                                                                                                       |                                                          |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| [Self-hosting](docs/self-hosting.md)                                                                  | Compose, volumes, HTTPS/PWA, backup/restore, upgrades    |
+| [Configuration](docs/configuration.md)                                                                | Every env var, precedence, secret files                  |
+| [Security model](docs/security.md)                                                                    | Auth, CSRF, sanitization, containment, container posture |
+| [Pairing & alignment](docs/alignment.md)                                                              | The three gates, providers, aligner, sample fixtures     |
+| [Reader & player](docs/reader-and-player.md)                                                          | Features and honest limitations                          |
+| [Progress durability](docs/progress.md)                                                               | The event model and reconciliation rules                 |
+| [HTTP API](docs/api.md)                                                                               | Endpoint reference                                       |
+| [Contributing](docs/contributing.md)                                                                  | Dev setup, tests, repo layout                            |
+| [Product brief](docs/product-brief.md) · [Research & architecture](docs/research-and-architecture.md) | Why it is built this way                                 |
+
+## Status
+
+V1 foundation: the surfaces above are implemented, tested (unit +
+integration + browser QA), and runnable today. Production-scale automatic
+transcription of full-length audiobooks remains explicitly experimental —
+see [docs/alignment.md](docs/alignment.md) for exactly where that line is.
+
+## License
+
+[AGPL-3.0-or-later](LICENSE). Bundled Literata font © The Literata Project
+Authors, SIL OFL 1.1 (`web/public/fonts/OFL.txt`). Sample stories and
+artwork are original works of this repository.

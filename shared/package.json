@@ -1,0 +1,26 @@
+{
+  "name": "@tandemleaf/shared",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.6.0"
+  },
+  "devDependencies": {
+    "vitest": "4.1.11"
+  }
+}

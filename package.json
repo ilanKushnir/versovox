@@ -1,0 +1,38 @@
+{
+  "name": "tandemleaf",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "description": "Self-hosted tandem reading: a non-destructive reader/player overlay for existing ebook and audiobook libraries.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @tandemleaf/server",
+    "dev:web": "npm run dev --workspace @tandemleaf/web",
+    "build": "npm run build --workspace @tandemleaf/shared && npm run build --workspace @tandemleaf/server && npm run build --workspace @tandemleaf/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run build --workspace @tandemleaf/shared && npm run test --workspaces --if-present",
+    "fixtures": "node scripts/generate-fixtures.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "qa": "node scripts/qa-browser.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.2",
+    "fflate": "0.8.3",
+    "text2wav": "0.0.14",
+    "eslint": "10.10.0",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.0"
+  }
+}

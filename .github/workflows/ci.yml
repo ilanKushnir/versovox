@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - name: Install ffmpeg (audio probing in integration tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npm ci
+      - name: Format check
+        run: npm run format:check
+      - name: Lint
+        run: npm run lint
+      # Tests run BEFORE the full build on purpose: `npm test` must work from
+      # a fresh `npm ci` (it builds the shared workspace itself) and not
+      # depend on a pre-existing dist/.
+      - name: Unit and integration tests (clean install order)
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build (bundles + service-worker precache)
+        run: npm run build
+      - name: Assert service worker precache was injected
+        run: |
+          grep -q "tl-shell-" web/dist/sw.js
+          ! grep -q "__TL_PRECACHE__" web/dist/sw.js
+          grep -q '"/assets/' web/dist/sw.js
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose config
+        run: TL_SESSION_SECRET=ci-validation-secret docker compose config -q
+      - name: Build image
+        run: docker build -t tandemleaf:ci .
+      - name: Smoke test container (health, setup-token gate)
+        run: |
+          docker run -d --name tl -p 8383:8383 \
+            -e TL_SESSION_SECRET=ci-smoke-secret-0123456789 \
+            -e TL_SETUP_TOKEN=ci-smoke-setup-token tandemleaf:ci
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8383/api/health; then ok=1; break; fi
+            sleep 1
+          done
+          [ "$ok" = "1" ] || (docker logs tl; exit 1)
+          curl -fsS http://127.0.0.1:8383/api/setup/status | grep needsSetup
+
+          # Setup without / with a wrong token must be refused.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
+            -H 'content-type: application/json' -H 'x-tl-csrf: 1' \
+            -d '{"username":"admin","password":"smoke-password-123"}')
+          [ "$code" = "400" ] || (echo "tokenless setup returned $code"; exit 1)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
+            -H 'content-type: application/json' -H 'x-tl-csrf: 1' \
+            -d '{"username":"admin","password":"smoke-password-123","setupToken":"wrong-token"}')
+          [ "$code" = "403" ] || (echo "wrong-token setup returned $code"; exit 1)
+
+          # Correct token creates the admin; a second attempt is closed.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
+            -H 'content-type: application/json' -H 'x-tl-csrf: 1' \
+            -d '{"username":"admin","password":"smoke-password-123","setupToken":"ci-smoke-setup-token"}')
+          [ "$code" = "200" ] || (echo "valid setup returned $code"; docker logs tl; exit 1)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
+            -H 'content-type: application/json' -H 'x-tl-csrf: 1' \
+            -d '{"username":"other","password":"smoke-password-123","setupToken":"ci-smoke-setup-token"}')
+          [ "$code" = "409" ] || (echo "second setup returned $code"; exit 1)
+          docker rm -f tl

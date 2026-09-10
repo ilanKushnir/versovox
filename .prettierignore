@@ -1,0 +1,10 @@
+node_modules/
+dist/
+fixtures/
+qa-output/
+coverage/
+web/public/vendor/
+web/public/fonts/
+*.min.js
+package-lock.json
+LICENSE

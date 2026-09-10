@@ -1,0 +1,160 @@
+import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { z } from 'zod';
+import { normalizeForMatch } from '../util/text.js';
+import { type TranscriptWord } from '../alignment/align.js';
+
+const execFileP = promisify(execFile);
+
+/**
+ * Transcription adapter seam. TandemLeaf does NOT bundle a speech model and
+ * requires no cloud API. Providers:
+ *
+ *  - "none":     transcription disabled (default). Pairs can still be linked
+ *                by metadata; sentence-exact switching stays unavailable.
+ *  - "fixture":  reads a sidecar `*.tandemleaf-transcript.json` next to the
+ *                audio (used by the bundled sample library and by anyone who
+ *                produces word timestamps out of band). Deterministic.
+ *  - "whisper-cli" (EXPERIMENTAL): shells out to a user-installed
+ *                whisper.cpp-compatible binary with word timestamps.
+ *                See docs/alignment.md for the exact contract.
+ */
+
+export const transcriptFileSchema = z.object({
+  language: z.string(),
+  model: z.string().default('external'),
+  /** Words with absolute milliseconds across the whole audiobook. */
+  words: z.array(
+    z.object({
+      w: z.string(),
+      s: z.number().int().min(0),
+      e: z.number().int().min(0),
+    }),
+  ),
+});
+export type TranscriptFile = z.infer<typeof transcriptFileSchema>;
+
+export interface TranscriptionRequest {
+  /** Absolute paths of the book's audio files, in playback order. */
+  trackPaths: string[];
+  /** Absolute start offset of each track (ms). */
+  trackStartMs: number[];
+  language: string;
+  /**
+   * TandemLeaf-owned writable directory for intermediate transcription
+   * output. Source libraries are read-only mounts and must NEVER be written
+   * to; all whisper output prefixes live in a private temp dir under here.
+   */
+  workDir: string;
+  /** For the whisper-cli provider. */
+  whisperBin?: string;
+  whisperModel?: string;
+  /** Resumable checkpoint: index of the next track to process. */
+  checkpoint?: { nextTrack: number; words: TranscriptWord[] };
+  onCheckpoint?: (cp: { nextTrack: number; words: TranscriptWord[] }) => void;
+}
+
+export interface TranscriptionResult {
+  language: string;
+  model: string;
+  words: TranscriptWord[];
+}
+
+export interface TranscriptionProvider {
+  readonly name: string;
+  transcribe(req: TranscriptionRequest): Promise<TranscriptionResult>;
+}
+
+/** Locate the sidecar transcript for a book (dir-level or file-level). */
+export function findSidecarTranscript(trackPaths: string[]): string | null {
+  if (trackPaths.length === 0) return null;
+  const first = trackPaths[0]!;
+  const dirSidecar = path.join(path.dirname(first), 'transcript.tandemleaf.json');
+  if (fs.existsSync(dirSidecar)) return dirSidecar;
+  const fileSidecar = first.replace(/\.[^.]+$/, '') + '.tandemleaf-transcript.json';
+  if (fs.existsSync(fileSidecar)) return fileSidecar;
+  return null;
+}
+
+export class FixtureProvider implements TranscriptionProvider {
+  readonly name = 'fixture';
+
+  async transcribe(req: TranscriptionRequest): Promise<TranscriptionResult> {
+    const sidecar = findSidecarTranscript(req.trackPaths);
+    if (!sidecar) {
+      throw new Error(
+        'No sidecar transcript found (expected transcript.tandemleaf.json next to the audio). ' +
+          'The "fixture" provider only reads pre-computed word timestamps.',
+      );
+    }
+    const parsed = transcriptFileSchema.parse(JSON.parse(fs.readFileSync(sidecar, 'utf8')));
+    const words = parsed.words
+      .map((w) => ({ w: normalizeForMatch(w.w), s: w.s, e: w.e }))
+      .filter((w) => w.w.length > 0);
+    return { language: parsed.language, model: parsed.model, words };
+  }
+}
+
+/**
+ * EXPERIMENTAL: invokes a whisper.cpp-style CLI per track and stitches
+ * absolute timestamps. Expects the binary to accept:
+ *   <bin> -m <model> -l <language> -ojf -of <outprefix> <audio.wav-or-mp3>
+ * and to write `<outprefix>.json` in whisper.cpp "full JSON" layout
+ * (transcription[].offsets + tokens[].text/offsets). Tested against
+ * whisper.cpp `main`/`whisper-cli`; other CLIs may need a wrapper script.
+ */
+export class WhisperCliProvider implements TranscriptionProvider {
+  readonly name = 'whisper-cli';
+
+  async transcribe(req: TranscriptionRequest): Promise<TranscriptionResult> {
+    if (!req.whisperBin) throw new Error('TL_WHISPER_BIN is not configured');
+    if (!fs.existsSync(req.whisperBin)) {
+      throw new Error(`Whisper binary not found: ${req.whisperBin}`);
+    }
+    const words: TranscriptWord[] = req.checkpoint?.words ? [...req.checkpoint.words] : [];
+    const startTrack = req.checkpoint?.nextTrack ?? 0;
+    // All whisper output lives in a private temp dir under the TandemLeaf
+    // cache; source libraries are read-only and are never written to.
+    fs.mkdirSync(req.workDir, { recursive: true });
+    const tmpDir = fs.mkdtempSync(path.join(req.workDir, 'whisper-'));
+    try {
+      for (let t = startTrack; t < req.trackPaths.length; t++) {
+        const trackPath = req.trackPaths[t]!;
+        const outPrefix = path.join(tmpDir, `track_${t}`);
+        const args = ['-ojf', '-of', outPrefix, trackPath];
+        if (req.whisperModel) args.unshift('-m', req.whisperModel);
+        if (req.language) args.unshift('-l', req.language);
+        await execFileP(req.whisperBin, args, { maxBuffer: 64 * 1024 * 1024 });
+        const jsonPath = `${outPrefix}.json`;
+        const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+        fs.rmSync(jsonPath, { force: true });
+        const offset = req.trackStartMs[t] ?? 0;
+        for (const seg of data.transcription ?? []) {
+          for (const tok of seg.tokens ?? []) {
+            const text = normalizeForMatch(String(tok.text ?? ''));
+            if (!text) continue;
+            const s = Number(tok.offsets?.from ?? seg.offsets?.from ?? 0) + offset;
+            const e = Number(tok.offsets?.to ?? seg.offsets?.to ?? 0) + offset;
+            words.push({ w: text, s, e });
+          }
+        }
+        req.onCheckpoint?.({ nextTrack: t + 1, words });
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+    return {
+      language: req.language,
+      model: `whisper-cli:${path.basename(req.whisperModel || 'default')}`,
+      words,
+    };
+  }
+}
+
+export function getProvider(name: string): TranscriptionProvider | null {
+  if (name === 'fixture') return new FixtureProvider();
+  if (name === 'whisper-cli') return new WhisperCliProvider();
+  return null;
+}

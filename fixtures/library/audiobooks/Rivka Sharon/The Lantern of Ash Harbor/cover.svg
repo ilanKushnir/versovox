@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
+  <rect width="800" height="1200" fill="#1E3A31"/>
+  <rect x="80" y="160" width="120" height="8" fill="#C9A227"/>
+  <text x="80" y="300" font-size="72" font-family="Georgia, 'Times New Roman', serif" fill="#F4EFE4">The Lantern of</text>
+  <text x="80" y="392" font-size="72" font-family="Georgia, 'Times New Roman', serif" fill="#F4EFE4">Ash Harbor</text>
+  <text x="80" y="514" font-size="34" font-family="Georgia, serif" fill="#C9A227">Rivka Sharon</text>
+  <g transform="translate(80 1020)">
+    <path d="M0 60 C 30 10, 90 10, 120 60 C 90 46, 30 46, 0 60 Z" fill="none" stroke="#C9A227" stroke-width="6"/>
+    <line x1="60" y1="18" x2="60" y2="60" stroke="#C9A227" stroke-width="6"/>
+  </g>
+  <text x="80" y="1140" font-size="24" font-family="Georgia, serif" fill="#F4EFE4" opacity="0.7">A TandemLeaf sample edition</text>
+</svg>
