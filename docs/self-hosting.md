@@ -42,7 +42,7 @@ TandemLeaf detects `.epub` files and `.m4b/.mp3/.m4a/.flac/.ogg/.opus` audio
 
 The container starts as root only to align its user with `PUID`/`PGID`
 (default `1000:1000`) and own its writable volumes, then drops privileges
-with `su-exec`. Set them to the host user that owns your data volume. `TZ`
+with `gosu`. Set them to the host user that owns your data volume. `TZ`
 sets the container timezone. No Docker socket is mounted, no privileged mode
 is used, and `no-new-privileges` is enabled in the compose file.
 

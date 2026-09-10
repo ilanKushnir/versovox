@@ -136,7 +136,7 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 
 ## Container posture
 
-- Runs as a non-root user (`PUID`/`PGID`), privileges dropped via `su-exec`
+- Runs as a non-root user (`PUID`/`PGID`), privileges dropped via `gosu`
   after volume ownership alignment; `no-new-privileges` in compose.
 - No Docker socket, no privileged mode, no host network.
 - No native Node modules (SQLite is Node's built-in `node:sqlite`), keeping
