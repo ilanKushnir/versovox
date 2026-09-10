@@ -1,24 +1,34 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { LANGUAGES, languageLabel } from '@versovox/shared';
 import { api } from '../api/client';
 import { type BookSummary, type PairDto } from '../lib/types';
-import { EmptyState, Sheet, useToast } from '../components/ui';
+import { Cover, EmptyState, Sheet, useToast } from '../components/ui';
+import { useSession } from '../state/session';
 import {
   IconAlert,
   IconBookOpen,
   IconCheck,
   IconClose,
+  IconDownload,
   IconHeadphones,
   IconLink,
+  IconSwitch,
 } from '../components/icons';
 import { formatDuration, formatPct } from '../lib/format';
 import { MANUAL_LINK_NOTE, UNALIGNED_PAIR_NOTE } from '../lib/pairLabel';
 
+type PairAction = 'confirm' | 'reject' | 'unlink' | 'align';
+
 export function PairsPage() {
+  const { user } = useSession();
   const [pairs, setPairs] = useState<PairDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const toast = useToast();
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isAdmin = user?.role === 'admin';
 
   const load = useCallback(async () => {
     try {
@@ -33,7 +43,25 @@ export function PairsPage() {
     void load();
   }, [load]);
 
-  const act = async (pairId: string, action: 'confirm' | 'reject' | 'unlink' | 'align') => {
+  // Live progress while any alignment runs.
+  const active = pairs?.some(
+    (p) => p.lastAlignJob && ['queued', 'running'].includes(p.lastAlignJob.state),
+  );
+  useEffect(() => {
+    if (active && !pollRef.current) pollRef.current = setInterval(() => void load(), 3000);
+    if (!active && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [active, load]);
+
+  const act = async (pairId: string, action: PairAction) => {
     setBusyId(pairId);
     try {
       await api(`/api/pairs/${pairId}/${action}`, { method: 'POST' });
@@ -54,6 +82,36 @@ export function PairsPage() {
     }
   };
 
+  const setLanguage = async (pairId: string, language: string | null) => {
+    try {
+      await api(`/api/pairs/${pairId}/language`, { method: 'POST', body: { language } });
+      toast.show(
+        language ? `Narration language set to ${languageLabel(language)}` : 'Language reset',
+      );
+      await load();
+    } catch {
+      toast.show('Could not change the language (admin only)');
+    }
+  };
+
+  const downloadModel = async (modelId: string, language: string) => {
+    try {
+      await api(`/api/models/${modelId}/download`, { method: 'POST' });
+      toast.show(
+        `Downloading the ${languageLabel(language)} model — alignment resumes when it lands`,
+        {
+          label: 'Watch progress',
+          onClick: () => {
+            location.assign('/settings#speech-models');
+          },
+        },
+      );
+      await load();
+    } catch {
+      toast.show('Could not start the download (admin only)');
+    }
+  };
+
   if (error) {
     return (
       <main className="app-main">
@@ -70,20 +128,19 @@ export function PairsPage() {
 
   return (
     <main className="app-main">
-      <h1 className="section-title" style={{ marginBlockStart: 0 }}>
-        Pairing review
-      </h1>
-      <p style={{ color: 'var(--vx-text-soft)', maxWidth: '62ch', marginBlockStart: 0 }}>
-        Versovox links ebook and audiobook editions of the same work. Metadata alone never links
-        anything automatically: strong matches are verified against the actual narration content
-        first, uncertain matches wait for your decision, and switching precision is always shown per
-        pair — never claimed globally.
-      </p>
-      <div style={{ marginBlockEnd: 16 }}>
+      <header className="page-head page-head--row">
+        <div>
+          <h1>Pairing</h1>
+          <p>
+            Ebook and audiobook editions of the same work. Metadata alone never links anything:
+            strong matches are verified against the narration first, uncertain ones wait for you,
+            and switching precision is shown per pair.
+          </p>
+        </div>
         <button className="btn btn--secondary" onClick={() => setLinkOpen(true)}>
-          <IconLink size={16} /> Link two books manually
+          <IconLink size={16} /> Link manually
         </button>
-      </div>
+      </header>
       {linkOpen && (
         <ManualLinkSheet
           onClose={() => setLinkOpen(false)}
@@ -97,8 +154,8 @@ export function PairsPage() {
 
       {!pairs ? (
         <div aria-busy="true">
-          <div className="skeleton" style={{ height: 160, marginBlockEnd: 16 }} />
-          <div className="skeleton" style={{ height: 160 }} />
+          <div className="skeleton" style={{ height: 180, marginBlockEnd: 16 }} />
+          <div className="skeleton" style={{ height: 180 }} />
         </div>
       ) : pairs.length === 0 ? (
         <EmptyState icon={<IconLink size={42} />} title="No pair suggestions yet">
@@ -109,25 +166,55 @@ export function PairsPage() {
         <>
           {candidates.length > 0 && (
             <section aria-label="Needs review">
-              <h2 className="section-title">Needs review ({candidates.length})</h2>
+              <h2 className="section-title">
+                Needs review <span className="section-title__count">{candidates.length}</span>
+              </h2>
               {candidates.map((p) => (
-                <PairCard key={p.id} pair={p} busy={busyId === p.id} onAction={act} />
+                <PairCard
+                  key={p.id}
+                  pair={p}
+                  busy={busyId === p.id}
+                  isAdmin={isAdmin}
+                  onAction={act}
+                  onLanguage={setLanguage}
+                  onDownloadModel={downloadModel}
+                />
               ))}
             </section>
           )}
           {linked.length > 0 && (
             <section aria-label="Linked pairs">
-              <h2 className="section-title">Linked ({linked.length})</h2>
+              <h2 className="section-title">
+                Linked <span className="section-title__count">{linked.length}</span>
+              </h2>
               {linked.map((p) => (
-                <PairCard key={p.id} pair={p} busy={busyId === p.id} onAction={act} />
+                <PairCard
+                  key={p.id}
+                  pair={p}
+                  busy={busyId === p.id}
+                  isAdmin={isAdmin}
+                  onAction={act}
+                  onLanguage={setLanguage}
+                  onDownloadModel={downloadModel}
+                />
               ))}
             </section>
           )}
           {rejected.length > 0 && (
             <section aria-label="Dismissed pairs">
-              <h2 className="section-title">Dismissed ({rejected.length})</h2>
+              <h2 className="section-title">
+                Dismissed <span className="section-title__count">{rejected.length}</span>
+              </h2>
               {rejected.map((p) => (
-                <PairCard key={p.id} pair={p} busy={busyId === p.id} onAction={act} />
+                <PairCard
+                  key={p.id}
+                  pair={p}
+                  busy={busyId === p.id}
+                  isAdmin={isAdmin}
+                  onAction={act}
+                  onLanguage={setLanguage}
+                  onDownloadModel={downloadModel}
+                />
               ))}
             </section>
           )}
@@ -137,29 +224,73 @@ export function PairsPage() {
   );
 }
 
-function ScoreCell({ label, value }: { label: string; value: string }) {
+function ScoreCell({
+  label,
+  value,
+  good,
+}: {
+  label: string;
+  value: string;
+  good?: boolean | null;
+}) {
   return (
-    <div className="evidence-cell">
+    <div className={`evidence-cell ${good === true ? 'is-good' : good === false ? 'is-bad' : ''}`}>
       {label}
       <b>{value}</b>
     </div>
   );
 }
 
+function EditionTile({
+  book,
+  kind,
+  extra,
+}: {
+  book: { id: string; title: string; author: string | null } | null;
+  kind: 'ebook' | 'audio';
+  extra?: string;
+}) {
+  return (
+    <Link to={book ? `/book/${book.id}` : '/pairs'} className="edition-tile">
+      <span className="edition-tile__cover">
+        {book && (
+          <Cover
+            book={{ id: book.id, title: book.title, author: book.author, hasCover: true, kind }}
+            className="edition-tile__img"
+          />
+        )}
+      </span>
+      <span className="edition-tile__body">
+        <span className="edition-tile__kind">
+          {kind === 'ebook' ? <IconBookOpen size={12} /> : <IconHeadphones size={12} />}
+          {kind === 'ebook' ? 'Ebook' : 'Audiobook'}
+        </span>
+        <span className="edition-tile__title">{book?.title ?? 'Unknown'}</span>
+        <span className="edition-tile__meta">
+          {book?.author ?? '—'}
+          {extra ? ` · ${extra}` : ''}
+        </span>
+      </span>
+    </Link>
+  );
+}
+
 function PairCard({
   pair,
   busy,
+  isAdmin,
   onAction,
+  onLanguage,
+  onDownloadModel,
 }: {
   pair: PairDto;
   busy: boolean;
-  onAction: (id: string, a: 'confirm' | 'reject' | 'unlink' | 'align') => void;
+  isAdmin: boolean;
+  onAction: (id: string, a: PairAction) => void;
+  onLanguage: (id: string, language: string | null) => void;
+  onDownloadModel: (modelId: string, language: string) => void;
 }) {
   const e = pair.evidence;
-  // Evidence notes are written while the pair is still a candidate; the
-  // "awaits content verification / confirm manually" wording becomes false
-  // once the pair is linked (auto status only ever follows a passing content
-  // probe), so swap or drop it here while candidates keep the warning.
   const notes = (e.notes ?? []).flatMap((n): { text: string; done: boolean }[] => {
     if (pair.status === 'candidate' || !n.startsWith('Strong metadata match')) {
       return [{ text: n, done: false }];
@@ -182,50 +313,82 @@ function PairCard({
         : pair.status === 'candidate'
           ? 'Suggested'
           : 'Dismissed';
+  const job = pair.lastAlignJob;
+  const running = job && (job.state === 'queued' || job.state === 'running');
+  const lang = pair.language;
+  const langSourceLabel =
+    lang.source === 'override'
+      ? 'set by you'
+      : lang.source === 'alignment'
+        ? 'detected'
+        : lang.source === 'ebook-metadata'
+          ? 'from the ebook'
+          : lang.source === 'audio-tags'
+            ? 'from the audio tags'
+            : 'unknown — will be detected';
+
   return (
-    <article className="pair-card">
-      <div className="pair-card__titles">
-        <span className="pair-card__work">{pair.ebook?.title ?? 'Unknown ebook'}</span>
-        <IconLink size={16} style={{ color: 'var(--vx-text-soft)' }} />
-        <span className="pair-card__work">{pair.audio?.title ?? 'Unknown audiobook'}</span>
+    <article className={`pair-card pair-card--${pair.status}`}>
+      <div className="pair-card__editions">
+        <EditionTile book={pair.ebook} kind="ebook" />
+        <span className="pair-card__link" aria-hidden="true">
+          <IconSwitch size={18} />
+        </span>
+        <EditionTile
+          book={pair.audio}
+          kind="audio"
+          extra={pair.audio?.durationMs ? formatDuration(pair.audio.durationMs) : undefined}
+        />
+      </div>
+
+      <div className="pair-card__status">
         <span
-          className={`badge ${pair.status !== 'candidate' && pair.status !== 'rejected' ? 'badge--paired' : ''}`}
+          className={`badge ${pair.status === 'auto' || pair.status === 'confirmed' ? 'badge--paired' : pair.status === 'rejected' ? 'badge--muted' : ''}`}
         >
           {statusLabel}
         </span>
         {pair.handoff?.available && (
-          <span className="badge badge--paired">
-            Switch ready · {formatPct(pair.handoff.exactSentenceCoverage)} sentence-exact
+          <span className="badge badge--sync">
+            <IconSwitch size={11} /> Switch ready · {formatPct(pair.handoff.exactSentenceCoverage)}{' '}
+            exact
           </span>
         )}
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 16,
-          fontSize: 13.5,
-          color: 'var(--vx-text-soft)',
-          flexWrap: 'wrap',
-        }}
-      >
-        <span>
-          <IconBookOpen size={13} /> {pair.ebook?.author ?? '—'}
-        </span>
-        <span>
-          <IconHeadphones size={13} /> {pair.audio?.author ?? '—'}
-          {pair.audio?.durationMs ? ` · ${formatDuration(pair.audio.durationMs)}` : ''}
-        </span>
-        <span>Match score {formatPct(pair.score)}</span>
+        <span className="pair-card__score">Match {formatPct(pair.score)}</span>
+        <label className="lang-pick">
+          <span className="lang-pick__label">Narration</span>
+          <select
+            className="lang-pick__select"
+            value={lang.override ?? ''}
+            disabled={!isAdmin}
+            title={`Language ${langSourceLabel}`}
+            onChange={(ev) => onLanguage(pair.id, ev.target.value || null)}
+          >
+            <option value="">
+              {lang.override
+                ? 'Auto'
+                : `Auto · ${lang.effective ? languageLabel(lang.effective) : 'detect'}`}
+            </option>
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label} · {l.native}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="evidence-grid">
         {e.titleScore !== undefined && (
-          <ScoreCell label="Title similarity" value={formatPct(e.titleScore)} />
+          <ScoreCell label="Title" value={formatPct(e.titleScore)} good={e.titleScore > 0.85} />
         )}
         {e.authorScore !== undefined && (
-          <ScoreCell label="Author similarity" value={formatPct(e.authorScore)} />
+          <ScoreCell label="Author" value={formatPct(e.authorScore)} good={e.authorScore > 0.85} />
         )}
-        <ScoreCell label="Identifiers" value={e.identifierMatch ? 'Match' : '—'} />
+        <ScoreCell
+          label="Identifiers"
+          value={e.identifierMatch ? 'Match' : '—'}
+          good={e.identifierMatch ? true : null}
+        />
         <ScoreCell
           label="Language"
           value={
@@ -235,12 +398,21 @@ function PairCard({
                 ? 'Match'
                 : 'Mismatch'
           }
+          good={e.languageMatch ?? null}
         />
         {e.durationPagesRatio != null && (
-          <ScoreCell label="Length ratio" value={`${e.durationPagesRatio.toFixed(2)}×`} />
+          <ScoreCell
+            label="Length ratio"
+            value={`${e.durationPagesRatio.toFixed(2)}×`}
+            good={e.durationPagesRatio > 0.55 && e.durationPagesRatio < 1.9}
+          />
         )}
         {e.contentScore != null && (
-          <ScoreCell label="Content overlap" value={formatPct(e.contentScore)} />
+          <ScoreCell
+            label="Content overlap"
+            value={formatPct(e.contentScore)}
+            good={e.contentScore > 0.6}
+          />
         )}
       </div>
 
@@ -255,25 +427,82 @@ function PairCard({
         </div>
       )}
 
-      {pair.alignment ? (
-        <div style={{ fontSize: 13.5 }}>
-          <strong>Alignment</strong> · v{pair.alignment.version} ({pair.alignment.model}) ·{' '}
-          {formatPct(pair.alignment.exactSentenceCoverage)} sentence-exact · coverage{' '}
-          {formatPct(pair.alignment.coverage)} · confidence{' '}
-          {formatPct(pair.alignment.meanConfidence)} · {pair.alignment.segmentCount} sentences (the
-          remainder switches approximately or reports unavailable)
-          {pair.alignment.gaps.length > 0 && (
-            <span style={{ color: 'var(--vx-text-soft)' }}>
-              {' '}
-              · {pair.alignment.gaps.length} gap{pair.alignment.gaps.length > 1 ? 's' : ''} (e.g.{' '}
-              {pair.alignment.gaps[0]!.reason} {formatDuration(pair.alignment.gaps[0]!.fromMs)}–
-              {formatDuration(pair.alignment.gaps[0]!.toMs)})
+      {running && job && (
+        <div className="align-progress" role="status">
+          <span className="spinner" style={{ width: 16, height: 16 }} />
+          <span className="grow">
+            <span style={{ fontWeight: 600 }}>
+              {job.state === 'queued' ? 'Alignment queued' : 'Aligning'}
             </span>
+            {job.detail ? ` — ${job.detail}` : ''}
+            <span className="progressbar" aria-hidden="true">
+              <span style={{ width: `${Math.round(job.progress * 100)}%` }} />
+            </span>
+          </span>
+        </div>
+      )}
+      {job?.state === 'failed' && job.modelMissing && pair.status !== 'rejected' && (
+        <div className="banner banner--action" role="alert">
+          <IconDownload size={16} />
+          <span className="grow">
+            <strong>{languageLabel(job.modelMissing.language)} speech model needed.</strong>{' '}
+            {job.modelMissing.message.replace(/ — download it in Settings.*$/, '')}. Download it and
+            this alignment runs by itself when it lands.
+          </span>
+          <button
+            className="btn"
+            style={{ minHeight: 38 }}
+            disabled={!isAdmin}
+            onClick={() => onDownloadModel(job.modelMissing!.modelId, job.modelMissing!.language)}
+          >
+            Download
+          </button>
+          <Link to="/settings#speech-models" className="btn btn--ghost" style={{ minHeight: 38 }}>
+            Models
+          </Link>
+        </div>
+      )}
+      {job?.state === 'failed' && !job.modelMissing && pair.status !== 'rejected' && (
+        <div className="banner banner--error" role="alert">
+          <IconAlert size={15} />
+          <span className="grow">Alignment failed: {job.error}</span>
+          {isAdmin && (
+            <button
+              className="btn btn--ghost"
+              style={{ minHeight: 36 }}
+              onClick={() => onAction(pair.id, 'align')}
+            >
+              Retry
+            </button>
           )}
+        </div>
+      )}
+
+      {pair.alignment ? (
+        <div className="align-summary">
+          <div className="align-summary__row">
+            <strong>Aligned</strong>
+            <span>{formatPct(pair.alignment.exactSentenceCoverage)} sentence-exact</span>
+            <span>coverage {formatPct(pair.alignment.coverage)}</span>
+            <span>confidence {formatPct(pair.alignment.meanConfidence)}</span>
+            <span>{pair.alignment.segmentCount} sentences</span>
+            <span className="soft">
+              {pair.alignment.model} · {languageLabel(pair.alignment.language)}
+            </span>
+            {pair.alignment.gaps.length > 0 && (
+              <span className="soft">
+                {pair.alignment.gaps.length} gap{pair.alignment.gaps.length > 1 ? 's' : ''} (e.g.{' '}
+                {pair.alignment.gaps[0]!.reason} {formatDuration(pair.alignment.gaps[0]!.fromMs)}–
+                {formatDuration(pair.alignment.gaps[0]!.toMs)})
+              </span>
+            )}
+          </div>
           <CoverageStrip pair={pair} />
         </div>
       ) : (
-        pair.status !== 'rejected' && (
+        pair.status !== 'rejected' &&
+        !running &&
+        !job?.modelMissing && (
           <div style={{ fontSize: 13.5, color: 'var(--vx-text-soft)' }}>{UNALIGNED_PAIR_NOTE}</div>
         )
       )}
@@ -281,12 +510,16 @@ function PairCard({
       <div className="pair-actions">
         {pair.status === 'candidate' && (
           <>
-            <button className="btn" disabled={busy} onClick={() => onAction(pair.id, 'confirm')}>
+            <button
+              className="btn"
+              disabled={busy || !isAdmin}
+              onClick={() => onAction(pair.id, 'confirm')}
+            >
               <IconCheck size={16} /> Link editions
             </button>
             <button
               className="btn btn--secondary"
-              disabled={busy}
+              disabled={busy || !isAdmin}
               onClick={() => onAction(pair.id, 'reject')}
             >
               <IconClose size={16} /> Not a match
@@ -295,18 +528,18 @@ function PairCard({
         )}
         {(pair.status === 'auto' || pair.status === 'confirmed') && (
           <>
-            {!pair.alignment && (
+            {!running && (
               <button
                 className="btn btn--secondary"
-                disabled={busy}
+                disabled={busy || !isAdmin}
                 onClick={() => onAction(pair.id, 'align')}
               >
-                Run alignment
+                {pair.alignment ? 'Re-run alignment' : 'Run alignment'}
               </button>
             )}
             <button
               className="btn btn--danger"
-              disabled={busy}
+              disabled={busy || !isAdmin}
               onClick={() => onAction(pair.id, 'unlink')}
             >
               Unlink
@@ -316,7 +549,7 @@ function PairCard({
         {pair.status === 'rejected' && (
           <button
             className="btn btn--secondary"
-            disabled={busy}
+            disabled={busy || !isAdmin}
             onClick={() => onAction(pair.id, 'confirm')}
           >
             Link anyway
@@ -435,11 +668,12 @@ function CoverageStrip({ pair }: { pair: PairDto }) {
     };
   }, [pair.id]);
   if (!bars || bars.length === 0) return null;
+  const avg = bars.reduce((a, b) => a + b.confidence, 0) / bars.length;
   return (
     <div
       className="coverage-strip"
       role="img"
-      aria-label={`Alignment confidence per minute: ${bars.map((b) => Math.round(b.confidence * 100) + '%').join(', ')}`}
+      aria-label={`Alignment confidence per minute across ${bars.length} minutes, average ${formatPct(avg)}`}
     >
       {bars.map((b) => (
         <span

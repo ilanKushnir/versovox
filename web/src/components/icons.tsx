@@ -23,13 +23,34 @@ function I({ size = 22, children, ...rest }: P) {
   );
 }
 
-export const LeafMark = ({ size = 24, ...rest }: P) => (
+/**
+ * The Versovox mark: a left-hand page (the verso) whose edge turns into a
+ * sound wave — the book and the voice as one shape.
+ */
+export const VersoMark = ({ size = 24, ...rest }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" {...rest}>
-    <path d="M12 21C12 13 7 9.5 3 9.5 3 15.5 6.5 20 12 21Z" fill="currentColor" opacity="0.55" />
-    <path d="M12 21C12 11 16 5.5 21 3c.8 7-2 14.5-9 18Z" fill="currentColor" />
-    <path d="M12 21c0-6 2.5-12 7-16" stroke="var(--vx-bg, #fff)" strokeWidth="1" opacity="0.5" />
+    <path
+      d="M4 4.5A1.5 1.5 0 0 1 5.5 3h6.2c.7 0 1.3.6 1.3 1.3V20c0 .6-.5 1-1 1H5.5A1.5 1.5 0 0 1 4 19.5z"
+      fill="currentColor"
+      opacity="0.92"
+    />
+    <path
+      d="M7 8h3.5M7 11.5h3.5M7 15h2.5"
+      stroke="var(--vx-bg, #fff)"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      opacity="0.85"
+    />
+    <path
+      d="M15.5 9.5v5M18 7.5v9M20.5 10v4"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    />
   </svg>
 );
+/** @deprecated use VersoMark */
+export const LeafMark = VersoMark;
 
 export const IconLibrary = (p: P) => (
   <I {...p}>

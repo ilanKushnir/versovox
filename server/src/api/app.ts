@@ -13,6 +13,12 @@ import { registerProgressRoutes } from './routes/progress.js';
 import { registerAnnotationRoutes } from './routes/annotations.js';
 import { registerPairRoutes } from './routes/pairs.js';
 import { registerJobRoutes, registerOfflineRoutes, registerSettingsRoutes } from './routes/misc.js';
+import { registerModelRoutes } from './routes/models.js';
+import { createRequire } from 'node:module';
+
+const APP_VERSION: string = (
+  createRequire(import.meta.url)('../../package.json') as { version: string }
+).version;
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -102,7 +108,7 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
 
   app.get('/api/health', { config: { public: true } }, async () => ({
     status: 'ok',
-    version: '0.1.0',
+    version: APP_VERSION,
     time: new Date().toISOString(),
   }));
 
@@ -116,6 +122,7 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
   registerJobRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
   registerOfflineRoutes(app, ctx);
+  registerModelRoutes(app, ctx);
 
   // Static web app + SPA fallback (everything not under /api).
   if (opts.webDist && fs.existsSync(path.join(opts.webDist, 'index.html'))) {

@@ -282,7 +282,7 @@ export function LibraryPage() {
             {shelf === 'none' && kind === 'all' && !query && data && (
               <span className="section-title__stats">
                 {stats.ebooks} ebooks · {stats.audio} audiobooks
-                {stats.paired > 0 ? ` · ${Math.round(stats.paired)} tandem` : ''}
+                {stats.paired > 0 ? ` · ${Math.round(stats.paired)} paired` : ''}
               </span>
             )}
           </h2>

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api/client';
 import { useSession, type User } from '../state/session';
-import { LeafMark } from '../components/icons';
+import { VersoMark } from '../components/icons';
 
 function AuthCard({
   title,
@@ -22,11 +22,13 @@ function AuthCard({
 }) {
   return (
     <main className="auth-page">
+      <div className="auth-page__glow" aria-hidden="true" />
       <form className="auth-card" onSubmit={onSubmit}>
         <span className="brand">
-          <LeafMark size={34} style={{ color: 'var(--vx-primary)' }} />
+          <VersoMark size={34} style={{ color: 'var(--vx-primary)' }} />
           <span className="brand__name">Versovox</span>
         </span>
+        <p className="auth-card__tagline">Read and listen in tandem</p>
         <h1>{title}</h1>
         <p className="lede">{lede}</p>
         {error && (

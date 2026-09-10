@@ -16,6 +16,7 @@ const DEFAULTS: Settings = {
   jobConcurrency: 2,
   autoPairThreshold: 0.92,
   storageBudgetMb: 0,
+  languageModels: {},
 };
 
 /** Settings keys that can be pinned by env vars, mapped to config fields. */

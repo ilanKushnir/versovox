@@ -151,5 +151,7 @@ export const settingsSchema = z.object({
   jobConcurrency: z.number().int().min(1).max(8),
   autoPairThreshold: z.number().min(0.5).max(1),
   storageBudgetMb: z.number().int().min(0),
+  /** Per-language speech model preference (language code → catalog model id). */
+  languageModels: z.record(z.string().max(8), z.string().max(64)).default({}),
 });
 export type Settings = z.infer<typeof settingsSchema>;

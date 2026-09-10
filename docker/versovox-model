@@ -1,32 +1,42 @@
 #!/bin/sh
-# versovox-model — fetch a whisper.cpp ggml model into the models volume.
+# versovox-model — fetch a speech model into the models volume from the CLI.
+# The same catalog is available with progress bars in Settings → Speech models.
 #
 #   docker compose exec versovox versovox-model large-v3-turbo
+#   docker compose exec versovox versovox-model he          # Hebrew (ivrit.ai fine-tune)
 #   docker compose exec versovox versovox-model list
-#
-# Models come from the whisper.cpp maintainers' Hugging Face repo. Pick by
-# language/quality: `large-v3-turbo` is the sweet spot for Hebrew and other
-# non-English narration on a CPU-only server; `base`/`small` are fast but
-# rough; `large-v3` is the most accurate and several times slower.
 set -eu
 MODELS_DIR="${VX_MODELS_DIR:-/models}"
-BASE_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
-KNOWN="tiny base small medium large-v3 large-v3-turbo tiny.en base.en small.en medium.en"
+HF="https://huggingface.co"
+
+# id | filename | url
+CATALOG="large-v3-turbo|ggml-large-v3-turbo.bin|$HF/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+large-v3|ggml-large-v3.bin|$HF/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
+small|ggml-small.bin|$HF/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+ivrit-large-v3-turbo|ggml-ivrit-large-v3-turbo.bin|$HF/ivrit-ai/whisper-large-v3-turbo-ggml/resolve/main/ggml-model.bin
+ivrit-large-v3|ggml-ivrit-large-v3.bin|$HF/ivrit-ai/whisper-large-v3-ggml/resolve/main/ggml-model.bin"
 
 name="${1:-}"
 case "$name" in
-  ""|-h|--help)
-    echo "usage: versovox-model <model> | list"; echo "models: $KNOWN"; exit 1 ;;
-  list)
-    echo "available: $KNOWN"; echo "installed in $MODELS_DIR:"; ls -1 "$MODELS_DIR"/ggml-*.bin 2>/dev/null || echo "  (none)"; exit 0 ;;
+  he|hebrew) name=ivrit-large-v3-turbo ;;
+  en|de|fr|es|it|pt|ru|nl) name=large-v3-turbo ;;
+  ar) name=large-v3 ;;
 esac
-case " $KNOWN " in *" $name "*) ;; *) echo "unknown model: $name (try: $KNOWN)"; exit 1 ;; esac
-
-file="ggml-$name.bin"
+case "$name" in
+  ""|-h|--help)
+    echo "usage: versovox-model <model-id | language-code> | list"
+    echo "$CATALOG" | cut -d'|' -f1 | sed 's/^/  /'; exit 1 ;;
+  list)
+    echo "catalog:"; echo "$CATALOG" | cut -d'|' -f1 | sed 's/^/  /'
+    echo "installed in $MODELS_DIR:"; ls -1 "$MODELS_DIR"/ggml-*.bin 2>/dev/null || echo "  (none)"; exit 0 ;;
+esac
+line=$(echo "$CATALOG" | grep "^$name|" || true)
+[ -n "$line" ] || { echo "unknown model: $name"; exit 1; }
+file=$(echo "$line" | cut -d'|' -f2); url=$(echo "$line" | cut -d'|' -f3)
 dest="$MODELS_DIR/$file"
 if [ -s "$dest" ]; then echo "already present: $dest"; exit 0; fi
 mkdir -p "$MODELS_DIR"
 echo "downloading $file → $dest"
-wget -q --show-progress -O "$dest.part" "$BASE_URL/$file"
+wget -q --show-progress -c -O "$dest.part" "$url"
 mv "$dest.part" "$dest"
-echo "done. Set VX_WHISPER_MODEL=$dest (and VX_TRANSCRIBE_PROVIDER=whisper-cli)."
+echo "done: $dest"

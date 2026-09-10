@@ -238,4 +238,14 @@ CREATE TABLE login_throttle (
 ALTER TABLE books ADD COLUMN derived_rev TEXT;
 `,
   },
+  {
+    version: 4,
+    sql: `
+-- Per-pair narration language override (user-set) and the language that was
+-- actually used/detected by the last alignment, so the speech model can be
+-- chosen per language and "model missing" errors name the right one.
+ALTER TABLE pairs ADD COLUMN language TEXT;
+ALTER TABLE pairs ADD COLUMN detected_language TEXT;
+`,
+  },
 ];

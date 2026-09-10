@@ -9,7 +9,7 @@ import {
 } from 'react-router-dom';
 import { SessionProvider, useSession } from './state/session';
 import { ToastProvider } from './components/ui';
-import { IconLibrary, IconLink, IconSettings, LeafMark } from './components/icons';
+import { IconLibrary, IconLink, IconSettings, VersoMark } from './components/icons';
 import { startProgressLifecycle } from './progress/engine';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { LibraryPage } from './pages/LibraryPage';
@@ -58,7 +58,7 @@ function Shell() {
       {!immersive && (
         <header className="app-header">
           <Link to="/" className="brand" aria-label="Versovox home">
-            <LeafMark size={26} style={{ color: 'var(--vx-primary)' }} />
+            <VersoMark size={26} style={{ color: 'var(--vx-primary)' }} />
             <span className="brand__name">Versovox</span>
           </Link>
           <nav className="app-nav" aria-label="Primary">

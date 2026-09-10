@@ -50,11 +50,29 @@ books: cumulative across tracks in playback order).
 ### whisper-cli contract (experimental)
 
 The Docker image ships `whisper-cli` (whisper.cpp, CPU build) at
-`/usr/local/bin/whisper-cli` and defaults `VX_WHISPER_BIN` to it, so the only
-missing piece is a model: `docker compose exec versovox versovox-model
-large-v3-turbo` downloads it into `/models` (then set
-`VX_WHISPER_MODEL=/models/ggml-large-v3-turbo.bin` and
-`VX_TRANSCRIBE_PROVIDER=whisper-cli`).
+`/usr/local/bin/whisper-cli` and defaults `VX_WHISPER_BIN` to it. Models come
+from a **per-language catalog** in Settings → Speech models (admin): one click
+downloads the recommended ggml model for each of ten languages into
+`VX_MODELS_DIR`, with progress, resume, and removal; `versovox-model <id|lang>`
+does the same from the CLI.
+
+What "best" means here (September 2026): whisper.cpp runs OpenAI's Whisper
+family, where `large-v3` is the most accurate general model and
+`large-v3-turbo` reaches it within 1–2 WER points at ~5× the CPU speed — so
+turbo is the default for English, German, French, Spanish, Italian,
+Portuguese, Russian, and Dutch, with `large-v3` selectable per language
+(and preferred for Arabic). Language fine-tunes beat both on their own
+language: **Hebrew uses ivrit.ai's whisper-large-v3-turbo** (trained on ~390 h
+of transcribed Hebrew), with their large-v3 fine-tune as the slower, most
+accurate option. No newer Whisper generation exists as of this writing; the
+catalog is a single file to extend when one does.
+
+**Which language?** Per pair: a user override on the Pairing page → the
+EPUB's `dc:language` → the audio tags → whisper's own detector on a 40 s clip
+(needs any multilingual model installed) → `VX_DEFAULT_LANGUAGE`. The chosen
+language picks the model. If that model is not installed, the alignment job
+fails with a structured `model-missing` error that the Pairing page turns into
+a one-click download; the alignment re-queues itself when the model lands.
 
 Each track is first decoded with the bundled ffmpeg to the 16 kHz mono
 16-bit WAV that whisper.cpp expects (so m4b/m4a/mp3/flac all work without

@@ -219,6 +219,85 @@ export class WhisperCliProvider implements TranscriptionProvider {
 }
 
 /**
+ * Detect the spoken language of a track with whisper.cpp's built-in
+ * detector on a ~40 s excerpt (skipping a likely intro). Returns a 2-letter
+ * code or null when detection is unavailable/uncertain.
+ */
+export async function detectLanguage(
+  whisperBin: string,
+  modelPath: string,
+  trackPath: string,
+  workDir: string,
+  signal?: AbortSignal,
+): Promise<{ language: string; probability: number } | null> {
+  fs.mkdirSync(workDir, { recursive: true });
+  const tmpDir = fs.mkdtempSync(path.join(workDir, 'detect-'));
+  const wav = path.join(tmpDir, 'clip.wav');
+  try {
+    await execFileP(
+      'ffmpeg',
+      [
+        '-y',
+        '-v',
+        'error',
+        '-ss',
+        '120',
+        '-t',
+        '40',
+        '-i',
+        trackPath,
+        '-vn',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-f',
+        'wav',
+        wav,
+      ],
+      { maxBuffer: 1024 * 1024, timeout: TRANSCODE_TIMEOUT_MS, killSignal: 'SIGKILL', signal },
+    ).catch(() =>
+      // Very short files: take the beginning instead.
+      execFileP(
+        'ffmpeg',
+        [
+          '-y',
+          '-v',
+          'error',
+          '-t',
+          '40',
+          '-i',
+          trackPath,
+          '-vn',
+          '-ac',
+          '1',
+          '-ar',
+          '16000',
+          '-f',
+          'wav',
+          wav,
+        ],
+        { maxBuffer: 1024 * 1024, timeout: TRANSCODE_TIMEOUT_MS, killSignal: 'SIGKILL', signal },
+      ),
+    );
+    const { stdout, stderr } = await execFileP(
+      whisperBin,
+      ['-m', modelPath, '--detect-language', '-f', wav],
+      { maxBuffer: 4 * 1024 * 1024, timeout: 10 * 60_000, killSignal: 'SIGKILL', signal },
+    );
+    const m = /auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([0-9.]+)\)/i.exec(
+      `${stdout}\n${stderr}`,
+    );
+    if (!m) return null;
+    return { language: m[1]!.toLowerCase(), probability: Number(m[2]) };
+  } catch {
+    return null;
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Decode any container/codec ffmpeg understands to 16 kHz mono 16-bit WAV.
  * Returns the WAV path, or the original path when ffmpeg is missing/fails
  * (already-WAV inputs are passed through as-is).

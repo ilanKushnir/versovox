@@ -13,6 +13,8 @@ import {
   type ResolveContext,
 } from '../../alignment/service.js';
 import { loadManifest, loadSentences } from '../../epub/extract.js';
+import { languageCode } from '../../pairing/score.js';
+import { LANGUAGES, parseModelMissing } from '../../transcription/models.js';
 
 export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
@@ -20,12 +22,58 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
   const pairDto = (row: Record<string, unknown>) => {
     const handle = latestAlignment(db, String(row.id));
     const ebook = db
-      .prepare('SELECT id, title, author, cover_path FROM books WHERE id = ?')
+      .prepare('SELECT id, title, author, cover_path, language FROM books WHERE id = ?')
       .get(String(row.ebook_id)) as Record<string, unknown> | undefined;
     const audio = db
-      .prepare('SELECT id, title, author, duration_ms, cover_path FROM books WHERE id = ?')
+      .prepare(
+        'SELECT id, title, author, duration_ms, cover_path, language FROM books WHERE id = ?',
+      )
       .get(String(row.audio_id)) as Record<string, unknown> | undefined;
+    const lastJob = db
+      .prepare(
+        `SELECT state, progress, detail, error, created_at FROM jobs
+         WHERE type = 'align' AND payload_json LIKE ? ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(`%"pairId":"${String(row.id)}"%`) as
+      | {
+          state: string;
+          progress: number;
+          detail: string | null;
+          error: string | null;
+          created_at: string;
+        }
+      | undefined;
+    const override = languageCode(row.language as string | null);
+    const effectiveLanguage =
+      override ??
+      languageCode(row.detected_language as string | null) ??
+      languageCode(ebook?.language as string | null) ??
+      languageCode(audio?.language as string | null);
     return {
+      language: {
+        override,
+        detected: languageCode(row.detected_language as string | null),
+        effective: effectiveLanguage,
+        source: override
+          ? 'override'
+          : row.detected_language
+            ? 'alignment'
+            : ebook?.language
+              ? 'ebook-metadata'
+              : audio?.language
+                ? 'audio-tags'
+                : 'unknown',
+      },
+      lastAlignJob: lastJob
+        ? {
+            state: lastJob.state,
+            progress: Number(lastJob.progress),
+            detail: lastJob.detail,
+            error: lastJob.error,
+            modelMissing: parseModelMissing(lastJob.error),
+            createdAt: lastJob.created_at,
+          }
+        : null,
       id: String(row.id),
       status: String(row.status),
       score: Number(row.score),
@@ -55,6 +103,22 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
       handoff: handoffStatus(handle),
     };
   };
+
+  /** Per-pair narration language override (drives speech-model choice). */
+  app.post('/api/pairs/:id/language', async (req, reply) => {
+    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
+    const { id } = req.params as { id: string };
+    const parsed = z.object({ language: z.string().max(8).nullable() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid' });
+    const code = parsed.data.language ? languageCode(parsed.data.language) : null;
+    if (parsed.data.language && (!code || !LANGUAGES.some((l) => l.code === code))) {
+      return reply.code(400).send({ error: 'unsupported-language' });
+    }
+    const res = db.prepare('UPDATE pairs SET language = ? WHERE id = ?').run(code, id);
+    if (Number(res.changes) === 0) return reply.code(404).send({ error: 'not-found' });
+    const row = db.prepare('SELECT * FROM pairs WHERE id = ?').get(id) as Record<string, unknown>;
+    return { pair: pairDto(row) };
+  });
 
   app.get('/api/pairs', async () => {
     const rows = db

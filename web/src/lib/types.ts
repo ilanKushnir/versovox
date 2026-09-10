@@ -78,6 +78,20 @@ export interface PairDto {
     gaps: { fromMs: number; toMs: number; reason: string }[];
     createdAt: string;
   } | null;
+  language: {
+    override: string | null;
+    detected: string | null;
+    effective: string | null;
+    source: 'override' | 'alignment' | 'ebook-metadata' | 'audio-tags' | 'unknown';
+  };
+  lastAlignJob: {
+    state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+    progress: number;
+    detail: string | null;
+    error: string | null;
+    modelMissing: { language: string; modelId: string; message: string } | null;
+    createdAt: string;
+  } | null;
   /** Handoff availability; NOT a claim of sentence exactness (see handoff). */
   switchable: boolean;
   handoff: {
@@ -102,3 +116,25 @@ export interface ResolveResponse {
 }
 
 export type { Annotation, BookSummary, Locator };
+
+export interface ModelInfo {
+  id: string;
+  label: string;
+  family: 'openai' | 'ivrit-ai';
+  languages: string[] | '*';
+  file: string;
+  sizeBytes: number;
+  note: string;
+  cost: number;
+  installed: boolean;
+  installedBytes: number;
+  download: { state: string; progress: number; detail: string | null } | null;
+  lastError: string | null;
+}
+
+export interface ModelsResponse {
+  modelsDir: string;
+  whisperAvailable: boolean;
+  models: ModelInfo[];
+  languages: { code: string; label: string; native: string; models: string[] }[];
+}

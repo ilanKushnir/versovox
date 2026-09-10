@@ -17,13 +17,23 @@ import { extractCover, probeAudio } from '../audio/probe.js';
 import { CANDIDATE_THRESHOLD, scorePair } from '../pairing/score.js';
 import { alignBook, type EbookSentenceInput, type TranscriptWord } from '../alignment/align.js';
 import { storeAlignment } from '../alignment/service.js';
-import { getProvider } from '../transcription/providers.js';
+import { detectLanguage, getProvider } from '../transcription/providers.js';
+import {
+  anyMultilingualModel,
+  languageByCode,
+  modelById,
+  modelPath,
+  ModelMissingError,
+  resolveModelForLanguage,
+} from '../transcription/models.js';
+import { languageCode } from '../pairing/score.js';
 import { resolveSettings } from '../domain/settings.js';
 import {
   enqueueJob,
   jobCheckpoint,
   jobProgress,
   LeaseLostError,
+  retryJob,
   type JobRow,
   type LeaseGuard,
 } from './queue.js';
@@ -44,7 +54,97 @@ export const JOB_HANDLERS: Record<string, JobHandler> = {
   'index-audio': runIndexAudio,
   'pair-scan': runPairScan,
   align: runAlign,
+  'model-download': runModelDownload,
 };
+
+/**
+ * Stream a catalog speech model into VX_MODELS_DIR. Writes to `<file>.part`
+ * with progress updates and renames only once the whole file arrived and
+ * matches the published size, so a half-download is never mistaken for a
+ * model. Resumable across attempts via HTTP Range.
+ */
+export async function runModelDownload(
+  ctx: AppContext,
+  job: JobRow,
+  guard: LeaseGuard,
+): Promise<void> {
+  const { db, config } = ctx;
+  const { modelId } = JSON.parse(job.payload_json) as { modelId: string };
+  const spec = modelById(modelId);
+  if (!spec) throw new Error(`Unknown model: ${modelId}`);
+  fs.mkdirSync(config.modelsDir, { recursive: true });
+  const dest = modelPath(config.modelsDir, spec);
+  const part = `${dest}.part`;
+  let have = 0;
+  try {
+    have = fs.statSync(part).size;
+  } catch {
+    have = 0;
+  }
+  const controller = new AbortController();
+  const res = await fetch(spec.url, {
+    headers: have > 0 ? { range: `bytes=${have}-` } : {},
+    redirect: 'follow',
+    signal: controller.signal,
+  });
+  if (res.status === 416) {
+    have = 0; // server refused the range: start over
+    fs.rmSync(part, { force: true });
+    return runModelDownload(ctx, job, guard);
+  }
+  if (!res.ok || !res.body) throw new Error(`Download failed: HTTP ${res.status} from ${spec.url}`);
+  const resumed = res.status === 206;
+  if (!resumed) have = 0;
+  const total = (resumed ? have : 0) + Number(res.headers.get('content-length') ?? spec.sizeBytes);
+  const out = fs.createWriteStream(part, { flags: resumed ? 'a' : 'w' });
+  let received = have;
+  let lastReport = 0;
+  const fmt = (n: number) => `${(n / 1_073_741_824).toFixed(2)} GB`;
+  try {
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      if (guard.isLost()) {
+        controller.abort();
+        throw new LeaseLostError(job.id);
+      }
+      if (!out.write(chunk)) await new Promise<void>((r) => out.once('drain', () => r()));
+      received += chunk.byteLength;
+      const now = Date.now();
+      if (now - lastReport > 2000) {
+        lastReport = now;
+        // Removing the model from the UI deletes the .part file: stop streaming.
+        if (!fs.existsSync(part)) {
+          controller.abort();
+          throw new Error('Download cancelled (model removed)');
+        }
+        jobProgress(
+          db,
+          job.id,
+          job.lease_token,
+          Math.min(0.99, received / total),
+          `${spec.label}: ${fmt(received)} of ${fmt(total)}`,
+        );
+      }
+    }
+  } finally {
+    await new Promise<void>((r) => out.end(() => r()));
+  }
+  const size = fs.statSync(part).size;
+  if (size < spec.sizeBytes * 0.9) {
+    throw new Error(
+      `Download incomplete (${fmt(size)} of ${fmt(spec.sizeBytes)}); retry to resume`,
+    );
+  }
+  guard.assertHeld();
+  fs.renameSync(part, dest);
+  jobProgress(db, job.id, job.lease_token, 1, `${spec.label}: installed (${fmt(size)})`);
+  // Alignments that failed only because this model was missing can go again.
+  const waiting = db
+    .prepare(`SELECT id FROM jobs WHERE type = 'align' AND state = 'failed' AND error LIKE ?`)
+    .all(`model-missing:%:${spec.id}|%`) as { id: string }[];
+  for (const w of waiting) retryJob(db, w.id);
+  if (waiting.length)
+    ctx.log.info(`Re-queued ${waiting.length} alignment(s) waiting for ${spec.id}`);
+}
 
 export async function runScan(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {
   const { db, config } = ctx;
@@ -699,7 +799,67 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     realResolveWithin(String(audio.root_dir), String(t.rel_path)),
   );
   const trackStartMs = trackRows.map((t) => Number(t.start_ms_absolute));
-  const language = String(ebook.language ?? settings.defaultLanguage).slice(0, 2);
+
+  // Narration language: user override on the pair → ebook metadata → audio
+  // tags → whisper's own detector on a short clip (needs any multilingual
+  // model installed) → the instance default. The chosen language selects
+  // the speech model (Hebrew → ivrit.ai fine-tune, etc.).
+  let language = languageCode(pair.language as string | null);
+  let languageSource = 'override';
+  if (!language) {
+    language = languageCode(ebook.language as string | null);
+    languageSource = 'ebook-metadata';
+  }
+  if (!language) {
+    language = languageCode(audio.language as string | null);
+    languageSource = 'audio-tags';
+  }
+  if (!language && settings.transcribeProvider === 'whisper-cli' && trackPaths[0]) {
+    const bin = settings.whisperBin || config.whisperBin;
+    const detector = anyMultilingualModel(config.modelsDir);
+    if (bin && detector) {
+      jobProgress(db, job.id, job.lease_token, 0.12, 'Detecting narration language');
+      const det = await detectLanguage(
+        bin,
+        detector.path,
+        trackPaths[0],
+        path.join(config.cacheDir, 'whisper-work'),
+      );
+      guard.assertHeld();
+      if (det && det.probability >= 0.5) {
+        language = languageCode(det.language);
+        languageSource = `detected (${Math.round(det.probability * 100)}%)`;
+      }
+    }
+  }
+  if (!language) {
+    language = languageCode(settings.defaultLanguage) ?? 'en';
+    languageSource = 'default';
+  }
+  guard.assertHeld();
+  db.prepare('UPDATE pairs SET detected_language = ? WHERE id = ?').run(language, pairId);
+  jobProgress(
+    db,
+    job.id,
+    job.lease_token,
+    0.15,
+    `Language: ${languageByCode(language)?.label ?? language} (${languageSource})`,
+  );
+
+  // Speech model for that language — a missing one fails the job with a
+  // structured error the pairing page turns into a "download it" prompt.
+  let whisperModel = settings.whisperModel || config.whisperModel;
+  if (settings.transcribeProvider === 'whisper-cli') {
+    try {
+      const chosen = resolveModelForLanguage(config.modelsDir, language, settings.languageModels);
+      whisperModel = chosen.path;
+    } catch (err) {
+      if (err instanceof ModelMissingError && !(whisperModel && fs.existsSync(whisperModel))) {
+        throw err;
+      }
+      // A custom VX_WHISPER_MODEL path outside the catalog still works.
+    }
+  }
 
   // Transcript cache: keyed by source content hash + provider + language.
   const sourceHash = String(audio.content_hash ?? sha256hex(trackPaths.join('|')));
@@ -723,7 +883,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
       language,
       workDir: path.join(config.cacheDir, 'whisper-work'),
       whisperBin: settings.whisperBin || config.whisperBin,
-      whisperModel: settings.whisperModel || config.whisperModel,
+      whisperModel,
       checkpoint,
       onCheckpoint: (cp) => jobCheckpoint(db, job.id, job.lease_token, cp),
     });

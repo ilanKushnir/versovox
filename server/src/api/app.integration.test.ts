@@ -511,6 +511,71 @@ describe('Versovox API', () => {
     expect(Math.abs(back.to!.bookMs! - originalBookMs)).toBeLessThan(20000);
   });
 
+  it('alignment without an installed speech model fails with a structured, actionable error', async () => {
+    const pairsRes = await authed({ url: '/api/pairs' });
+    const pair = (pairsRes.json() as { pairs: { id: string; status: string }[] }).pairs.find(
+      (p) => p.status === 'auto' || p.status === 'confirmed',
+    )!;
+    expect(pair).toBeDefined();
+    // The test env pins the provider to 'fixture'; lift the pin for this case.
+    const pinned = ctx.config.envPinned;
+    ctx.config.envPinned = pinned.filter((k) => k !== 'transcribeProvider');
+    ctx.config.transcribeProvider = 'whisper-cli';
+    ctx.config.whisperBin = '/usr/bin/true';
+    try {
+      const put = await authed({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { transcribeProvider: 'whisper-cli' },
+      });
+      expect(put.statusCode).toBe(200);
+      // Narration language override drives the model choice (Hebrew → ivrit.ai).
+      const lang = await authed({
+        method: 'POST',
+        url: `/api/pairs/${pair.id}/language`,
+        payload: { language: 'he' },
+      });
+      expect(lang.json()).toMatchObject({ pair: { language: { override: 'he' } } });
+      const bad = await authed({
+        method: 'POST',
+        url: `/api/pairs/${pair.id}/language`,
+        payload: { language: 'xx' },
+      });
+      expect(bad.statusCode).toBe(400);
+
+      const align = await authed({ method: 'POST', url: `/api/pairs/${pair.id}/align` });
+      expect(align.statusCode).toBe(200);
+      await drainJobs();
+      const after = await authed({ url: `/api/pairs/${pair.id}` });
+      const dto = (
+        after.json() as { pair: { lastAlignJob: { state: string; modelMissing: unknown } } }
+      ).pair;
+      expect(dto.lastAlignJob.state).toBe('failed');
+      expect(dto.lastAlignJob.modelMissing).toMatchObject({
+        language: 'he',
+        modelId: 'ivrit-large-v3-turbo',
+      });
+
+      // Catalog endpoint reports the gap; a fake install re-queues the alignment.
+      const models = await authed({ url: '/api/models' });
+      const list = (models.json() as { models: { id: string; installed: boolean }[] }).models;
+      expect(list.find((m) => m.id === 'ivrit-large-v3-turbo')?.installed).toBe(false);
+    } finally {
+      ctx.config.envPinned = pinned;
+      ctx.config.transcribeProvider = 'fixture';
+      await authed({
+        method: 'POST',
+        url: `/api/pairs/${pair.id}/language`,
+        payload: { language: null },
+      });
+      await authed({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { transcribeProvider: 'fixture' },
+      });
+    }
+  });
+
   it('progress round-trip with reconciliation over the API', async () => {
     const mk = (over: Record<string, unknown>) => ({
       eventId: crypto.randomUUID(),

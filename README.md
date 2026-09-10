@@ -56,11 +56,12 @@ loss-resistant progress.)
 - **Libraries refresh themselves**: periodic rescans (default hourly) pick
   up titles added through Calibre-Web Automated, Audiobookshelf, or plain
   folders; pairing waits for indexing to finish so nothing is missed.
-- **No cloud required**: the image bundles whisper.cpp; run
-  `versovox-model large-v3-turbo` once to fetch a model into `/models` and
-  audiobooks are transcribed locally (audio transcoded automatically, model
-  per language of your choice). Sidecar word-timestamp transcripts work
-  too — documented honestly in docs/alignment.md.
+- **No cloud required**: the image bundles whisper.cpp and a per-language
+  speech-model catalog — one click in Settings downloads the best model for
+  each of ten languages (Hebrew uses the ivrit.ai fine-tune), narration
+  language is detected or set per pair, and a missing model turns into a
+  download prompt instead of a silent failure. Sidecar word-timestamp
+  transcripts work too — documented honestly in docs/alignment.md.
 - **Plays well with your reverse proxy**: optional header-based single
   sign-on from Authentik / Authelia / oauth2-proxy, trusted only from the
   proxy's own address (docs/security.md).
