@@ -11,7 +11,7 @@ let tmp: string;
 const silentLog = { info: () => {}, warn: () => {} };
 
 beforeAll(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-auth-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-auth-'));
 });
 
 afterAll(() => {

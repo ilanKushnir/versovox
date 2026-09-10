@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { type BookSummary } from '@tandemleaf/shared';
+import { type BookSummary } from '@versovox/shared';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';
 import { handoffStatus, latestAlignment, isSwitchable } from '../../alignment/service.js';

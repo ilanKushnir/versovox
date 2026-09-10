@@ -6,7 +6,7 @@ import { mergeWhisperTokens, WhisperCliProvider } from './providers.js';
 
 /**
  * Whisper output-location safety: source libraries are read-only mounts, so
- * all intermediate output must land in the TandemLeaf work dir and be
+ * all intermediate output must land in the Versovox work dir and be
  * cleaned up afterwards. Uses a deterministic fake whisper binary.
  */
 
@@ -28,7 +28,7 @@ const FAKE_JSON = {
 };
 
 beforeAll(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-whisper-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-whisper-'));
   sourceDir = path.join(tmp, 'library');
   workDir = path.join(tmp, 'cache', 'whisper-work');
   fs.mkdirSync(sourceDir, { recursive: true });
@@ -72,7 +72,7 @@ describe('WhisperCliProvider', () => {
     });
     expect(result.words.map((w) => w.w)).toEqual(['hello', 'world']);
     expect(result.words[0]!.s).toBe(0);
-    // Source library untouched (still exactly one file, no *.tl-whisper).
+    // Source library untouched (still exactly one file, no *.vx-whisper).
     expect(fs.readdirSync(sourceDir)).toEqual(['track0.mp3']);
     // Temp output cleaned from the work dir.
     expect(fs.readdirSync(workDir)).toEqual([]);

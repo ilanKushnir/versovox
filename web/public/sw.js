@@ -1,4 +1,4 @@
-/* TandemLeaf service worker: app-shell offline startup + explicit per-title
+/* Versovox service worker: app-shell offline startup + explicit per-title
    offline packages.
 
    Strategy (honest about what is and is not offline):
@@ -17,16 +17,16 @@ importScripts('/sw-range.js');
 importScripts('/sw-auth.js');
 
 /* Both placeholders are replaced by the build (scripts inside web/vite.config.ts). */
-const BUILD = /*__TL_BUILD__*/ 'dev';
-const PRECACHE = /*__TL_PRECACHE__*/ [
+const BUILD = /*__VX_BUILD__*/ 'dev';
+const PRECACHE = /*__VX_PRECACHE__*/ [
   '/',
   '/manifest.webmanifest',
   '/icons/favicon.svg',
   '/fonts/literata.css',
 ];
 
-const SHELL_CACHE = `tl-shell-${BUILD}`;
-const OFFLINE_CACHE = 'tl-offline-v1'; // written by the app's download manager
+const SHELL_CACHE = `vx-shell-${BUILD}`;
+const OFFLINE_CACHE = 'vx-offline-v1'; // written by the app's download manager
 
 /* Revocation gate for cache-first book content: while online, the session
    is revalidated against the server (at most once per TTL) before cached
@@ -35,12 +35,12 @@ const OFFLINE_CACHE = 'tl-offline-v1'; // written by the app's download manager
    so deliberate airplane-mode reading continues to work (a device that is
    already offline learns about revocation only on reconnect — documented
    in docs/security.md). */
-const authGate = self.tlAuth.createAuthGate({
+const authGate = self.vxAuth.createAuthGate({
   fetchFn: () =>
     fetch('/api/auth/me', {
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: { 'x-tl-csrf': '1' },
+      headers: { 'x-vx-csrf': '1' },
     }),
   onRevoked: async () => {
     try {
@@ -49,7 +49,7 @@ const authGate = self.tlAuth.createAuthGate({
       /* best effort */
     }
     const clients = await self.clients.matchAll({ includeUncontrolled: true });
-    for (const c of clients) c.postMessage({ type: 'tl-unauthorized' });
+    for (const c of clients) c.postMessage({ type: 'vx-unauthorized' });
   },
 });
 
@@ -182,7 +182,7 @@ self.addEventListener('fetch', (event) => {
  */
 async function serveTrack(req, url) {
   const cache = await caches.open(OFFLINE_CACHE);
-  const metaRes = await cache.match(self.tlRange.metaKey(url.pathname));
+  const metaRes = await cache.match(self.vxRange.metaKey(url.pathname));
   if (!metaRes) return fetch(req);
   if (!(await authGate.allowCachedPrivate())) return fetch(req);
   const meta = await metaRes.json(); // { size, chunkSize, contentType }
@@ -192,7 +192,7 @@ async function serveTrack(req, url) {
   let end = meta.size - 1;
   let status = 200;
   if (rangeHeader) {
-    const parsed = self.tlRange.parseRangeHeader(rangeHeader, meta.size);
+    const parsed = self.vxRange.parseRangeHeader(rangeHeader, meta.size);
     if (parsed === null) {
       return new Response(null, {
         status: 416,
@@ -206,7 +206,7 @@ async function serveTrack(req, url) {
     }
   }
 
-  const span = self.tlRange.chunkSpan(start, end, meta.chunkSize);
+  const span = self.vxRange.chunkSpan(start, end, meta.chunkSize);
   let idx = span.first;
   const pathname = url.pathname;
   const chunkSize = meta.chunkSize;
@@ -216,13 +216,13 @@ async function serveTrack(req, url) {
         controller.close();
         return;
       }
-      const chunkRes = await cache.match(self.tlRange.chunkKey(pathname, idx));
+      const chunkRes = await cache.match(self.vxRange.chunkKey(pathname, idx));
       if (!chunkRes) {
         controller.error(new Error(`missing offline chunk ${idx} for ${pathname}`));
         return;
       }
       const buf = new Uint8Array(await chunkRes.arrayBuffer());
-      const bounds = self.tlRange.sliceWithin(idx, chunkSize, buf.length, start, end);
+      const bounds = self.vxRange.sliceWithin(idx, chunkSize, buf.length, start, end);
       controller.enqueue(buf.subarray(bounds.from, bounds.to));
       idx += 1;
     },
@@ -240,10 +240,10 @@ async function serveTrack(req, url) {
 function offlineFallback() {
   return new Response(
     '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">' +
-      '<title>TandemLeaf — offline</title>' +
+      '<title>Versovox — offline</title>' +
       '<body style="font-family:system-ui;background:#FAF6EF;color:#1F2620;display:grid;place-items:center;min-height:100dvh;margin:0">' +
       '<div style="text-align:center;padding:24px"><h1 style="font-size:20px">You are offline</h1>' +
-      '<p>TandemLeaf could not load. Reconnect once, and the app will work offline afterwards.</p></div>',
+      '<p>Versovox could not load. Reconnect once, and the app will work offline afterwards.</p></div>',
     { headers: { 'content-type': 'text/html; charset=utf-8' } },
   );
 }

@@ -1,4 +1,4 @@
-import { type AlignmentGap, type AlignmentSegment } from '@tandemleaf/shared';
+import { type AlignmentGap, type AlignmentSegment } from '@versovox/shared';
 import { stringSimilarity } from '../util/text.js';
 
 /**

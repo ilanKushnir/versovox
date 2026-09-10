@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rasterizes the TandemLeaf mark into the PWA/App icon set using the
+ * Rasterizes the Versovox mark into the PWA/App icon set using the
  * Playwright chromium already present on dev/CI machines. Outputs are
  * committed, so end users never need this script.
  *

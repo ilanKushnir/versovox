@@ -1,6 +1,6 @@
 import { api } from '../api/client';
 import { idbAll, idbClear, idbDelete, idbGet, idbPut, STORES } from '../progress/idb';
-import { type BookSummary } from '@tandemleaf/shared';
+import { type BookSummary } from '@versovox/shared';
 
 /**
  * Explicit per-title offline packages. Downloads go into a dedicated Cache
@@ -15,18 +15,18 @@ import { type BookSummary } from '@tandemleaf/shared';
  * with correct 206/Content-Range behavior.
  */
 
-export const OFFLINE_CACHE = 'tl-offline-v1';
+export const OFFLINE_CACHE = 'vx-offline-v1';
 /** Per-chunk audio buffer bound (max bytes in memory at once per download). */
 export const AUDIO_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /* Cache-key conventions — MUST stay in sync with web/public/sw-range.js
    (asserted by web/src/offline/downloads.test.ts). */
 export const chunkKey = (url: string, i: number) =>
-  `${url}${url.includes('?') ? '&' : '?'}tlchunk=${i}`;
-export const metaKey = (url: string) => `${url}${url.includes('?') ? '&' : '?'}tlmeta=1`;
+  `${url}${url.includes('?') ? '&' : '?'}vxchunk=${i}`;
+export const metaKey = (url: string) => `${url}${url.includes('?') ? '&' : '?'}vxmeta=1`;
 /** In-progress marker recording which source version partial chunks belong to
     (client-only; the service worker never serves from it). */
-export const partialMetaKey = (url: string) => `${url}${url.includes('?') ? '&' : '?'}tlpartial=1`;
+export const partialMetaKey = (url: string) => `${url}${url.includes('?') ? '&' : '?'}vxpartial=1`;
 export const chunkCount = (size: number, chunk: number) =>
   size === 0 ? 0 : Math.ceil(size / chunk);
 
@@ -101,7 +101,7 @@ async function sha256Hex(buf: ArrayBuffer): Promise<string | null> {
 function fetchOpts(signal: AbortSignal, range?: string): RequestInit {
   return {
     credentials: 'same-origin',
-    headers: { 'x-tl-csrf': '1', ...(range ? { range } : {}) },
+    headers: { 'x-vx-csrf': '1', ...(range ? { range } : {}) },
     signal,
   };
 }

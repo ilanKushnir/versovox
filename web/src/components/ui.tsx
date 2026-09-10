@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { type BookSummary } from '@tandemleaf/shared';
+import { type BookSummary } from '@versovox/shared';
 import { IconClose } from './icons';
 
 /* ----------------------------------------------------------------- Sheet */

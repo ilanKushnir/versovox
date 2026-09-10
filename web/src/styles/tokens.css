@@ -1,31 +1,31 @@
-/* TandemLeaf design tokens — see .tastemaker/style-lock.md
+/* Versovox design tokens — see .tastemaker/style-lock.md
    Light: leaf primary on warm paper. Dark: light-leaf accent is the
    interactive color; primary green is fill-only with white labels. */
 
 :root {
   /* palette — light */
-  --tl-text: #1f2620;
-  --tl-text-soft: #55604f;
-  --tl-bg: #faf6ef;
-  --tl-surface: #f1ebe1;
-  --tl-surface-raised: #ffffff;
-  --tl-primary: #2f5d48;
-  --tl-primary-hover: #27503d;
-  --tl-on-primary: #ffffff;
-  --tl-accent: #8c6a40; /* bronze — audio */
-  --tl-border: #e2dacc;
-  --tl-border-strong: #c9bfae;
-  --tl-interactive: var(--tl-primary);
-  --tl-danger: #a03d2e;
-  --tl-focus: #2f5d48;
-  --tl-shadow-1: 0 1px 2px rgb(31 38 32 / 0.06), 0 2px 8px rgb(31 38 32 / 0.06);
-  --tl-shadow-2: 0 2px 6px rgb(31 38 32 / 0.08), 0 12px 32px rgb(31 38 32 / 0.12);
-  --tl-scrim: rgb(31 38 32 / 0.45);
+  --vx-text: #1f2620;
+  --vx-text-soft: #55604f;
+  --vx-bg: #faf6ef;
+  --vx-surface: #f1ebe1;
+  --vx-surface-raised: #ffffff;
+  --vx-primary: #2f5d48;
+  --vx-primary-hover: #27503d;
+  --vx-on-primary: #ffffff;
+  --vx-accent: #8c6a40; /* bronze — audio */
+  --vx-border: #e2dacc;
+  --vx-border-strong: #c9bfae;
+  --vx-interactive: var(--vx-primary);
+  --vx-danger: #a03d2e;
+  --vx-focus: #2f5d48;
+  --vx-shadow-1: 0 1px 2px rgb(31 38 32 / 0.06), 0 2px 8px rgb(31 38 32 / 0.06);
+  --vx-shadow-2: 0 2px 6px rgb(31 38 32 / 0.08), 0 12px 32px rgb(31 38 32 / 0.12);
+  --vx-scrim: rgb(31 38 32 / 0.45);
 
   /* type */
-  --tl-font-ui:
+  --vx-font-ui:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --tl-font-reading: 'Literata', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --vx-font-reading: 'Literata', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 
   /* spacing 4px scale */
   --sp-1: 4px;
@@ -41,59 +41,59 @@
   --radius-control: 8px;
   --radius-pill: 999px;
 
-  --tl-safe-top: env(safe-area-inset-top, 0px);
-  --tl-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --tl-safe-left: env(safe-area-inset-left, 0px);
-  --tl-safe-right: env(safe-area-inset-right, 0px);
+  --vx-safe-top: env(safe-area-inset-top, 0px);
+  --vx-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --vx-safe-left: env(safe-area-inset-left, 0px);
+  --vx-safe-right: env(safe-area-inset-right, 0px);
 
-  --tl-duration-quick: 150ms;
-  --tl-duration-base: 220ms;
-  --tl-duration-slow: 260ms;
-  --tl-ease: cubic-bezier(0.25, 0.7, 0.35, 1);
+  --vx-duration-quick: 150ms;
+  --vx-duration-base: 220ms;
+  --vx-duration-slow: 260ms;
+  --vx-ease: cubic-bezier(0.25, 0.7, 0.35, 1);
 
   color-scheme: light;
 }
 
 [data-app-theme='dark'] {
-  --tl-text: #ede7da;
-  --tl-text-soft: #a5ab9c;
-  --tl-bg: #101412;
-  --tl-surface: #1a201b;
-  --tl-surface-raised: #222925;
-  --tl-primary: #3e7258;
-  --tl-primary-hover: #488365;
-  --tl-on-primary: #ffffff;
-  --tl-accent: #c9a97d;
-  --tl-border: #2a322c;
-  --tl-border-strong: #43504a;
-  --tl-interactive: #93c7aa;
-  --tl-danger: #d98a76;
-  --tl-focus: #93c7aa;
-  --tl-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
-  --tl-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 12px 32px rgb(0 0 0 / 0.5);
-  --tl-scrim: rgb(0 0 0 / 0.6);
+  --vx-text: #ede7da;
+  --vx-text-soft: #a5ab9c;
+  --vx-bg: #101412;
+  --vx-surface: #1a201b;
+  --vx-surface-raised: #222925;
+  --vx-primary: #3e7258;
+  --vx-primary-hover: #488365;
+  --vx-on-primary: #ffffff;
+  --vx-accent: #c9a97d;
+  --vx-border: #2a322c;
+  --vx-border-strong: #43504a;
+  --vx-interactive: #93c7aa;
+  --vx-danger: #d98a76;
+  --vx-focus: #93c7aa;
+  --vx-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
+  --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 12px 32px rgb(0 0 0 / 0.5);
+  --vx-scrim: rgb(0 0 0 / 0.6);
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-app-theme='light']) {
-    --tl-text: #ede7da;
-    --tl-text-soft: #a5ab9c;
-    --tl-bg: #101412;
-    --tl-surface: #1a201b;
-    --tl-surface-raised: #222925;
-    --tl-primary: #3e7258;
-    --tl-primary-hover: #488365;
-    --tl-on-primary: #ffffff;
-    --tl-accent: #c9a97d;
-    --tl-border: #2a322c;
-    --tl-border-strong: #43504a;
-    --tl-interactive: #93c7aa;
-    --tl-danger: #d98a76;
-    --tl-focus: #93c7aa;
-    --tl-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
-    --tl-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 12px 32px rgb(0 0 0 / 0.5);
-    --tl-scrim: rgb(0 0 0 / 0.6);
+    --vx-text: #ede7da;
+    --vx-text-soft: #a5ab9c;
+    --vx-bg: #101412;
+    --vx-surface: #1a201b;
+    --vx-surface-raised: #222925;
+    --vx-primary: #3e7258;
+    --vx-primary-hover: #488365;
+    --vx-on-primary: #ffffff;
+    --vx-accent: #c9a97d;
+    --vx-border: #2a322c;
+    --vx-border-strong: #43504a;
+    --vx-interactive: #93c7aa;
+    --vx-danger: #d98a76;
+    --vx-focus: #93c7aa;
+    --vx-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
+    --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 12px 32px rgb(0 0 0 / 0.5);
+    --vx-scrim: rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
 }

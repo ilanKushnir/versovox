@@ -30,7 +30,7 @@ vi.mock('../api/client', () => ({
 }));
 
 import { persistActiveLocatorAndFlush, recordCheckpoint, setActiveLocatorProvider } from './engine';
-import { type ProgressEvent } from '@tandemleaf/shared';
+import { type ProgressEvent } from '@versovox/shared';
 
 beforeEach(() => {
   stores.clear();

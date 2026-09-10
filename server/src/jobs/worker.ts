@@ -11,7 +11,7 @@ import { JOB_HANDLERS } from './handlers.js';
 
 /**
  * Bounded-concurrency worker loop over the SQLite job queue. Runs inline in
- * the web process (TL_INLINE_WORKER=1, default) or as a dedicated container
+ * the web process (VX_INLINE_WORKER=1, default) or as a dedicated container
  * (compose `worker` service). Both modes share the queue safely because
  * claims are atomic lease grants.
  *

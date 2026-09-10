@@ -1,5 +1,5 @@
 {
-  "name": "tandemleaf",
+  "name": "versovox",
   "version": "0.1.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
@@ -14,14 +14,14 @@
     "web"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @tandemleaf/server",
-    "dev:web": "npm run dev --workspace @tandemleaf/web",
-    "build": "npm run build --workspace @tandemleaf/shared && npm run build --workspace @tandemleaf/server && npm run build --workspace @tandemleaf/web",
+    "dev": "npm run dev --workspace @versovox/server",
+    "dev:web": "npm run dev --workspace @versovox/web",
+    "build": "npm run build --workspace @versovox/shared && npm run build --workspace @versovox/server && npm run build --workspace @versovox/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "npm run build --workspace @tandemleaf/shared && npm run test --workspaces --if-present",
+    "test": "npm run build --workspace @versovox/shared && npm run test --workspaces --if-present",
     "fixtures": "node scripts/generate-fixtures.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "qa": "node scripts/qa-browser.mjs"

@@ -28,7 +28,7 @@ declare module 'fastify' {
  */
 export function decodedPathname(url: string): string | null {
   try {
-    return decodeURIComponent(new URL(url, 'http://tandemleaf.invalid').pathname);
+    return decodeURIComponent(new URL(url, 'http://versovox.invalid').pathname);
   } catch {
     return null;
   }
@@ -62,7 +62,7 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
     bodyLimit: 2 * 1024 * 1024,
     // Default false: forwarded headers are ignored so clients cannot spoof
     // their IP (rate-limit keys). Operators behind a reverse proxy opt in
-    // with TL_TRUST_PROXY (see config.ts).
+    // with VX_TRUST_PROXY (see config.ts).
     trustProxy: ctx.config.trustProxy,
   });
 
@@ -147,7 +147,7 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
       return reply
         .code(503)
         .type('text/plain')
-        .send('TandemLeaf web assets are not built. Run: npm run build');
+        .send('Versovox web assets are not built. Run: npm run build');
     });
   }
 

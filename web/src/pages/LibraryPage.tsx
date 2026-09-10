@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { type BookSummary } from '@tandemleaf/shared';
+import { type BookSummary } from '@versovox/shared';
 import { api } from '../api/client';
 import { Cover, EmptyState, useToast } from '../components/ui';
 import { useSession } from '../state/session';
@@ -216,7 +216,7 @@ export function LibraryPage() {
           [
             ['none', 'Everything', null],
             ['in-progress', 'In progress', <IconPlay size={13} key="p" />],
-            ['paired', 'Tandem pairs', <IconLink size={13} key="l" />],
+            ['paired', 'Paired editions', <IconLink size={13} key="l" />],
             ['downloaded', 'Downloaded', <IconDownload size={13} key="d" />],
           ] as [Shelf, string, React.ReactNode][]
         ).map(([value, label, icon]) => (
@@ -260,8 +260,8 @@ export function LibraryPage() {
           </EmptyState>
         ) : (
           <EmptyState icon={<IconLibrary size={44} />} title="Your library is empty">
-            TandemLeaf reads existing ebook and audiobook folders without changing them. Mount your
-            libraries (TL_EBOOK_DIRS / TL_AUDIOBOOK_DIRS) and run a scan.
+            Versovox reads existing ebook and audiobook folders without changing them. Mount your
+            libraries (VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS) and run a scan.
           </EmptyState>
         )
       ) : (
@@ -272,7 +272,7 @@ export function LibraryPage() {
               : shelf === 'in-progress'
                 ? 'In progress'
                 : shelf === 'paired'
-                  ? 'Tandem pairs'
+                  ? 'Paired editions'
                   : kind === 'ebook'
                     ? 'Ebooks'
                     : kind === 'audio'
@@ -412,10 +412,10 @@ function BookCard({ book, offline }: { book: BookSummary; offline: boolean }) {
           {pair && (
             <span
               className={`badge badge--paired ${pair.switchable ? 'badge--sync' : ''}`}
-              title={pair.switchable ? 'Tandem — exact switching ready' : 'Paired edition'}
+              title={pair.switchable ? 'Synced — exact switching ready' : 'Paired edition'}
             >
               <IconLink size={11} />
-              {pair.switchable ? 'TANDEM' : 'PAIR'}
+              {pair.switchable ? 'SYNC' : 'PAIR'}
             </span>
           )}
         </span>

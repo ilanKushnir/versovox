@@ -9,12 +9,12 @@ import { type TranscriptWord } from '../alignment/align.js';
 const execFileP = promisify(execFile);
 
 /**
- * Transcription adapter seam. TandemLeaf does NOT bundle a speech model and
+ * Transcription adapter seam. Versovox does NOT bundle a speech model and
  * requires no cloud API. Providers:
  *
  *  - "none":     transcription disabled (default). Pairs can still be linked
  *                by metadata; sentence-exact switching stays unavailable.
- *  - "fixture":  reads a sidecar `*.tandemleaf-transcript.json` next to the
+ *  - "fixture":  reads a sidecar `*.versovox-transcript.json` next to the
  *                audio (used by the bundled sample library and by anyone who
  *                produces word timestamps out of band). Deterministic.
  *  - "whisper-cli" (EXPERIMENTAL): shells out to a user-installed
@@ -43,7 +43,7 @@ export interface TranscriptionRequest {
   trackStartMs: number[];
   language: string;
   /**
-   * TandemLeaf-owned writable directory for intermediate transcription
+   * Versovox-owned writable directory for intermediate transcription
    * output. Source libraries are read-only mounts and must NEVER be written
    * to; all whisper output prefixes live in a private temp dir under here.
    */
@@ -73,9 +73,9 @@ export interface TranscriptionProvider {
 export function findSidecarTranscript(trackPaths: string[]): string | null {
   if (trackPaths.length === 0) return null;
   const first = trackPaths[0]!;
-  const dirSidecar = path.join(path.dirname(first), 'transcript.tandemleaf.json');
+  const dirSidecar = path.join(path.dirname(first), 'transcript.versovox.json');
   if (fs.existsSync(dirSidecar)) return dirSidecar;
-  const fileSidecar = first.replace(/\.[^.]+$/, '') + '.tandemleaf-transcript.json';
+  const fileSidecar = first.replace(/\.[^.]+$/, '') + '.versovox-transcript.json';
   if (fs.existsSync(fileSidecar)) return fileSidecar;
   return null;
 }
@@ -87,7 +87,7 @@ export class FixtureProvider implements TranscriptionProvider {
     const sidecar = findSidecarTranscript(req.trackPaths);
     if (!sidecar) {
       throw new Error(
-        'No sidecar transcript found (expected transcript.tandemleaf.json next to the audio). ' +
+        'No sidecar transcript found (expected transcript.versovox.json next to the audio). ' +
           'The "fixture" provider only reads pre-computed word timestamps.',
       );
     }
@@ -168,7 +168,7 @@ export class WhisperCliProvider implements TranscriptionProvider {
   readonly name = 'whisper-cli';
 
   async transcribe(req: TranscriptionRequest): Promise<TranscriptionResult> {
-    if (!req.whisperBin) throw new Error('TL_WHISPER_BIN is not configured');
+    if (!req.whisperBin) throw new Error('VX_WHISPER_BIN is not configured');
     if (!fs.existsSync(req.whisperBin)) {
       throw new Error(`Whisper binary not found: ${req.whisperBin}`);
     }
@@ -177,7 +177,7 @@ export class WhisperCliProvider implements TranscriptionProvider {
     }
     const words: TranscriptWord[] = req.checkpoint?.words ? [...req.checkpoint.words] : [];
     const startTrack = req.checkpoint?.nextTrack ?? 0;
-    // All whisper output lives in a private temp dir under the TandemLeaf
+    // All whisper output lives in a private temp dir under the Versovox
     // cache; source libraries are read-only and are never written to.
     fs.mkdirSync(req.workDir, { recursive: true });
     const tmpDir = fs.mkdtempSync(path.join(req.workDir, 'whisper-'));

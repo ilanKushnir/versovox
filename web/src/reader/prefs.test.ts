@@ -27,14 +27,14 @@ describe('reader prefs', () => {
     expect(loadPrefs().theme).toBe('night');
     expect(loadPrefs().size).toBe(22);
     // A pref added in a future version falls back to its default.
-    store.set('tl-reader-prefs', JSON.stringify({ theme: 'sepia' }));
+    store.set('vx-reader-prefs', JSON.stringify({ theme: 'sepia' }));
     const p = loadPrefs();
     expect(p.theme).toBe('sepia');
     expect(p.lineHeight).toBe(DEFAULT_PREFS.lineHeight);
   });
 
   it('survives corrupt storage', () => {
-    store.set('tl-reader-prefs', '{not json');
+    store.set('vx-reader-prefs', '{not json');
     expect(loadPrefs()).toEqual(DEFAULT_PREFS);
   });
 });
@@ -84,9 +84,9 @@ describe('page layout', () => {
   });
 
   it('migrates the retired serif font choice', () => {
-    store.set('tl-reader-prefs', JSON.stringify({ font: 'serif' }));
+    store.set('vx-reader-prefs', JSON.stringify({ font: 'serif' }));
     expect(loadPrefs().font).toBe('iowan');
-    store.set('tl-reader-prefs', JSON.stringify({ font: 'comic' }));
+    store.set('vx-reader-prefs', JSON.stringify({ font: 'comic' }));
     expect(loadPrefs().font).toBe(DEFAULT_PREFS.font);
   });
 });

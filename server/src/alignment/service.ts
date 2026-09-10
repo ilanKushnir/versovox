@@ -11,7 +11,7 @@ import {
   type HandoffStatus,
   type Locator,
   type SwitchResolution,
-} from '@tandemleaf/shared';
+} from '@versovox/shared';
 import { type DB, nowIso } from '../db/index.js';
 import { newId } from '../util/ids.js';
 import { type AlignerResult } from './align.js';

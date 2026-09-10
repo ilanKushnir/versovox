@@ -57,9 +57,9 @@ function Shell() {
     <div className="app-shell">
       {!immersive && (
         <header className="app-header">
-          <Link to="/" className="brand" aria-label="TandemLeaf home">
-            <LeafMark size={26} style={{ color: 'var(--tl-primary)' }} />
-            <span className="brand__name">TandemLeaf</span>
+          <Link to="/" className="brand" aria-label="Versovox home">
+            <LeafMark size={26} style={{ color: 'var(--vx-primary)' }} />
+            <span className="brand__name">Versovox</span>
           </Link>
           <nav className="app-nav" aria-label="Primary">
             {nav}

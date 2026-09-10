@@ -1,4 +1,4 @@
-/** TandemLeaf icon set: one consistent 24px / 1.75-stroke hand-drawn family. */
+/** Versovox icon set: one consistent 24px / 1.75-stroke hand-drawn family. */
 
 import { type SVGProps } from 'react';
 
@@ -27,7 +27,7 @@ export const LeafMark = ({ size = 24, ...rest }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" {...rest}>
     <path d="M12 21C12 13 7 9.5 3 9.5 3 15.5 6.5 20 12 21Z" fill="currentColor" opacity="0.55" />
     <path d="M12 21C12 11 16 5.5 21 3c.8 7-2 14.5-9 18Z" fill="currentColor" />
-    <path d="M12 21c0-6 2.5-12 7-16" stroke="var(--tl-bg, #fff)" strokeWidth="1" opacity="0.5" />
+    <path d="M12 21c0-6 2.5-12 7-16" stroke="var(--vx-bg, #fff)" strokeWidth="1" opacity="0.5" />
   </svg>
 );
 

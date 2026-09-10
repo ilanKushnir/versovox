@@ -11,7 +11,7 @@ import { type AppContext } from '../context.js';
 import { claimNextJob, finishJob, makeLeaseGuard } from '../jobs/queue.js';
 import { JOB_HANDLERS } from '../jobs/handlers.js';
 import { ensureSetupToken } from '../auth/setupToken.js';
-import { type EbookLocator, type AudioLocator } from '@tandemleaf/shared';
+import { type EbookLocator, type AudioLocator } from '@versovox/shared';
 
 const SETUP_TOKEN = 'integration-setup-token';
 
@@ -58,7 +58,7 @@ function authed(opts: {
     payload: opts.payload as never,
     headers: {
       cookie,
-      'x-tl-csrf': '1',
+      'x-vx-csrf': '1',
       ...(opts.payload !== undefined ? { 'content-type': 'application/json' } : {}),
     },
   });
@@ -66,9 +66,9 @@ function authed(opts: {
 
 beforeAll(async () => {
   expect(fs.existsSync(fixtures)).toBe(true);
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-int-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-int-'));
   // Exercise the real env-var path (including settings env-pinning).
-  process.env.TL_TRANSCRIBE_PROVIDER = 'fixture';
+  process.env.VX_TRANSCRIBE_PROVIDER = 'fixture';
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
@@ -95,7 +95,7 @@ afterAll(async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('TandemLeaf API', () => {
+describe('Versovox API', () => {
   let lanternEbookId = '';
   let lanternAudioId = '';
   let pairId = '';
@@ -108,7 +108,7 @@ describe('TandemLeaf API', () => {
     const noToken = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-tl-csrf': '1' },
+      headers: { 'x-vx-csrf': '1' },
       payload: { username: 'astra', password: 'correct-horse-battery-staple' },
     });
     expect(noToken.statusCode).toBe(400);
@@ -117,7 +117,7 @@ describe('TandemLeaf API', () => {
     const wrongToken = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-tl-csrf': '1' },
+      headers: { 'x-vx-csrf': '1' },
       payload: {
         username: 'astra',
         password: 'correct-horse-battery-staple',
@@ -130,7 +130,7 @@ describe('TandemLeaf API', () => {
     const weak = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-tl-csrf': '1' },
+      headers: { 'x-vx-csrf': '1' },
       payload: { username: 'astra', password: 'short', setupToken: SETUP_TOKEN },
     });
     expect(weak.statusCode).toBe(400);
@@ -140,7 +140,7 @@ describe('TandemLeaf API', () => {
       app.inject({
         method: 'POST',
         url: '/api/setup',
-        headers: { 'x-tl-csrf': '1' },
+        headers: { 'x-vx-csrf': '1' },
         payload: {
           username: 'astra',
           password: 'correct-horse-battery-staple',
@@ -150,7 +150,7 @@ describe('TandemLeaf API', () => {
       app.inject({
         method: 'POST',
         url: '/api/setup',
-        headers: { 'x-tl-csrf': '1' },
+        headers: { 'x-vx-csrf': '1' },
         payload: {
           username: 'mallory',
           password: 'mallory-password-123',
@@ -169,7 +169,7 @@ describe('TandemLeaf API', () => {
     const again = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-tl-csrf': '1' },
+      headers: { 'x-vx-csrf': '1' },
       payload: { username: 'x', password: 'y'.repeat(12), setupToken: SETUP_TOKEN },
     });
     expect(again.statusCode).toBe(409);
@@ -187,7 +187,7 @@ describe('TandemLeaf API', () => {
     const badOrigin = await app.inject({
       method: 'POST',
       url: '/api/library/rescan',
-      headers: { cookie, 'x-tl-csrf': '1', origin: 'https://evil.example', host: 'localhost:8383' },
+      headers: { cookie, 'x-vx-csrf': '1', origin: 'https://evil.example', host: 'localhost:8383' },
     });
     expect(badOrigin.statusCode).toBe(403);
   });
@@ -234,14 +234,14 @@ describe('TandemLeaf API', () => {
       await app.inject({
         method: 'POST',
         url: '/api/auth/login',
-        headers: { 'x-tl-csrf': '1' },
+        headers: { 'x-vx-csrf': '1' },
         payload: { username: 'astra', password: 'wrong-password-attempt' },
       });
     }
     const limited = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      headers: { 'x-tl-csrf': '1' },
+      headers: { 'x-vx-csrf': '1' },
       payload: { username: 'astra', password: 'wrong-password-attempt' },
     });
     expect(limited.statusCode).toBe(429);
@@ -254,7 +254,7 @@ describe('TandemLeaf API', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/auth/login',
-        headers: { 'x-tl-csrf': '1', 'x-forwarded-for': `203.0.113.${i}` },
+        headers: { 'x-vx-csrf': '1', 'x-forwarded-for': `203.0.113.${i}` },
         payload: { username: 'astra', password: 'wrong-password-attempt' },
       });
       expect(res.statusCode).toBe(429);
@@ -265,7 +265,7 @@ describe('TandemLeaf API', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      headers: { 'x-tl-csrf': '1' },
+      headers: { 'x-vx-csrf': '1' },
       payload: { username: 'no-such-user-xyz', password: 'whatever-password' },
     });
     expect(res.statusCode).toBe(401);

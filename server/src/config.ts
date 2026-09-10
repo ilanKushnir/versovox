@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 /**
  * Environment configuration. Precedence (documented in docs/configuration.md):
- *   1. Environment variables (TL_*), including TL_*_FILE secret-file variants.
+ *   1. Environment variables (VX_*), including VX_*_FILE secret-file variants.
  *   2. In-app admin settings stored in the database (subset of keys).
  *   3. Built-in defaults.
  * Env always wins so operators can pin values in Compose.
@@ -33,7 +33,7 @@ const envSchema = z.object({
   ebookDirs: z.array(z.string()).default([]),
   audiobookDirs: z.array(z.string()).default([]),
   sessionSecret: z.string().min(16).optional(),
-  /** One-time first-run bootstrap token (TL_SETUP_TOKEN / TL_SETUP_TOKEN_FILE). */
+  /** One-time first-run bootstrap token (VX_SETUP_TOKEN / VX_SETUP_TOKEN_FILE). */
   setupToken: z.string().min(8).optional(),
   /**
    * Proxy trust. Default: no proxy headers are trusted (X-Forwarded-For is
@@ -74,7 +74,7 @@ function bool(v: string | undefined): boolean | undefined {
 }
 
 /**
- * TL_TRUST_PROXY: unset/0/false -> false (forwarded headers ignored);
+ * VX_TRUST_PROXY: unset/0/false -> false (forwarded headers ignored);
  * 1/true -> trust local/private proxies only; otherwise a comma-separated
  * list of proxy addresses/CIDRs. Never trusts arbitrary forwarded headers.
  */
@@ -93,26 +93,26 @@ function parseTrustProxy(v: string | undefined): boolean | string[] | undefined 
 
 export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): EnvConfig {
   const raw: Record<string, unknown> = {
-    port: readEnv('TL_PORT'),
-    host: readEnv('TL_HOST'),
-    dataDir: readEnv('TL_DATA_DIR'),
-    cacheDir: readEnv('TL_CACHE_DIR'),
-    modelsDir: readEnv('TL_MODELS_DIR'),
-    ebookDirs: splitDirs(readEnv('TL_EBOOK_DIRS')),
-    audiobookDirs: splitDirs(readEnv('TL_AUDIOBOOK_DIRS')),
-    sessionSecret: readEnv('TL_SESSION_SECRET'),
-    setupToken: readEnv('TL_SETUP_TOKEN'),
-    trustProxy: parseTrustProxy(readEnv('TL_TRUST_PROXY')),
-    trustHttps: bool(readEnv('TL_TRUST_HTTPS')),
-    sessionDays: readEnv('TL_SESSION_DAYS'),
-    inlineWorker: bool(readEnv('TL_INLINE_WORKER')),
-    jobConcurrency: readEnv('TL_JOB_CONCURRENCY'),
-    transcribeProvider: readEnv('TL_TRANSCRIBE_PROVIDER'),
-    whisperBin: readEnv('TL_WHISPER_BIN'),
-    whisperModel: readEnv('TL_WHISPER_MODEL'),
-    defaultLanguage: readEnv('TL_DEFAULT_LANGUAGE'),
-    scanIntervalMinutes: readEnv('TL_SCAN_INTERVAL_MINUTES'),
-    logLevel: readEnv('TL_LOG_LEVEL'),
+    port: readEnv('VX_PORT'),
+    host: readEnv('VX_HOST'),
+    dataDir: readEnv('VX_DATA_DIR'),
+    cacheDir: readEnv('VX_CACHE_DIR'),
+    modelsDir: readEnv('VX_MODELS_DIR'),
+    ebookDirs: splitDirs(readEnv('VX_EBOOK_DIRS')),
+    audiobookDirs: splitDirs(readEnv('VX_AUDIOBOOK_DIRS')),
+    sessionSecret: readEnv('VX_SESSION_SECRET'),
+    setupToken: readEnv('VX_SETUP_TOKEN'),
+    trustProxy: parseTrustProxy(readEnv('VX_TRUST_PROXY')),
+    trustHttps: bool(readEnv('VX_TRUST_HTTPS')),
+    sessionDays: readEnv('VX_SESSION_DAYS'),
+    inlineWorker: bool(readEnv('VX_INLINE_WORKER')),
+    jobConcurrency: readEnv('VX_JOB_CONCURRENCY'),
+    transcribeProvider: readEnv('VX_TRANSCRIBE_PROVIDER'),
+    whisperBin: readEnv('VX_WHISPER_BIN'),
+    whisperModel: readEnv('VX_WHISPER_MODEL'),
+    defaultLanguage: readEnv('VX_DEFAULT_LANGUAGE'),
+    scanIntervalMinutes: readEnv('VX_SCAN_INTERVAL_MINUTES'),
+    logLevel: readEnv('VX_LOG_LEVEL'),
   };
   const envPinned = Object.entries(raw)
     .filter(([, v]) => v !== undefined)
@@ -131,7 +131,7 @@ export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): En
   if (!sessionSecret) {
     // No default credentials, no hardcoded secret: generate one on first run
     // and persist it in the data dir (0600). Operators should still set
-    // TL_SESSION_SECRET(_FILE) explicitly in production.
+    // VX_SESSION_SECRET(_FILE) explicitly in production.
     const secretPath = path.join(parsed.dataDir, 'session-secret');
     if (fs.existsSync(secretPath)) {
       sessionSecret = fs.readFileSync(secretPath, 'utf8').trim();

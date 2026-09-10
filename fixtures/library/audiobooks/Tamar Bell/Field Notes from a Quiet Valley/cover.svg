@@ -9,5 +9,5 @@
     <path d="M0 60 C 30 10, 90 10, 120 60 C 90 46, 30 46, 0 60 Z" fill="none" stroke="#A9C47F" stroke-width="6"/>
     <line x1="60" y1="18" x2="60" y2="60" stroke="#A9C47F" stroke-width="6"/>
   </g>
-  <text x="80" y="1140" font-size="24" font-family="Georgia, serif" fill="#F1EFE2" opacity="0.7">A TandemLeaf sample edition</text>
+  <text x="80" y="1140" font-size="24" font-family="Georgia, serif" fill="#F1EFE2" opacity="0.7">A Versovox sample edition</text>
 </svg>

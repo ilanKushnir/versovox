@@ -2,7 +2,7 @@
 
 ## Ebook reader (EPUB)
 
-TandemLeaf renders its own **derived index** of each EPUB: the server parses
+Versovox renders its own **derived index** of each EPUB: the server parses
 the container/OPF/spine/TOC, sanitizes every chapter, and extracts a stable
 sentence index (content-derived sentence IDs + character offsets) that
 anchors progress, annotations, search, and alignment. The source file is

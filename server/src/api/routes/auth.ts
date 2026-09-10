@@ -1,5 +1,5 @@
 import { type FastifyInstance } from 'fastify';
-import { loginSchema, setupSchema } from '@tandemleaf/shared';
+import { loginSchema, setupSchema } from '@versovox/shared';
 import { type AppContext } from '../../context.js';
 import { hashPassword, verifyAgainstDummy, verifyPassword } from '../../auth/passwords.js';
 import { createSession, destroySession, LoginThrottle } from '../../auth/sessions.js';
@@ -87,7 +87,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     const body = loginSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid' });
     // Throttle by (account, client IP) AND by client IP alone. req.ip only
-    // reflects forwarded headers when TL_TRUST_PROXY explicitly trusts the
+    // reflects forwarded headers when VX_TRUST_PROXY explicitly trusts the
     // proxy, so a direct attacker cannot rotate X-Forwarded-For past the
     // limits — and a remote attacker cannot lock the real owner out of a
     // known username by burning its attempts from elsewhere.

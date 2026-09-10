@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Browser QA sweep against a running TandemLeaf server.
+ * Browser QA sweep against a running Versovox server.
  *
  * Usage:
  *   node scripts/qa-browser.mjs [baseUrl] [username] [password]
@@ -26,8 +26,8 @@ try {
 const BASE = process.argv[2] ?? 'http://127.0.0.1:8383';
 const USER = process.argv[3] ?? 'astra';
 const PASS = process.argv[4] ?? 'astra-demo-password-1';
-// First-run bootstrap token (matches the TL_SETUP_TOKEN the QA server runs with).
-const SETUP_TOKEN = process.env.TL_QA_SETUP_TOKEN ?? 'qa-setup-token';
+// First-run bootstrap token (matches the VX_SETUP_TOKEN the QA server runs with).
+const SETUP_TOKEN = process.env.VX_QA_SETUP_TOKEN ?? 'qa-setup-token';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.join(here, '..', 'qa-output');
@@ -233,7 +233,7 @@ async function run() {
             try {
               const res = await fetch('/api/pairs', {
                 credentials: 'same-origin',
-                headers: { 'x-tl-csrf': '1' },
+                headers: { 'x-vx-csrf': '1' },
               });
               if (!res.ok) return false;
               const { pairs } = await res.json();
@@ -411,7 +411,7 @@ async function run() {
         page.evaluate(async (id) => {
           const res = await fetch(`/api/progress/${id}`, {
             credentials: 'same-origin',
-            headers: { 'x-tl-csrf': '1' },
+            headers: { 'x-vx-csrf': '1' },
           });
           const data = await res.json();
           return data.state?.locator ?? null;
@@ -714,14 +714,14 @@ async function run() {
   await page.waitForTimeout(1500); // 401 discovery + awaited purge
   const revoked = await page.evaluate(async () => {
     const loginVisible = !!document.querySelector('#li-user');
-    const cacheGone = !(await caches.has('tl-offline-v1'));
+    const cacheGone = !(await caches.has('vx-offline-v1'));
     // Cache-first must no longer answer for book content: the request goes
     // to the network, which refuses it.
     let apiStatus = 0;
     try {
       const res = await fetch('/api/books', {
         credentials: 'same-origin',
-        headers: { 'x-tl-csrf': '1' },
+        headers: { 'x-vx-csrf': '1' },
       });
       apiStatus = res.status;
     } catch {

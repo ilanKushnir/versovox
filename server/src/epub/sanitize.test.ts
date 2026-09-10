@@ -30,7 +30,7 @@ describe('sanitizeChapter', () => {
 
   it('rewrites internal links to data attributes and keeps https external links inert', () => {
     const r = clean(`<a href="ch2.xhtml#part2">next</a><a href="https://example.org/">site</a>`);
-    expect(r.html).toContain('data-tl-href="OEBPS/ch2.xhtml#part2"');
+    expect(r.html).toContain('data-vx-href="OEBPS/ch2.xhtml#part2"');
     expect(r.html).toContain('rel="noopener noreferrer nofollow"');
   });
 

@@ -6,7 +6,7 @@ import { startWorker } from './jobs/worker.js';
 /**
  * Dedicated worker process (compose `worker` service). Shares the SQLite
  * database (same /data volume, same host) with the web container; claims are
- * atomic so both can run concurrently. Set TL_INLINE_WORKER=0 on the web
+ * atomic so both can run concurrently. Set VX_INLINE_WORKER=0 on the web
  * container when using this.
  */
 
@@ -17,9 +17,9 @@ const ctx: AppContext = {
   db,
   config,
   log: {
-    info: (m) => console.log(`[tandemleaf-worker] ${m}`),
-    warn: (m) => console.warn(`[tandemleaf-worker] ${m}`),
-    error: (m) => console.error(`[tandemleaf-worker] ${m}`),
+    info: (m) => console.log(`[versovox-worker] ${m}`),
+    warn: (m) => console.warn(`[versovox-worker] ${m}`),
+    error: (m) => console.error(`[versovox-worker] ${m}`),
   },
 };
 

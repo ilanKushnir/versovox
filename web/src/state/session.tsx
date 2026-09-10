@@ -69,7 +69,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   //    fetch wrapper) — downloads aborted, offline data purged — before the
   //    caller sees the error.
   //  - The service worker's own online revocation check posts
-  //    'tl-unauthorized' after purging the offline cache; the page then
+  //    'vx-unauthorized' after purging the offline cache; the page then
   //    clears its IndexedDB state and drops to the login screen.
   useEffect(() => {
     const invalidate = async () => {
@@ -79,7 +79,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     const unset = setUnauthorizedHandler(invalidate);
     const onSwMessage = (e: MessageEvent) => {
-      if ((e.data as { type?: string } | null)?.type === 'tl-unauthorized') void invalidate();
+      if ((e.data as { type?: string } | null)?.type === 'vx-unauthorized') void invalidate();
     };
     navigator.serviceWorker?.addEventListener('message', onSwMessage);
     return () => {

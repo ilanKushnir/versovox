@@ -73,8 +73,8 @@ export function PairsPage() {
       <h1 className="section-title" style={{ marginBlockStart: 0 }}>
         Pairing review
       </h1>
-      <p style={{ color: 'var(--tl-text-soft)', maxWidth: '62ch', marginBlockStart: 0 }}>
-        TandemLeaf links ebook and audiobook editions of the same work. Metadata alone never links
+      <p style={{ color: 'var(--vx-text-soft)', maxWidth: '62ch', marginBlockStart: 0 }}>
+        Versovox links ebook and audiobook editions of the same work. Metadata alone never links
         anything automatically: strong matches are verified against the actual narration content
         first, uncertain matches wait for your decision, and switching precision is always shown per
         pair — never claimed globally.
@@ -186,7 +186,7 @@ function PairCard({
     <article className="pair-card">
       <div className="pair-card__titles">
         <span className="pair-card__work">{pair.ebook?.title ?? 'Unknown ebook'}</span>
-        <IconLink size={16} style={{ color: 'var(--tl-text-soft)' }} />
+        <IconLink size={16} style={{ color: 'var(--vx-text-soft)' }} />
         <span className="pair-card__work">{pair.audio?.title ?? 'Unknown audiobook'}</span>
         <span
           className={`badge ${pair.status !== 'candidate' && pair.status !== 'rejected' ? 'badge--paired' : ''}`}
@@ -204,7 +204,7 @@ function PairCard({
           display: 'flex',
           gap: 16,
           fontSize: 13.5,
-          color: 'var(--tl-text-soft)',
+          color: 'var(--vx-text-soft)',
           flexWrap: 'wrap',
         }}
       >
@@ -263,7 +263,7 @@ function PairCard({
           {formatPct(pair.alignment.meanConfidence)} · {pair.alignment.segmentCount} sentences (the
           remainder switches approximately or reports unavailable)
           {pair.alignment.gaps.length > 0 && (
-            <span style={{ color: 'var(--tl-text-soft)' }}>
+            <span style={{ color: 'var(--vx-text-soft)' }}>
               {' '}
               · {pair.alignment.gaps.length} gap{pair.alignment.gaps.length > 1 ? 's' : ''} (e.g.{' '}
               {pair.alignment.gaps[0]!.reason} {formatDuration(pair.alignment.gaps[0]!.fromMs)}–
@@ -274,7 +274,7 @@ function PairCard({
         </div>
       ) : (
         pair.status !== 'rejected' && (
-          <div style={{ fontSize: 13.5, color: 'var(--tl-text-soft)' }}>{UNALIGNED_PAIR_NOTE}</div>
+          <div style={{ fontSize: 13.5, color: 'var(--vx-text-soft)' }}>{UNALIGNED_PAIR_NOTE}</div>
         )
       )}
 
@@ -370,7 +370,7 @@ function ManualLinkSheet({ onClose, onLinked }: { onClose: () => void; onLinked:
 
   return (
     <Sheet title="Link two books manually" onClose={onClose}>
-      <p style={{ color: 'var(--tl-text-soft)', fontSize: 13.5, marginBlockStart: 0 }}>
+      <p style={{ color: 'var(--vx-text-soft)', fontSize: 13.5, marginBlockStart: 0 }}>
         {MANUAL_LINK_NOTE}
       </p>
       {error && (

@@ -1,4 +1,4 @@
-# TandemLeaf style lock
+# Versovox style lock
 
 Mood: elegant / literary-calm (generated seed 47, elegant mood, then brand-adjusted: paper neutrals kept, primary swapped to leaf green, bronze retained as the audio-secondary accent). All values re-validated with check_contrast --matrix.
 

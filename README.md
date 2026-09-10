@@ -1,8 +1,8 @@
-# TandemLeaf
+# Versovox
 
 **Read and listen in perfect tandem.**
 
-TandemLeaf is a self-hosted, open-source (AGPL-3.0) reading layer for the
+Versovox is a self-hosted, open-source (AGPL-3.0) reading layer for the
 libraries you already have. It mounts your existing ebook and audiobook
 folders **read-only** and gives you a calm, installable app with a serious
 EPUB reader, a resilient audiobook player, conservative edition pairing, and
@@ -11,11 +11,11 @@ and listening**.
 
 It deliberately is _not_ another library manager. Calibre / Calibre-Web
 Automated, Kavita, Audiobookshelf, and Shelfmark keep doing what they do;
-TandemLeaf coexists with all of them (or with plain folders) and owns only
+Versovox coexists with all of them (or with plain folders) and owns only
 its own state: derived reading indexes, pair decisions, alignment data,
 progress, annotations, and offline packages. (Synchronized text+audio
 production itself isn't new — Storyteller pioneered self-hosted alignment
-with EPUB Media Overlays; TandemLeaf's angle is being a **non-destructive
+with EPUB Media Overlays; Versovox's angle is being a **non-destructive
 overlay** over unmodified existing libraries, with strict pairing review and
 loss-resistant progress.)
 
@@ -64,7 +64,7 @@ loss-resistant progress.)
 ## Quick start
 
 ```bash
-cp .env.example .env    # set TL_SESSION_SECRET (openssl rand -hex 32)
+cp .env.example .env    # set VX_SESSION_SECRET (openssl rand -hex 32)
 docker compose up -d --build
 # open http://localhost:8383 — create the admin account (no defaults)
 ```
@@ -82,9 +82,9 @@ Node ≥ 22.5 and ffmpeg:
 
 ```bash
 npm ci && npm run build
-TL_EBOOK_DIRS=fixtures/library/ebooks \
-TL_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
-TL_TRANSCRIBE_PROVIDER=fixture node server/dist/index.js
+VX_EBOOK_DIRS=fixtures/library/ebooks \
+VX_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
+VX_TRANSCRIBE_PROVIDER=fixture node server/dist/index.js
 ```
 
 ## Documentation

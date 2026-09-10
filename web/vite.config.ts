@@ -8,12 +8,12 @@ import react from '@vitejs/plugin-react';
  * Injects the app-shell precache manifest into the built service worker.
  * After the bundle is written, every hashed JS/CSS asset plus local fonts
  * and icons is enumerated and spliced into dist/sw.js, replacing the
- * /*__TL_PRECACHE__* / and /*__TL_BUILD__* / placeholders. The BUILD id is a
+ * /*__VX_PRECACHE__* / and /*__VX_BUILD__* / placeholders. The BUILD id is a
  * content hash so the shell cache rotates exactly when the shell changes.
  */
 function swPrecachePlugin(): Plugin {
   return {
-    name: 'tl-sw-precache',
+    name: 'vx-sw-precache',
     apply: 'build',
     closeBundle() {
       const dist = path.resolve(__dirname, 'dist');
@@ -42,9 +42,9 @@ function swPrecachePlugin(): Plugin {
       }
       const build = hash.digest('hex').slice(0, 12);
       let sw = fs.readFileSync(swPath, 'utf8');
-      sw = sw.replace(/\/\*__TL_BUILD__\*\/\s*'dev'/, `'${build}'`);
+      sw = sw.replace(/\/\*__VX_BUILD__\*\/\s*'dev'/, `'${build}'`);
       sw = sw.replace(
-        /const PRECACHE = \/\*__TL_PRECACHE__\*\/ \[[^\]]*\];/,
+        /const PRECACHE = \/\*__VX_PRECACHE__\*\/ \[[^\]]*\];/,
         `const PRECACHE = ${JSON.stringify(list)};`,
       );
       fs.writeFileSync(swPath, sw);

@@ -16,7 +16,7 @@ forward.**
    locally.
 4. **Resume** combines the newest acknowledged server state with any newer
    unacknowledged local events — using the _same_ decision function the
-   server runs (`@tandemleaf/shared` `resolveResume`), so offline reading
+   server runs (`@versovox/shared` `resolveResume`), so offline reading
    resumes correctly and reconciles idempotently later.
 
 ## Server (append-only + reconciled state)

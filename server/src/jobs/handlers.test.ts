@@ -22,7 +22,7 @@ let tmp: string;
 let ctx: AppContext;
 
 beforeAll(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-handlers-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-handlers-'));
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
@@ -585,7 +585,7 @@ describe('lease ownership gates handler side effects', () => {
     // Audio book with one track and a fixture sidecar transcript.
     fs.writeFileSync(path.join(root, 'audio', 'a.mp3'), Buffer.alloc(64, 7));
     fs.writeFileSync(
-      path.join(root, 'audio', 'transcript.tandemleaf.json'),
+      path.join(root, 'audio', 'transcript.versovox.json'),
       JSON.stringify({
         language: 'en',
         model: 'fixture',

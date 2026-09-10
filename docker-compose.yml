@@ -1,6 +1,6 @@
-# TandemLeaf self-hosting quick start.
+# Versovox self-hosting quick start.
 #
-#   1. cp .env.example .env   (set TL_SESSION_SECRET: openssl rand -hex 32)
+#   1. cp .env.example .env   (set VX_SESSION_SECRET: openssl rand -hex 32)
 #   2. Edit the library mounts below to point at your real folders.
 #   3. docker compose up -d
 #   4. Open http://<host>:8383 and create the admin account.
@@ -9,10 +9,10 @@
 # (Caddy, Traefik, nginx) with a certificate in front. See docs/self-hosting.md.
 
 services:
-  tandemleaf:
+  versovox:
     build: .
-    # Or, when published: image: ghcr.io/OWNER/tandemleaf:latest
-    container_name: tandemleaf
+    # Or, when published: image: ghcr.io/OWNER/versovox:latest
+    container_name: versovox
     restart: unless-stopped
     ports:
       - '8383:8383'
@@ -20,31 +20,31 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Etc/UTC}
-      TL_SESSION_SECRET: ${TL_SESSION_SECRET:?set TL_SESSION_SECRET in .env}
+      VX_SESSION_SECRET: ${VX_SESSION_SECRET:?set VX_SESSION_SECRET in .env}
       # One-time first-run bootstrap token (required to create the admin
       # account). Leave empty to let the server generate one and print it in
-      # `docker compose logs tandemleaf` on first start.
-      TL_SETUP_TOKEN: ${TL_SETUP_TOKEN:-}
-      TL_TRUST_HTTPS: ${TL_TRUST_HTTPS:-0}
+      # `docker compose logs versovox` on first start.
+      VX_SETUP_TOKEN: ${VX_SETUP_TOKEN:-}
+      VX_TRUST_HTTPS: ${VX_TRUST_HTTPS:-0}
       # Proxy trust is OFF by default (client IPs cannot be spoofed via
       # X-Forwarded-For). Behind a reverse proxy set "1" (local/private
       # proxies) or a comma-separated list of proxy IPs/CIDRs.
-      TL_TRUST_PROXY: ${TL_TRUST_PROXY:-0}
-      TL_EBOOK_DIRS: /library/ebooks
-      TL_AUDIOBOOK_DIRS: /library/audiobooks
-      TL_TRANSCRIBE_PROVIDER: ${TL_TRANSCRIBE_PROVIDER:-none}
-      TL_DEFAULT_LANGUAGE: ${TL_DEFAULT_LANGUAGE:-en}
-      TL_SCAN_INTERVAL_MINUTES: ${TL_SCAN_INTERVAL_MINUTES:-60}
+      VX_TRUST_PROXY: ${VX_TRUST_PROXY:-0}
+      VX_EBOOK_DIRS: /library/ebooks
+      VX_AUDIOBOOK_DIRS: /library/audiobooks
+      VX_TRANSCRIBE_PROVIDER: ${VX_TRANSCRIBE_PROVIDER:-none}
+      VX_DEFAULT_LANGUAGE: ${VX_DEFAULT_LANGUAGE:-en}
+      VX_SCAN_INTERVAL_MINUTES: ${VX_SCAN_INTERVAL_MINUTES:-60}
       # The bundled worker handles scans/alignment. Set to 0 when enabling
       # the dedicated worker service below.
-      TL_INLINE_WORKER: ${TL_INLINE_WORKER:-1}
-      TL_JOB_CONCURRENCY: ${TL_JOB_CONCURRENCY:-2}
+      VX_INLINE_WORKER: ${VX_INLINE_WORKER:-1}
+      VX_JOB_CONCURRENCY: ${VX_JOB_CONCURRENCY:-2}
     volumes:
-      # TandemLeaf-owned writable state. SQLite lives in tl-data: keep it on
+      # Versovox-owned writable state. SQLite lives in vx-data: keep it on
       # a local disk volume, never on SMB/NFS.
-      - tl-data:/data
-      - tl-cache:/cache
-      - tl-models:/models
+      - vx-data:/data
+      - vx-cache:/cache
+      - vx-models:/models
       # Source libraries: ALWAYS read-only. Point these at your existing
       # Calibre/CWA, Kavita, Audiobookshelf, or plain folders.
       - ./fixtures/library/ebooks:/library/ebooks:ro
@@ -58,32 +58,32 @@ services:
 
   # Optional dedicated worker for scans/transcription/alignment. Enable with:
   #   docker compose --profile worker up -d
-  # and set TL_INLINE_WORKER=0 on the tandemleaf service.
+  # and set VX_INLINE_WORKER=0 on the versovox service.
   worker:
     build: .
     profiles: ['worker']
-    container_name: tandemleaf-worker
+    container_name: versovox-worker
     restart: unless-stopped
     command: ['node', 'server/dist/worker-entry.js']
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Etc/UTC}
-      TL_EBOOK_DIRS: /library/ebooks
-      TL_AUDIOBOOK_DIRS: /library/audiobooks
-      TL_TRANSCRIBE_PROVIDER: ${TL_TRANSCRIBE_PROVIDER:-none}
-      TL_JOB_CONCURRENCY: ${TL_JOB_CONCURRENCY:-2}
-      TL_WHISPER_BIN: ${TL_WHISPER_BIN:-}
-      TL_WHISPER_MODEL: ${TL_WHISPER_MODEL:-}
+      VX_EBOOK_DIRS: /library/ebooks
+      VX_AUDIOBOOK_DIRS: /library/audiobooks
+      VX_TRANSCRIBE_PROVIDER: ${VX_TRANSCRIBE_PROVIDER:-none}
+      VX_JOB_CONCURRENCY: ${VX_JOB_CONCURRENCY:-2}
+      VX_WHISPER_BIN: ${VX_WHISPER_BIN:-}
+      VX_WHISPER_MODEL: ${VX_WHISPER_MODEL:-}
     healthcheck:
       test: ['CMD', 'pgrep', '-f', 'worker-entry']
       interval: 30s
       timeout: 5s
       retries: 3
     volumes:
-      - tl-data:/data
-      - tl-cache:/cache
-      - tl-models:/models
+      - vx-data:/data
+      - vx-cache:/cache
+      - vx-models:/models
       - ./fixtures/library/ebooks:/library/ebooks:ro
       - ./fixtures/library/audiobooks:/library/audiobooks:ro
     deploy:
@@ -94,6 +94,6 @@ services:
       - no-new-privileges:true
 
 volumes:
-  tl-data:
-  tl-cache:
-  tl-models:
+  vx-data:
+  vx-cache:
+  vx-models:

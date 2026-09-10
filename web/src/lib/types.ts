@@ -5,7 +5,7 @@ import {
   type SwitchResolution,
   type TrackInfo,
   type Locator,
-} from '@tandemleaf/shared';
+} from '@versovox/shared';
 
 export interface BookDetail {
   book: BookSummary;

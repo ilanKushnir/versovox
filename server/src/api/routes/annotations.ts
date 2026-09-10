@@ -1,5 +1,5 @@
 import { type FastifyInstance } from 'fastify';
-import { createAnnotationSchema, type Annotation } from '@tandemleaf/shared';
+import { createAnnotationSchema, type Annotation } from '@versovox/shared';
 import { type AppContext } from '../../context.js';
 import { newId } from '../../util/ids.js';
 import { nowIso } from '../../db/index.js';

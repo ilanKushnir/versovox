@@ -6,10 +6,10 @@ const require = createRequire(import.meta.url);
 // web package's ESM default the UMD wrapper registers on globalThis instead
 // of module.exports; accept either.
 const required = require('../../public/sw-auth.js') as Record<string, unknown>;
-const tlAuth = (
+const vxAuth = (
   (required as { createAuthGate?: unknown }).createAuthGate
     ? required
-    : (globalThis as Record<string, unknown>).tlAuth
+    : (globalThis as Record<string, unknown>).vxAuth
 ) as {
   createAuthGate(opts: {
     fetchFn: () => Promise<{ status: number; ok: boolean }>;
@@ -22,7 +22,7 @@ const tlAuth = (
 describe('service-worker auth gate (online revocation fails closed)', () => {
   it('serves cached content while the server confirms the session', async () => {
     const fetchFn = vi.fn(async () => ({ status: 200, ok: true }));
-    const gate = tlAuth.createAuthGate({ fetchFn });
+    const gate = vxAuth.createAuthGate({ fetchFn });
     await expect(gate.allowCachedPrivate()).resolves.toBe(true);
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
@@ -31,7 +31,7 @@ describe('service-worker auth gate (online revocation fails closed)', () => {
     const onRevoked = vi.fn(async () => {});
     const fetchFn = vi.fn(async () => ({ status: 401, ok: false }));
     let t = 0;
-    const gate = tlAuth.createAuthGate({ fetchFn, onRevoked, now: () => t, ttlMs: 1000 });
+    const gate = vxAuth.createAuthGate({ fetchFn, onRevoked, now: () => t, ttlMs: 1000 });
     await expect(gate.allowCachedPrivate()).resolves.toBe(false);
     expect(onRevoked).toHaveBeenCalledTimes(1);
     // Later checks stay refused without re-running the purge.
@@ -42,7 +42,7 @@ describe('service-worker auth gate (online revocation fails closed)', () => {
 
   it('403 is treated as revocation too', async () => {
     const onRevoked = vi.fn();
-    const gate = tlAuth.createAuthGate({
+    const gate = vxAuth.createAuthGate({
       fetchFn: async () => ({ status: 403, ok: false }),
       onRevoked,
     });
@@ -53,7 +53,7 @@ describe('service-worker auth gate (online revocation fails closed)', () => {
   it('TTL: a fresh verdict is reused without another network check', async () => {
     const fetchFn = vi.fn(async () => ({ status: 200, ok: true }));
     let t = 0;
-    const gate = tlAuth.createAuthGate({ fetchFn, now: () => t, ttlMs: 30_000 });
+    const gate = vxAuth.createAuthGate({ fetchFn, now: () => t, ttlMs: 30_000 });
     await gate.allowCachedPrivate();
     t = 10_000;
     await gate.allowCachedPrivate(); // inside TTL
@@ -64,7 +64,7 @@ describe('service-worker auth gate (online revocation fails closed)', () => {
   });
 
   it('AIRPLANE MODE: network failure keeps offline reading working', async () => {
-    const gate = tlAuth.createAuthGate({
+    const gate = vxAuth.createAuthGate({
       fetchFn: async () => {
         throw new TypeError('Failed to fetch');
       },
@@ -76,7 +76,7 @@ describe('service-worker auth gate (online revocation fails closed)', () => {
 
   it('a session already known revoked STAYS revoked when the device then goes offline', async () => {
     let offline = false;
-    const gate = tlAuth.createAuthGate({
+    const gate = vxAuth.createAuthGate({
       fetchFn: async () => {
         if (offline) throw new TypeError('Failed to fetch');
         return { status: 401, ok: false };
@@ -95,7 +95,7 @@ describe('service-worker auth gate (online revocation fails closed)', () => {
   it('a server error (5xx) is inconclusive: the last verdict stands', async () => {
     let status = 200;
     let t = 0;
-    const gate = tlAuth.createAuthGate({
+    const gate = vxAuth.createAuthGate({
       fetchFn: async () => ({ status, ok: status >= 200 && status < 300 }),
       now: () => t,
       ttlMs: 1000,

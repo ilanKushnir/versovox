@@ -8,19 +8,19 @@ PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
 
 if [ "$(id -u)" = "0" ]; then
-  CURRENT_GID="$(getent group tandemleaf | cut -d: -f3)"
-  CURRENT_UID="$(getent passwd tandemleaf | cut -d: -f3)"
+  CURRENT_GID="$(getent group versovox | cut -d: -f3)"
+  CURRENT_UID="$(getent passwd versovox | cut -d: -f3)"
   # -o allows a PUID/PGID that collides with an existing system UID/GID.
   if [ "$CURRENT_GID" != "$PGID" ]; then
-    groupmod -o -g "$PGID" tandemleaf
+    groupmod -o -g "$PGID" versovox
   fi
   if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
-    usermod -o -u "$PUID" -g "$PGID" tandemleaf
+    usermod -o -u "$PUID" -g "$PGID" versovox
   fi
-  for d in "${TL_DATA_DIR:-/data}" "${TL_CACHE_DIR:-/cache}" "${TL_MODELS_DIR:-/models}"; do
+  for d in "${VX_DATA_DIR:-/data}" "${VX_CACHE_DIR:-/cache}" "${VX_MODELS_DIR:-/models}"; do
     if [ -d "$d" ]; then
       chown -h "$PUID:$PGID" "$d" 2>/dev/null || true
-      # Only fix ownership of TandemLeaf's own files, never a library mount,
+      # Only fix ownership of Versovox's own files, never a library mount,
       # and never follow a symlink out of the volume.
       find "$d" -maxdepth 2 ! -type l ! -user "$PUID" -exec chown -h "$PUID:$PGID" {} + 2>/dev/null || true
     fi

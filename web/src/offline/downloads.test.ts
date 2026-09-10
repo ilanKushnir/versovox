@@ -428,7 +428,7 @@ describe('logout/download race', () => {
     const origPut = cache.put.bind(cache);
     cache.put = async (url: string, res: Response) => {
       await origPut(url, res);
-      if (url.includes('tlchunk=0')) firstChunkStored();
+      if (url.includes('vxchunk=0')) firstChunkStored();
     };
 
     const downloadP = startDownload('bk1', () => {});

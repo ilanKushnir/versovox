@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { type AudioLocator, type EbookLocator } from '@tandemleaf/shared';
+import { type AudioLocator, type EbookLocator } from '@versovox/shared';
 import { api } from '../api/client';
 import { type Annotation, type BookDetail, type ResolveResponse } from '../lib/types';
 import { recordCheckpoint, resumeLocator, setActiveLocatorProvider } from '../progress/engine';
@@ -43,7 +43,7 @@ interface SkipPrefs {
 
 function loadSkip(): SkipPrefs {
   try {
-    const raw = JSON.parse(localStorage.getItem('tl-skip') ?? '');
+    const raw = JSON.parse(localStorage.getItem('vx-skip') ?? '');
     if (SKIP_CHOICES.includes(raw.back) && SKIP_CHOICES.includes(raw.fwd)) return raw;
   } catch {
     /* defaults */
@@ -54,9 +54,9 @@ function loadSkip(): SkipPrefs {
 /** Per-book speed override, falling back to the global default. */
 function loadSpeed(bookId: string): number {
   try {
-    const perBook = Number(localStorage.getItem(`tl-speed:${bookId}`));
+    const perBook = Number(localStorage.getItem(`vx-speed:${bookId}`));
     if (perBook > 0) return perBook;
-    return Number(localStorage.getItem('tl-speed')) || 1;
+    return Number(localStorage.getItem('vx-speed')) || 1;
   } catch {
     return 1;
   }
@@ -299,8 +299,8 @@ export function PlayerPage() {
     el.playbackRate = speed;
     el.preservesPitch = true;
     try {
-      localStorage.setItem('tl-speed', String(speed));
-      localStorage.setItem(`tl-speed:${id}`, String(speed));
+      localStorage.setItem('vx-speed', String(speed));
+      localStorage.setItem(`vx-speed:${id}`, String(speed));
     } catch {
       /* private mode */
     }
@@ -308,7 +308,7 @@ export function PlayerPage() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('tl-skip', JSON.stringify(skip));
+      localStorage.setItem('vx-skip', JSON.stringify(skip));
     } catch {
       /* private mode */
     }
@@ -438,7 +438,7 @@ export function PlayerPage() {
     if (!('mediaSession' in navigator) || !detail) return;
     navigator.mediaSession.metadata = new MediaMetadata({
       title: currentChapter?.title ?? detail.book.title,
-      artist: detail.book.author ?? 'TandemLeaf',
+      artist: detail.book.author ?? 'Versovox',
       album: detail.book.title,
       artwork: detail.book.hasCover
         ? [{ src: `${location.origin}/api/books/${id}/cover`, sizes: '512x512' }]
@@ -835,7 +835,7 @@ export function PlayerPage() {
             <div className="rs-label">Speed — {speed}×</div>
             <input
               className="slider"
-              style={{ color: 'var(--tl-interactive)' }}
+              style={{ color: 'var(--vx-interactive)' }}
               type="range"
               min={0.5}
               max={3}
@@ -856,7 +856,7 @@ export function PlayerPage() {
                 </button>
               ))}
             </div>
-            <p style={{ fontSize: 13, color: 'var(--tl-text-soft)', margin: '8px 0 0' }}>
+            <p style={{ fontSize: 13, color: 'var(--vx-text-soft)', margin: '8px 0 0' }}>
               Pitch is preserved at all speeds. Remembered per book.
             </p>
           </div>
@@ -936,7 +936,7 @@ export function PlayerPage() {
       {sheet === 'bookmarks' && (
         <Sheet title="Bookmarks" onClose={() => setSheet('none')}>
           {audioBookmarks.length === 0 && (
-            <p style={{ color: 'var(--tl-text-soft)', margin: 0 }}>
+            <p style={{ color: 'var(--vx-text-soft)', margin: 0 }}>
               No bookmarks yet. Tap the bookmark icon at the top while listening.
             </p>
           )}

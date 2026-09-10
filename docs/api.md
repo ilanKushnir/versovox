@@ -1,9 +1,9 @@
 # HTTP API
 
 All endpoints are same-origin JSON under `/api`, authenticated by session
-cookie except where noted. Mutating requests require the `x-tl-csrf: 1`
+cookie except where noted. Mutating requests require the `x-vx-csrf: 1`
 header. Schemas are zod-validated; canonical types live in
-`shared/src` (`@tandemleaf/shared`).
+`shared/src` (`@versovox/shared`).
 
 ## Auth & setup
 

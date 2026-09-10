@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { type Job, type Settings } from '@tandemleaf/shared';
+import { type Job, type Settings } from '@versovox/shared';
 import { api } from '../api/client';
 import { useSession } from '../state/session';
 import { useToast } from '../components/ui';
@@ -29,7 +29,7 @@ export function SettingsPage() {
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [appTheme, setAppTheme] = useState<string>(
-    () => localStorage.getItem('tl-app-theme') ?? 'auto',
+    () => localStorage.getItem('vx-app-theme') ?? 'auto',
   );
 
   const load = useCallback(async () => {
@@ -50,7 +50,7 @@ export function SettingsPage() {
     const root = document.documentElement;
     if (appTheme === 'auto') root.removeAttribute('data-app-theme');
     else root.setAttribute('data-app-theme', appTheme);
-    localStorage.setItem('tl-app-theme', appTheme);
+    localStorage.setItem('vx-app-theme', appTheme);
   }, [appTheme]);
 
   const save = async () => {
@@ -102,9 +102,9 @@ export function SettingsPage() {
 
       <section className="settings-section" aria-label="Libraries">
         <h2>Libraries</h2>
-        <p style={{ color: 'var(--tl-text-soft)', fontSize: 14, marginTop: 0 }}>
+        <p style={{ color: 'var(--vx-text-soft)', fontSize: 14, marginTop: 0 }}>
           Library folders are mounted read-only and configured by the server operator
-          (TL_EBOOK_DIRS, TL_AUDIOBOOK_DIRS). TandemLeaf never writes into them.
+          (VX_EBOOK_DIRS, VX_AUDIOBOOK_DIRS). Versovox never writes into them.
         </p>
         <dl style={{ margin: 0 }}>
           <div className="kv">
@@ -151,8 +151,8 @@ export function SettingsPage() {
 
       <section className="settings-section" aria-label="Alignment and transcription">
         <h2>Alignment & transcription</h2>
-        <p style={{ color: 'var(--tl-text-soft)', fontSize: 14, marginTop: 0 }}>
-          Sentence-exact switching needs a word-timestamped transcript. TandemLeaf bundles no speech
+        <p style={{ color: 'var(--vx-text-soft)', fontSize: 14, marginTop: 0 }}>
+          Sentence-exact switching needs a word-timestamped transcript. Versovox bundles no speech
           model and requires no cloud service: use pre-computed transcripts (fixture provider) or
           point the experimental provider at a local whisper-compatible binary.
         </p>
@@ -259,7 +259,7 @@ export function SettingsPage() {
             <IconCheck size={16} /> {saving ? 'Saving…' : 'Save changes'}
           </button>
         )}
-        <p style={{ color: 'var(--tl-text-soft)', fontSize: 13 }}>{data.precedence}</p>
+        <p style={{ color: 'var(--vx-text-soft)', fontSize: 13 }}>{data.precedence}</p>
       </section>
 
       <section className="settings-section" aria-label="Offline storage">
@@ -270,11 +270,11 @@ export function SettingsPage() {
             available for offline books.
           </p>
         ) : (
-          <p style={{ fontSize: 14.5, color: 'var(--tl-text-soft)' }}>
+          <p style={{ fontSize: 14.5, color: 'var(--vx-text-soft)' }}>
             Storage usage is not reported by this browser.
           </p>
         )}
-        <p style={{ color: 'var(--tl-text-soft)', fontSize: 13.5 }}>
+        <p style={{ color: 'var(--vx-text-soft)', fontSize: 13.5 }}>
           Downloads are per-title and explicit — manage them from each book page.
         </p>
       </section>
@@ -282,7 +282,7 @@ export function SettingsPage() {
       <section className="settings-section" aria-label="Background activity">
         <h2>Background activity</h2>
         {jobs.length === 0 ? (
-          <p style={{ color: 'var(--tl-text-soft)', fontSize: 14.5 }}>No background jobs yet.</p>
+          <p style={{ color: 'var(--vx-text-soft)', fontSize: 14.5 }}>No background jobs yet.</p>
         ) : (
           <div className="list-card">
             {jobs.slice(0, 12).map((j) => (
@@ -290,7 +290,7 @@ export function SettingsPage() {
                 {j.state === 'running' ? (
                   <span className="spinner" style={{ width: 15, height: 15 }} />
                 ) : j.state === 'failed' ? (
-                  <IconAlert size={15} style={{ color: 'var(--tl-danger)' }} />
+                  <IconAlert size={15} style={{ color: 'var(--vx-danger)' }} />
                 ) : (
                   <IconCheck size={15} style={{ opacity: j.state === 'done' ? 1 : 0.4 }} />
                 )}

@@ -1,5 +1,5 @@
 import { type FastifyInstance } from 'fastify';
-import { locatorSchema } from '@tandemleaf/shared';
+import { locatorSchema } from '@versovox/shared';
 import { z } from 'zod';
 import { type AppContext, activeDerivedDir } from '../../context.js';
 import { nowIso } from '../../db/index.js';

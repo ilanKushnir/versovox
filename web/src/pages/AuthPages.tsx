@@ -24,8 +24,8 @@ function AuthCard({
     <main className="auth-page">
       <form className="auth-card" onSubmit={onSubmit}>
         <span className="brand">
-          <LeafMark size={34} style={{ color: 'var(--tl-primary)' }} />
-          <span className="brand__name">TandemLeaf</span>
+          <LeafMark size={34} style={{ color: 'var(--vx-primary)' }} />
+          <span className="brand__name">Versovox</span>
         </span>
         <h1>{title}</h1>
         <p className="lede">{lede}</p>
@@ -68,7 +68,7 @@ export function SetupPage() {
       setUser(res.user);
     } catch (err) {
       if (err instanceof ApiError && err.code === 'bad-setup-token') {
-        setError('Wrong setup token. Find it in the server log or your TL_SETUP_TOKEN setting.');
+        setError('Wrong setup token. Find it in the server log or your VX_SETUP_TOKEN setting.');
       } else {
         setError(
           err instanceof ApiError && err.code === 'invalid'
@@ -84,7 +84,7 @@ export function SetupPage() {
   return (
     <AuthCard
       title="Create your admin account"
-      lede="First run: enter the one-time setup token from the server log (or your TL_SETUP_TOKEN setting), then choose the administrator credentials. There are no default passwords."
+      lede="First run: enter the one-time setup token from the server log (or your VX_SETUP_TOKEN setting), then choose the administrator credentials. There are no default passwords."
       onSubmit={submit}
       submitLabel="Create account & scan library"
       busy={busy}
@@ -180,7 +180,7 @@ export function LoginPage() {
   return (
     <AuthCard
       title="Welcome back"
-      lede="Sign in to your TandemLeaf server."
+      lede="Sign in to your Versovox server."
       onSubmit={submit}
       submitLabel="Sign in"
       busy={busy}

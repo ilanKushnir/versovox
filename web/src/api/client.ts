@@ -85,7 +85,7 @@ export async function api<T>(
       signal: opts.signal,
       keepalive: opts.keepalive,
       headers: {
-        'x-tl-csrf': '1',
+        'x-vx-csrf': '1',
         ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,

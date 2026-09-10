@@ -3,7 +3,7 @@
 ## Authentication
 
 - **First-run setup requires a one-time bootstrap token.** Creating the
-  admin account needs `TL_SETUP_TOKEN` (or `TL_SETUP_TOKEN_FILE`); when
+  admin account needs `VX_SETUP_TOKEN` (or `VX_SETUP_TOKEN_FILE`); when
   unset, the server generates a random token on first start, prints it in
   its log, and stores it at `<data>/setup-token` (0600). Whoever merely
   reaches a freshly started instance first therefore cannot take it over.
@@ -17,8 +17,8 @@
   event loop, and unknown usernames verify against a fixed dummy hash so
   response timing does not reveal whether an account exists.
 - Sessions are opaque 256-bit random tokens in an `HttpOnly`,
-  `SameSite=Lax` cookie (`Secure` when `TL_TRUST_HTTPS=1`). The database
-  stores only an HMAC of the token keyed by `TL_SESSION_SECRET`, so a stolen
+  `SameSite=Lax` cookie (`Secure` when `VX_TRUST_HTTPS=1`). The database
+  stores only an HMAC of the token keyed by `VX_SESSION_SECRET`, so a stolen
   database/backup cannot be replayed as live sessions, and rotating the
   secret invalidates all sessions.
 - Login is throttled **per (account, client IP)** (10 attempts / 5 minutes)
@@ -26,12 +26,12 @@
   restarts and expired windows are pruned daily. Keying the account limit
   on the caller's IP means a remote attacker cannot lock the real owner out
   of a known username. Forwarded headers (`X-Forwarded-For`) are ignored
-  unless the operator explicitly trusts a proxy via `TL_TRUST_PROXY`, so a
+  unless the operator explicitly trusts a proxy via `VX_TRUST_PROXY`, so a
   direct attacker cannot rotate spoofed IPs past the limit.
 - Sessions expire (default 30 days) and are deleted on logout.
 - **Route guarding is keyed on the matched route, not the raw URL.** The
   router matches the percent-decoded path, so a guard that inspected
-  `req.url` could be bypassed with `/%61pi/...`. TandemLeaf checks the
+  `req.url` could be bypassed with `/%61pi/...`. Versovox checks the
   resolved route pattern and the decoded path, marks the four public routes
   explicitly (`config.public`), and rejects malformed encodings with 400;
   a regression test covers the encoded-prefix case.
@@ -87,7 +87,7 @@ V1 and none is claimed.
 Defense in depth for cookie-authenticated calls:
 
 1. `SameSite=Lax` cookies;
-2. every mutating request must carry the custom header `x-tl-csrf: 1`
+2. every mutating request must carry the custom header `x-vx-csrf: 1`
    (unsettable cross-origin without CORS preflight, which same-origin-only
    `connect-src` and no CORS headers prevent);
 3. `Origin` / `Sec-Fetch-Site` headers, when present, must be same-origin.
@@ -103,7 +103,7 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 - All `on*` handlers, `style` attributes, and non-allowlisted attributes are
   dropped.
 - `javascript:` and any absolute-scheme URLs are stripped; internal links
-  become inert `data-tl-href` attributes the reader resolves itself;
+  become inert `data-vx-href` attributes the reader resolves itself;
   internal images are rewritten to authenticated asset routes; external
   images are removed.
 - EPUB archives are extracted by a **bounded streaming unzipper**: the
@@ -137,7 +137,7 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 
 ## Filesystem containment
 
-- Library roots are mounted read-only; TandemLeaf never writes into them.
+- Library roots are mounted read-only; Versovox never writes into them.
 - Every path derived from the database or user input resolves through
   containment checks (`resolveWithin`/`realResolveWithin`) that reject
   absolute paths, `..` traversal, prefix-sibling escapes, and symlinks that
@@ -150,13 +150,13 @@ strict allowlist over a spec-compliant HTML parser (parse5):
   a symlinked "cover" cannot exfiltrate files from outside (or inside) the
   library.
 - Whisper transcription output lives in a private temp directory under the
-  TandemLeaf cache and is removed in `finally`; source libraries are never
+  Versovox cache and is removed in `finally`; source libraries are never
   written to, so read-only mounts work.
 - The whisper binary and model paths an **admin** sets in the web UI must
-  resolve (after symlinks) inside `TL_MODELS_DIR`. A web session can
+  resolve (after symlinks) inside `VX_MODELS_DIR`. A web session can
   therefore only run executables the operator placed in the models volume,
   never arbitrary paths in the container. Environment-pinned paths
-  (`TL_WHISPER_BIN`) are the operator's and are not restricted.
+  (`VX_WHISPER_BIN`) are the operator's and are not restricted.
 - External tools (`ffprobe`, `ffmpeg`, whisper) always run via `execFile`
   with argument arrays (no shell), on `realpath`-resolved absolute file
   paths, with timeouts and `SIGKILL`.
@@ -173,7 +173,7 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 
 ## Secrets and logging
 
-- `TL_SESSION_SECRET` supports `_FILE` (Docker secrets). If unset, a random
+- `VX_SESSION_SECRET` supports `_FILE` (Docker secrets). If unset, a random
   secret is generated once and stored with mode 0600 in the data dir.
 - Tokens are never logged; session cookies never reach client-side
   JavaScript (`HttpOnly`); the web bundle contains no secrets.

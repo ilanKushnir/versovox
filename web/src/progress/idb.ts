@@ -1,6 +1,6 @@
 /** Minimal typed IndexedDB wrapper for the progress queue and offline state. */
 
-const DB_NAME = 'tandemleaf';
+const DB_NAME = 'versovox';
 const DB_VERSION = 2;
 
 export const STORES = {

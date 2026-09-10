@@ -1,4 +1,4 @@
-import { type PairEvidence } from '@tandemleaf/shared';
+import { type PairEvidence } from '@versovox/shared';
 import {
   normalizeAuthor,
   normalizeTitle,

@@ -6,7 +6,7 @@ import {
   type ProgressEvent,
   type ProgressIntent,
   type ProgressState,
-} from '@tandemleaf/shared';
+} from '@versovox/shared';
 import { api, ApiError, isOffline } from '../api/client';
 import { idbAll, idbDelete, idbGet, idbPut, STORES } from './idb';
 
@@ -23,10 +23,10 @@ import { idbAll, idbDelete, idbGet, idbPut, STORES } from './idb';
 
 function getDeviceId(): string {
   try {
-    let id = localStorage.getItem('tl-device-id');
+    let id = localStorage.getItem('vx-device-id');
     if (!id) {
       id = crypto.randomUUID();
-      localStorage.setItem('tl-device-id', id);
+      localStorage.setItem('vx-device-id', id);
     }
     return id;
   } catch {

@@ -201,7 +201,7 @@ export function derivedRevForAttempt(job: Pick<JobRow, 'id' | 'lease_token'>): s
 export const DERIVED_GC_GRACE_MS = 5 * 60_000;
 
 /** Sidecar recording when each non-active entry was first seen retired. */
-const GC_REGISTRY_FILE = '.tl-gc.json';
+const GC_REGISTRY_FILE = '.vx-gc.json';
 
 /**
  * Deferred, reference-safe garbage collection of derived versions. Runs
@@ -688,7 +688,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
   const provider = getProvider(settings.transcribeProvider);
   if (!provider) {
     throw new Error(
-      'Transcription is disabled (TL_TRANSCRIBE_PROVIDER=none). Configure "fixture" or the experimental "whisper-cli" provider to align this pair.',
+      'Transcription is disabled (VX_TRANSCRIBE_PROVIDER=none). Configure "fixture" or the experimental "whisper-cli" provider to align this pair.',
     );
   }
 

@@ -7,7 +7,7 @@ export type DB = DatabaseSync;
 
 export function openDatabase(dataDir: string): DB {
   fs.mkdirSync(dataDir, { recursive: true });
-  const file = path.join(dataDir, 'tandemleaf.db');
+  const file = path.join(dataDir, 'versovox.db');
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');

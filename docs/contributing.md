@@ -1,14 +1,14 @@
 # Contributing
 
-TandemLeaf is AGPL-3.0-or-later. By contributing you agree your work is
+Versovox is AGPL-3.0-or-later. By contributing you agree your work is
 licensed the same way.
 
 ## Repo layout
 
 ```
-shared/   @tandemleaf/shared — canonical contracts (locators, progress
+shared/   @versovox/shared — canonical contracts (locators, progress
           events + reconciliation, alignment types, API DTOs; zod schemas)
-server/   @tandemleaf/server — Fastify API + background worker
+server/   @versovox/server — Fastify API + background worker
   src/epub        EPUB parse / sanitize / derived-index extraction
   src/scanner     read-only library scans
   src/audio       ffprobe wrappers, streaming
@@ -18,7 +18,7 @@ server/   @tandemleaf/server — Fastify API + background worker
   src/jobs        SQLite job queue + handlers + worker loop
   src/progress    append-only progress pipeline
   src/api         routes, guards (auth/CSRF), app assembly
-web/      @tandemleaf/web — React PWA (reader, player, library, pairing,
+web/      @versovox/web — React PWA (reader, player, library, pairing,
           settings, offline downloads, sw.js)
 fixtures/ committed sample library (original stories, synthetic narration)
 scripts/  fixture/icon generators, browser QA sweep
@@ -36,9 +36,9 @@ npm ci
 npm run build            # shared + server + web
 
 # Terminal 1: API + inline worker against the sample library
-TL_EBOOK_DIRS=fixtures/library/ebooks \
-TL_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
-TL_TRANSCRIBE_PROVIDER=fixture \
+VX_EBOOK_DIRS=fixtures/library/ebooks \
+VX_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
+VX_TRANSCRIBE_PROVIDER=fixture \
 npm run dev
 
 # Terminal 2: Vite dev server (proxies /api to :8383)

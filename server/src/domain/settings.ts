@@ -1,4 +1,4 @@
-import { settingsSchema, type Settings } from '@tandemleaf/shared';
+import { settingsSchema, type Settings } from '@versovox/shared';
 import { type DB, nowIso } from '../db/index.js';
 import { type EnvConfig } from '../config.js';
 

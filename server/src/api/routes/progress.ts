@@ -1,5 +1,5 @@
 import { type FastifyInstance } from 'fastify';
-import { progressBatchSchema } from '@tandemleaf/shared';
+import { progressBatchSchema } from '@versovox/shared';
 import { type AppContext } from '../../context.js';
 import { applyProgressEvents, getProgressState } from '../../progress/service.js';
 

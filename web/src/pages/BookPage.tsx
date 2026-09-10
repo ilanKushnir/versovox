@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { type AudioLocator, type EbookLocator } from '@tandemleaf/shared';
+import { type AudioLocator, type EbookLocator } from '@versovox/shared';
 import { api } from '../api/client';
 import { type Annotation, type BookDetail, type ResolveResponse } from '../lib/types';
 import { Cover, EmptyState, useToast } from '../components/ui';
@@ -268,14 +268,14 @@ export function BookPage() {
       </div>
 
       {pair && (
-        <section className="tandem-card" aria-label="Tandem edition">
+        <section className="tandem-card" aria-label="Paired edition">
           <div className="tandem-card__icon">
             <IconSwitch size={22} />
           </div>
           <div className="tandem-card__body">
             <div className="tandem-card__title">
               {pair.switchable
-                ? `Tandem ready — switch to the ${isEbook ? 'audiobook' : 'ebook'} at the same sentence`
+                ? `Sync ready — switch to the ${isEbook ? 'audiobook' : 'ebook'} at the same sentence`
                 : `${isEbook ? 'Audiobook' : 'Ebook'} edition paired`}
             </div>
             <div className="tandem-card__sub">
@@ -365,7 +365,7 @@ export function BookPage() {
               <span className="grow" style={{ whiteSpace: 'normal' }}>
                 {a.selectedText ?? a.note ?? (a.kind === 'bookmark' ? 'Bookmark' : a.kind)}
                 {a.note && a.selectedText && (
-                  <span style={{ display: 'block', fontSize: 13, color: 'var(--tl-text-soft)' }}>
+                  <span style={{ display: 'block', fontSize: 13, color: 'var(--vx-text-soft)' }}>
                     {a.note}
                   </span>
                 )}
@@ -379,7 +379,7 @@ export function BookPage() {
       {detail.description && (
         <section style={{ maxWidth: '65ch' }}>
           <h2 className="section-title">About</h2>
-          <p style={{ color: 'var(--tl-text-soft)' }}>{detail.description}</p>
+          <p style={{ color: 'var(--vx-text-soft)' }}>{detail.description}</p>
         </section>
       )}
       {detail.chapters.length === 0 && annotations.length === 0 && !detail.description && (

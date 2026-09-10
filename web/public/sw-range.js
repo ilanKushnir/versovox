@@ -3,7 +3,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module && module.exports) module.exports = api;
-  if (root) root.tlRange = api;
+  if (root) root.vxRange = api;
 })(typeof self !== 'undefined' ? self : globalThis, function () {
   /**
    * Parse an HTTP Range header against a resource of `size` bytes.
@@ -48,12 +48,12 @@
 
   /** Cache key for chunk `i` of `url` (query param — fragments are stripped by Cache API). */
   function chunkKey(url, i) {
-    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'tlchunk=' + i;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'vxchunk=' + i;
   }
 
   /** Cache key for the stored metadata entry of a chunked resource. */
   function metaKey(url) {
-    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'tlmeta=1';
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'vxmeta=1';
   }
 
   /**

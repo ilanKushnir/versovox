@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openMemoryDatabase, type DB } from '../db/index.js';
 import { applyProgressEvents, getProgressState } from './service.js';
-import { type ProgressEvent } from '@tandemleaf/shared';
+import { type ProgressEvent } from '@versovox/shared';
 
 let db: DB;
 let n = 0;

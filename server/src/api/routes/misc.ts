@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import posix from 'node:path/posix';
 import { type FastifyInstance } from 'fastify';
-import { settingsSchema } from '@tandemleaf/shared';
+import { settingsSchema } from '@versovox/shared';
 import { type AppContext, activeDerivedDir } from '../../context.js';
 import { loadManifest, loadSentences } from '../../epub/extract.js';
 import {

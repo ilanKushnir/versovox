@@ -17,9 +17,9 @@ const ctx: AppContext = {
   db,
   config,
   log: {
-    info: (m) => console.log(`[tandemleaf] ${m}`),
-    warn: (m) => console.warn(`[tandemleaf] ${m}`),
-    error: (m) => console.error(`[tandemleaf] ${m}`),
+    info: (m) => console.log(`[versovox] ${m}`),
+    warn: (m) => console.warn(`[versovox] ${m}`),
+    error: (m) => console.error(`[versovox] ${m}`),
   },
 };
 
@@ -77,10 +77,10 @@ compactTimer.unref?.();
 app
   .listen({ port: config.port, host: config.host })
   .then(() => {
-    ctx.log.info(`TandemLeaf listening on http://${config.host}:${config.port}`);
+    ctx.log.info(`Versovox listening on http://${config.host}:${config.port}`);
     if (!config.trustHttps) {
       ctx.log.warn(
-        'Running without TL_TRUST_HTTPS: cookies are not marked Secure. Serve behind HTTPS in production (required for PWA install).',
+        'Running without VX_TRUST_HTTPS: cookies are not marked Secure. Serve behind HTTPS in production (required for PWA install).',
       );
     }
   })
