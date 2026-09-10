@@ -462,6 +462,7 @@ select.input {
   position: relative;
   display: block;
   flex-shrink: 0;
+  align-self: flex-start;
   width: 112px;
   aspect-ratio: 2/3;
   border-radius: 10px;
@@ -1004,6 +1005,7 @@ select.input {
   position: relative;
   display: block;
   flex-shrink: 0;
+  align-self: flex-start;
   width: 128px;
   aspect-ratio: 2/3;
   border-radius: var(--radius-card);
