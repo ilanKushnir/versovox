@@ -67,6 +67,26 @@ fine — clients never upload media.
 After that, iPhone Safari → Share → **Add to Home Screen** gives a
 standalone, offline-capable app.
 
+### Behind Authentik / Authelia / oauth2-proxy (single sign-on)
+
+If your proxy already authenticates users, let Versovox trust it instead of
+showing a second login (details and the threat model in docs/security.md):
+
+```yaml
+# Traefik: the authentik forward-auth middleware must forward the username
+# header (authResponseHeaders: [X-authentik-username, …]).
+environment:
+  VX_TRUST_PROXY: 192.168.1.50 # the proxy's address(es)
+  VX_TRUST_HTTPS: '1'
+  VX_PROXY_AUTH_HEADER: x-authentik-username
+  VX_PROXY_AUTH_SOURCES: 192.168.1.50/32 # header trusted only from this TCP peer
+  VX_PROXY_AUTH_ADMINS: ilan # optional; first user is admin anyway
+```
+
+The direct LAN port keeps the normal password login (a header sent straight to
+the port is ignored because the peer is not the proxy), so create a password
+account there first if you want a break-glass path.
+
 ## Resource and concurrency controls
 
 - `VX_JOB_CONCURRENCY` (default 2) bounds simultaneous background jobs.

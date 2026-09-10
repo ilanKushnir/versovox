@@ -32,9 +32,17 @@ services:
       VX_TRUST_PROXY: ${VX_TRUST_PROXY:-0}
       VX_EBOOK_DIRS: /library/ebooks
       VX_AUDIOBOOK_DIRS: /library/audiobooks
+      # Alignment: the image bundles whisper.cpp; download a model once with
+      #   docker compose exec versovox versovox-model large-v3-turbo
+      # then set VX_TRANSCRIBE_PROVIDER=whisper-cli in .env.
       VX_TRANSCRIBE_PROVIDER: ${VX_TRANSCRIBE_PROVIDER:-none}
+      VX_WHISPER_MODEL: ${VX_WHISPER_MODEL:-/models/ggml-large-v3-turbo.bin}
       VX_DEFAULT_LANGUAGE: ${VX_DEFAULT_LANGUAGE:-en}
       VX_SCAN_INTERVAL_MINUTES: ${VX_SCAN_INTERVAL_MINUTES:-60}
+      # Optional reverse-proxy SSO (Authentik etc.) — see docs/security.md.
+      VX_PROXY_AUTH_HEADER: ${VX_PROXY_AUTH_HEADER:-}
+      VX_PROXY_AUTH_SOURCES: ${VX_PROXY_AUTH_SOURCES:-}
+      VX_PROXY_AUTH_ADMINS: ${VX_PROXY_AUTH_ADMINS:-}
       # The bundled worker handles scans/alignment. Set to 0 when enabling
       # the dedicated worker service below.
       VX_INLINE_WORKER: ${VX_INLINE_WORKER:-1}

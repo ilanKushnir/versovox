@@ -130,6 +130,6 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   app.get('/api/auth/me', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ error: 'unauthorized' });
-    return { user: req.user };
+    return { user: req.user, via: req.authVia ?? 'session' };
   });
 }

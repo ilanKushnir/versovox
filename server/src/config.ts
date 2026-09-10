@@ -51,6 +51,15 @@ const envSchema = z.object({
   defaultLanguage: z.string().default('en'),
   /** Minutes between automatic library rescans; 0 disables (manual only). */
   scanIntervalMinutes: z.coerce.number().int().min(0).max(10_080).default(60),
+  /**
+   * Reverse-proxy SSO (see auth/proxyAuth.ts). Header carrying the
+   * authenticated username, e.g. `x-authentik-username`; empty = disabled.
+   */
+  proxyAuthHeader: z.string().max(64).default(''),
+  /** Proxy peer addresses/CIDRs whose header is trusted. Required when enabled. */
+  proxyAuthSources: z.array(z.string()).default([]),
+  /** Usernames (from the header) that are admins. */
+  proxyAuthAdmins: z.array(z.string()).default([]),
   logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 
@@ -112,6 +121,9 @@ export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): En
     whisperModel: readEnv('VX_WHISPER_MODEL'),
     defaultLanguage: readEnv('VX_DEFAULT_LANGUAGE'),
     scanIntervalMinutes: readEnv('VX_SCAN_INTERVAL_MINUTES'),
+    proxyAuthHeader: readEnv('VX_PROXY_AUTH_HEADER'),
+    proxyAuthSources: splitDirs(readEnv('VX_PROXY_AUTH_SOURCES')),
+    proxyAuthAdmins: splitDirs(readEnv('VX_PROXY_AUTH_ADMINS')),
     logLevel: readEnv('VX_LOG_LEVEL'),
   };
   const envPinned = Object.entries(raw)

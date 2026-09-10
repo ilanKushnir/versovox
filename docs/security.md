@@ -38,6 +38,31 @@
 - Pairing decisions (link/unlink/confirm/reject/align), rescans, job
   control, settings changes, and library root paths are admin-only.
 
+## Reverse-proxy single sign-on (optional)
+
+Self-hosters who already front their services with Authentik, Authelia, or
+oauth2-proxy can let that proxy sign users in:
+
+- `VX_PROXY_AUTH_HEADER=x-authentik-username` names the header the proxy
+  sets after authenticating the user.
+- `VX_PROXY_AUTH_SOURCES=192.168.1.50/32` lists the proxy's addresses. The
+  header is honoured **only when the TCP peer that delivered the request is
+  in this list** — checked on the socket, not on forwarded headers — so a
+  client that reaches Versovox directly (a LAN port, a break-glass URL) can
+  never forge it and simply sees the password login page. If the header is
+  configured without sources, sign-in stays disabled and a warning is
+  logged (fail closed).
+- Users are provisioned on first sight with an unusable password hash;
+  `VX_PROXY_AUTH_ADMINS` names the admins, and on an empty instance the
+  first proxied user becomes admin (the proxy already decides who may reach
+  Versovox at all). Setup-token bootstrap is closed once any user exists.
+- Proxied requests are authenticated per request (no Versovox cookie is
+  issued); signing out is the proxy's job, and the UI says so.
+
+Without a proxy, nothing changes: the setup token + password flow is the
+default, and it stays available on the direct URL for accounts that have a
+password.
+
 ## Offline data and logout
 
 Logout is revocation. Signing out (or discovering the session invalid)

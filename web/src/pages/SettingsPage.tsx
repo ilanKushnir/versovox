@@ -21,7 +21,7 @@ interface SettingsResponse {
 }
 
 export function SettingsPage() {
-  const { user, logout } = useSession();
+  const { user, via, logout } = useSession();
   const toast = useToast();
   const [data, setData] = useState<SettingsResponse | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -311,11 +311,18 @@ export function SettingsPage() {
       <section className="settings-section" aria-label="Account">
         <h2>Account</h2>
         <p style={{ fontSize: 14.5 }}>
-          Signed in as <strong>{user?.username}</strong> ({user?.role}).
+          Signed in as <strong>{user?.username}</strong> ({user?.role})
+          {via === 'proxy' ? ' through your identity provider.' : '.'}
         </p>
-        <button className="btn btn--secondary" onClick={() => void logout()}>
-          Sign out
-        </button>
+        {via === 'proxy' ? (
+          <p style={{ fontSize: 13.5, color: 'var(--vx-text-soft)' }}>
+            Sign-in is handled by the reverse proxy in front of Versovox; sign out from there.
+          </p>
+        ) : (
+          <button className="btn btn--secondary" onClick={() => void logout()}>
+            Sign out
+          </button>
+        )}
       </section>
     </main>
   );

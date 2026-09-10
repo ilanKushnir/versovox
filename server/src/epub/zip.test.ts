@@ -178,9 +178,11 @@ describe('extractZipToDir', () => {
     }
     peak = Math.max(peak, usage() - base);
     // Streaming keeps peak growth to a few chunk buffers; retaining the
-    // entries (48MB) or the old duplicate-and-retain shape (96MB) trip this,
-    // while allowing allocator/GC noise observed across CI runners.
-    expect(peak).toBeLessThan(32 * 1024 * 1024);
+    // entries (48MB) or the old duplicate-and-retain shape (96MB) trip this.
+    // The bound sits below the decompressed size with headroom for the
+    // allocator/GC noise observed across CI runners (up to ~36MB seen on
+    // GitHub-hosted runners for a 48MB archive).
+    expect(peak).toBeLessThan(44 * 1024 * 1024);
   });
 
   it('a violating archive is rejected before dangerous allocations occur', async () => {

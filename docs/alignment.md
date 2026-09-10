@@ -49,6 +49,13 @@ books: cumulative across tracks in playback order).
 
 ### whisper-cli contract (experimental)
 
+The Docker image ships `whisper-cli` (whisper.cpp, CPU build) at
+`/usr/local/bin/whisper-cli` and defaults `VX_WHISPER_BIN` to it, so the only
+missing piece is a model: `docker compose exec versovox versovox-model
+large-v3-turbo` downloads it into `/models` (then set
+`VX_WHISPER_MODEL=/models/ggml-large-v3-turbo.bin` and
+`VX_TRANSCRIBE_PROVIDER=whisper-cli`).
+
 Each track is first decoded with the bundled ffmpeg to the 16 kHz mono
 16-bit WAV that whisper.cpp expects (so m4b/m4a/mp3/flac all work without
 manual transcoding; the WAV lives in a private temp dir and is deleted
