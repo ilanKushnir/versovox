@@ -24,28 +24,36 @@ function I({ size = 22, children, ...rest }: P) {
 }
 
 /**
- * The Versovox mark: a left-hand page (the verso) whose edge turns into a
- * sound wave — the book and the voice as one shape.
+ * The Versovox mark: an open book whose right-hand page rises into a sound
+ * wave — text and voice as one object. Single colour, works at 16 px.
  */
 export const VersoMark = ({ size = 24, ...rest }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" {...rest}>
+    {/* spine + left page */}
     <path
-      d="M4 4.5A1.5 1.5 0 0 1 5.5 3h6.2c.7 0 1.3.6 1.3 1.3V20c0 .6-.5 1-1 1H5.5A1.5 1.5 0 0 1 4 19.5z"
+      d="M12 6.2C10.6 4.9 8.6 4.2 6.3 4.2H3.4c-.5 0-.9.4-.9.9v12.6c0 .5.4.9.9.9h2.9c2.3 0 4.3.7 5.7 2V6.2z"
       fill="currentColor"
-      opacity="0.92"
     />
     <path
-      d="M7 8h3.5M7 11.5h3.5M7 15h2.5"
+      d="M5.4 8.3h4M5.4 11.3h4M5.4 14.3h2.6"
       stroke="var(--vx-bg, #fff)"
-      strokeWidth="1.4"
+      strokeWidth="1.3"
       strokeLinecap="round"
-      opacity="0.85"
+      opacity="0.9"
+    />
+    {/* right page as a wave of bars */}
+    <path
+      d="M14.4 12.8v3.6M17 10.2v8.2M19.6 12v4.6M22 13.4v2.2"
+      stroke="currentColor"
+      strokeWidth="2.1"
+      strokeLinecap="round"
     />
     <path
-      d="M15.5 9.5v5M18 7.5v9M20.5 10v4"
+      d="M12 6.2v14.4"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.2"
       strokeLinecap="round"
+      opacity="0.5"
     />
   </svg>
 );

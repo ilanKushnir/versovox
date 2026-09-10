@@ -1,26 +1,28 @@
-/* Versovox design tokens — see .tastemaker/style-lock.md
-   Light: leaf primary on warm paper. Dark: light-leaf accent is the
-   interactive color; primary green is fill-only with white labels. */
+/* Versovox design tokens — "ink & ember".
+   Reading is paper and ink; listening is a warm lamp. Light: cream paper,
+   ink text, ember-copper primary, plum for audio. Dark: warm near-black
+   with a lighter ember for interactive text and a plum-lavender accent.
+   Every text/bg pairing below is ≥ 4.5:1; UI pairings ≥ 3:1. */
 
 :root {
   /* palette — light */
-  --vx-text: #1f2620;
-  --vx-text-soft: #55604f;
-  --vx-bg: #faf6ef;
-  --vx-surface: #f1ebe1;
-  --vx-surface-raised: #ffffff;
-  --vx-primary: #2f5d48;
-  --vx-primary-hover: #27503d;
-  --vx-on-primary: #ffffff;
-  --vx-accent: #8c6a40; /* bronze — audio */
-  --vx-border: #e2dacc;
-  --vx-border-strong: #c9bfae;
-  --vx-interactive: var(--vx-primary);
-  --vx-danger: #a03d2e;
-  --vx-focus: #2f5d48;
-  --vx-shadow-1: 0 1px 2px rgb(31 38 32 / 0.06), 0 2px 8px rgb(31 38 32 / 0.06);
-  --vx-shadow-2: 0 2px 6px rgb(31 38 32 / 0.08), 0 12px 32px rgb(31 38 32 / 0.12);
-  --vx-scrim: rgb(31 38 32 / 0.45);
+  --vx-text: #1c1917;
+  --vx-text-soft: #5f574d;
+  --vx-bg: #f6f1e8;
+  --vx-surface: #ede6da;
+  --vx-surface-raised: #fffdf9;
+  --vx-primary: #b4532a;
+  --vx-primary-hover: #9c4622;
+  --vx-on-primary: #fff8f2;
+  --vx-accent: #5e4a8a; /* plum — audio */
+  --vx-border: #ddd3c4;
+  --vx-border-strong: #c4b8a5;
+  --vx-interactive: #944320;
+  --vx-danger: #a83a2c;
+  --vx-focus: #b4532a;
+  --vx-shadow-1: 0 1px 2px rgb(60 40 20 / 0.06), 0 2px 10px rgb(60 40 20 / 0.06);
+  --vx-shadow-2: 0 2px 6px rgb(60 40 20 / 0.08), 0 14px 36px rgb(60 40 20 / 0.14);
+  --vx-scrim: rgb(28 25 23 / 0.45);
 
   /* type */
   --vx-font-ui:
@@ -37,8 +39,8 @@
   --sp-7: 48px;
   --sp-8: 64px;
 
-  --radius-card: 10px;
-  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-control: 9px;
   --radius-pill: 999px;
 
   --vx-safe-top: env(safe-area-inset-top, 0px);
@@ -55,44 +57,44 @@
 }
 
 [data-app-theme='dark'] {
-  --vx-text: #ede7da;
-  --vx-text-soft: #a5ab9c;
-  --vx-bg: #101412;
-  --vx-surface: #1a201b;
-  --vx-surface-raised: #222925;
-  --vx-primary: #3e7258;
-  --vx-primary-hover: #488365;
-  --vx-on-primary: #ffffff;
-  --vx-accent: #c9a97d;
-  --vx-border: #2a322c;
-  --vx-border-strong: #43504a;
-  --vx-interactive: #93c7aa;
-  --vx-danger: #d98a76;
-  --vx-focus: #93c7aa;
+  --vx-text: #efe7d9;
+  --vx-text-soft: #a99f91;
+  --vx-bg: #16120f;
+  --vx-surface: #1f1a15;
+  --vx-surface-raised: #29231d;
+  --vx-primary: #c86a3e;
+  --vx-primary-hover: #d67a50;
+  --vx-on-primary: #fff6ee;
+  --vx-accent: #b9a6d8;
+  --vx-border: #332c25;
+  --vx-border-strong: #4d4238;
+  --vx-interactive: #e69c74;
+  --vx-danger: #e08a7a;
+  --vx-focus: #e69c74;
   --vx-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
-  --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 12px 32px rgb(0 0 0 / 0.5);
+  --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 14px 36px rgb(0 0 0 / 0.5);
   --vx-scrim: rgb(0 0 0 / 0.6);
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-app-theme='light']) {
-    --vx-text: #ede7da;
-    --vx-text-soft: #a5ab9c;
-    --vx-bg: #101412;
-    --vx-surface: #1a201b;
-    --vx-surface-raised: #222925;
-    --vx-primary: #3e7258;
-    --vx-primary-hover: #488365;
-    --vx-on-primary: #ffffff;
-    --vx-accent: #c9a97d;
-    --vx-border: #2a322c;
-    --vx-border-strong: #43504a;
-    --vx-interactive: #93c7aa;
-    --vx-danger: #d98a76;
-    --vx-focus: #93c7aa;
+    --vx-text: #efe7d9;
+    --vx-text-soft: #a99f91;
+    --vx-bg: #16120f;
+    --vx-surface: #1f1a15;
+    --vx-surface-raised: #29231d;
+    --vx-primary: #c86a3e;
+    --vx-primary-hover: #d67a50;
+    --vx-on-primary: #fff6ee;
+    --vx-accent: #b9a6d8;
+    --vx-border: #332c25;
+    --vx-border-strong: #4d4238;
+    --vx-interactive: #e69c74;
+    --vx-danger: #e08a7a;
+    --vx-focus: #e69c74;
     --vx-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
-    --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 12px 32px rgb(0 0 0 / 0.5);
+    --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 14px 36px rgb(0 0 0 / 0.5);
     --vx-scrim: rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
@@ -100,38 +102,42 @@
 
 /* Reader page themes (independent of app theme) */
 [data-reader-theme='paper'] {
-  --rd-bg: #faf6ef;
-  --rd-text: #1f2620;
-  --rd-soft: #55604f;
-  --rd-link: #2f5d48;
-  --rd-highlight: rgb(201 162 39 / 0.32);
-  --rd-handoff: rgb(47 93 72 / 0.22);
+  --rd-bg: #f6f1e8;
+  --rd-text: #1c1917;
+  --rd-soft: #5f574d;
+  --rd-link: #944320;
+  --rd-highlight: rgb(214 160 52 / 0.35);
+  --rd-handoff: rgb(180 83 42 / 0.2);
+  --rd-bookmark: #b4532a;
   color-scheme: light;
 }
 [data-reader-theme='sepia'] {
-  --rd-bg: #f3e8d2;
-  --rd-text: #382e1f;
+  --rd-bg: #f1e5cf;
+  --rd-text: #3a2f22;
   --rd-soft: #6f6049;
-  --rd-link: #6d4d21;
-  --rd-highlight: rgb(173 122 41 / 0.3);
-  --rd-handoff: rgb(109 77 33 / 0.24);
+  --rd-link: #7d3f1c;
+  --rd-highlight: rgb(173 122 41 / 0.32);
+  --rd-handoff: rgb(125 63 28 / 0.22);
+  --rd-bookmark: #9c4622;
   color-scheme: light;
 }
 [data-reader-theme='night'] {
-  --rd-bg: #101412;
-  --rd-text: #d9d4c7;
-  --rd-soft: #8f958a;
-  --rd-link: #93c7aa;
-  --rd-highlight: rgb(201 169 125 / 0.3);
-  --rd-handoff: rgb(147 199 170 / 0.26);
+  --rd-bg: #16120f;
+  --rd-text: #ddd5c6;
+  --rd-soft: #918a7e;
+  --rd-link: #e69c74;
+  --rd-highlight: rgb(214 160 52 / 0.3);
+  --rd-handoff: rgb(230 156 116 / 0.24);
+  --rd-bookmark: #e69c74;
   color-scheme: dark;
 }
 [data-reader-theme='contrast'] {
   --rd-bg: #000000;
   --rd-text: #ffffff;
   --rd-soft: #d0d0d0;
-  --rd-link: #a8ffd0;
+  --rd-link: #ffc48a;
   --rd-highlight: rgb(255 214 90 / 0.45);
-  --rd-handoff: rgb(168 255 208 / 0.4);
+  --rd-handoff: rgb(255 196 138 / 0.4);
+  --rd-bookmark: #ffc48a;
   color-scheme: dark;
 }

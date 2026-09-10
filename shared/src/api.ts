@@ -124,24 +124,134 @@ export const jobSchema = z.object({
   createdAt: z.string(),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
+  /** What the job is about (pair/book/model), for queue displays. */
+  subject: z
+    .object({
+      title: z.string(),
+      sub: z.string().nullable(),
+      pairId: z.string().nullable(),
+      bookId: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 export type Job = z.infer<typeof jobSchema>;
+
+/**
+ * Roles. `admin` runs the server and its people; `curator` shepherds pairs
+ * (confirm / dismiss / re-align, watch the queue); `reader` reads and listens.
+ * Every role keeps its own progress, bookmarks and offline copies.
+ */
+export const roleSchema = z.enum(['admin', 'curator', 'reader']);
+export type Role = z.infer<typeof roleSchema>;
+export const ROLE_LABELS: Record<Role, { label: string; blurb: string }> = {
+  admin: { label: 'Admin', blurb: 'Everything: users, libraries, models, server settings.' },
+  curator: {
+    label: 'Curator',
+    blurb: 'Confirms and dismisses pairs, starts alignments, watches the queue.',
+  },
+  reader: { label: 'Reader', blurb: 'Reads and listens; own progress, bookmarks and downloads.' },
+};
+
+const usernameSchema = z
+  .string()
+  .min(3)
+  .max(32)
+  .regex(/^[a-zA-Z0-9._-]+$/, 'Letters, digits, dots, dashes and underscores only');
+const passwordSchema = z.string().min(10, 'At least 10 characters').max(1024);
+const displayNameSchema = z.string().trim().min(1).max(80);
+
+export const userDtoSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  displayName: z.string().nullable(),
+  role: roleSchema,
+  status: z.enum(['active', 'disabled']),
+  createdAt: z.string(),
+  lastLoginAt: z.string().nullable(),
+  /** Signs in through the reverse proxy (no local password). */
+  proxyManaged: z.boolean(),
+  sessions: z.number().int(),
+  booksInProgress: z.number().int(),
+});
+export type UserDto = z.infer<typeof userDtoSchema>;
+
+export const createUserSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  role: roleSchema.default('reader'),
+  displayName: displayNameSchema.optional(),
+});
+export const updateUserSchema = z.object({
+  role: roleSchema.optional(),
+  status: z.enum(['active', 'disabled']).optional(),
+  displayName: displayNameSchema.nullable().optional(),
+  /** Admin-set new password; signs the user out everywhere. */
+  password: passwordSchema.optional(),
+});
+export const createInviteSchema = z.object({
+  role: roleSchema.default('reader'),
+  displayName: displayNameSchema.optional(),
+  /** Suggested username, editable by the invitee. */
+  username: usernameSchema.optional(),
+  expiresInDays: z.number().int().min(1).max(30).default(7),
+});
+export const inviteDtoSchema = z.object({
+  id: z.string(),
+  role: roleSchema,
+  displayName: z.string().nullable(),
+  username: z.string().nullable(),
+  createdBy: z.string().nullable(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  usedAt: z.string().nullable(),
+});
+export type InviteDto = z.infer<typeof inviteDtoSchema>;
+export const acceptInviteSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  displayName: displayNameSchema.optional(),
+});
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(1024),
+  newPassword: passwordSchema,
+});
 
 export const loginSchema = z.object({
   username: z.string().min(1).max(64),
   password: z.string().min(1).max(1024),
 });
 
+const dirListSchema = z.array(z.string().trim().min(1).max(1024)).max(16);
+
 export const setupSchema = z.object({
-  username: z
-    .string()
-    .min(3)
-    .max(32)
-    .regex(/^[a-zA-Z0-9._-]+$/),
-  password: z.string().min(10).max(1024),
+  username: usernameSchema,
+  password: passwordSchema,
+  displayName: displayNameSchema.optional(),
   /** One-time bootstrap token proving control of the server (env/secret file/log). */
   setupToken: z.string().min(8).max(512),
+  /** Library roots chosen in the wizard (ignored when pinned by env). */
+  ebookDirs: dirListSchema.optional(),
+  audiobookDirs: dirListSchema.optional(),
+  defaultLanguage: z.string().min(2).max(16).optional(),
 });
+export const testPathsSchema = z.object({
+  paths: dirListSchema,
+  /** What the folder is expected to hold; drives the file-count hint. */
+  kind: bookKindSchema.optional(),
+});
+export const pathCheckSchema = z.object({
+  path: z.string(),
+  ok: z.boolean(),
+  exists: z.boolean(),
+  isDirectory: z.boolean(),
+  readable: z.boolean(),
+  /** Matching files found in a shallow, capped walk (null when unreadable). */
+  matches: z.number().int().nullable(),
+  sampled: z.boolean(),
+  problem: z.string().nullable(),
+});
+export type PathCheck = z.infer<typeof pathCheckSchema>;
 
 export const settingsSchema = z.object({
   defaultLanguage: z.string().min(2).max(16),
@@ -155,5 +265,8 @@ export const settingsSchema = z.object({
   languageModels: z.record(z.string().max(8), z.string().max(64)).default({}),
   /** Fetch the multilingual default (large-v3-turbo) on first start; other languages are always manual. */
   autoDownloadDefaultModel: z.boolean().default(true),
+  /** Library roots (read-only). Env vars VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS pin these. */
+  ebookDirs: dirListSchema.default([]),
+  audiobookDirs: dirListSchema.default([]),
 });
 export type Settings = z.infer<typeof settingsSchema>;

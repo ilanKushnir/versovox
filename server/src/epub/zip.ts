@@ -32,10 +32,10 @@ export interface ZipLimits {
 }
 
 export const EPUB_ZIP_LIMITS: ZipLimits = {
-  maxCompressedBytes: 100 * 1024 * 1024,
-  maxEntryBytes: 64 * 1024 * 1024,
-  maxTotalBytes: 300 * 1024 * 1024,
-  maxEntries: 4096,
+  maxCompressedBytes: 400 * 1024 * 1024,
+  maxEntryBytes: 96 * 1024 * 1024,
+  maxTotalBytes: 900 * 1024 * 1024,
+  maxEntries: 20_000,
   maxTotalRatio: 150,
 };
 

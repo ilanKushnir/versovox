@@ -4,6 +4,7 @@ import path from 'node:path';
 import posix from 'node:path/posix';
 import { type FastifyInstance } from 'fastify';
 import { settingsSchema } from '@versovox/shared';
+import { requireRole } from '../../auth/roles.js';
 import { type AppContext, activeDerivedDir } from '../../context.js';
 import { loadManifest, loadSentences } from '../../epub/extract.js';
 import {
@@ -12,41 +13,98 @@ import {
   trackSourceVersion,
 } from '../../audio/integrity.js';
 import { realResolveWithin } from '../../util/paths.js';
-import { resolveSettings, saveSettings } from '../../domain/settings.js';
+import { libraryRoots, resolveSettings, saveSettings } from '../../domain/settings.js';
 import { cancelJob, retryJob } from '../../jobs/queue.js';
+import { modelById } from '../../transcription/models.js';
 
 export function registerJobRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
+
+  const bookTitle = (id: string): string | null => {
+    const row = db.prepare('SELECT title FROM books WHERE id = ?').get(id) as
+      { title: string } | undefined;
+    return row?.title ?? null;
+  };
+  /** Human subject of a job: pair titles, book title, model label. */
+  const subjectOf = (type: string, payload: Record<string, unknown>) => {
+    try {
+      if (type === 'align' && typeof payload.pairId === 'string') {
+        const pair = db
+          .prepare('SELECT ebook_id, audio_id FROM pairs WHERE id = ?')
+          .get(payload.pairId) as { ebook_id: string; audio_id: string } | undefined;
+        if (!pair) return null;
+        const e = bookTitle(pair.ebook_id);
+        const a = bookTitle(pair.audio_id);
+        return {
+          title: e ?? a ?? 'Pair',
+          sub: e && a && e !== a ? `${e} ⇄ ${a}` : null,
+          pairId: payload.pairId,
+          bookId: pair.ebook_id,
+        };
+      }
+      if (
+        (type === 'index-ebook' || type === 'index-audio') &&
+        typeof payload.bookId === 'string'
+      ) {
+        return {
+          title: bookTitle(payload.bookId) ?? 'Book',
+          sub: null,
+          pairId: null,
+          bookId: payload.bookId,
+        };
+      }
+      if (type === 'model-download' && typeof payload.modelId === 'string') {
+        return {
+          title: modelById(payload.modelId)?.label ?? String(payload.modelId),
+          sub: 'Speech model',
+          pairId: null,
+          bookId: null,
+        };
+      }
+    } catch {
+      /* subject is best effort */
+    }
+    return null;
+  };
 
   app.get('/api/jobs', async () => {
     const rows = db
       .prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT 100')
       .all() as Record<string, unknown>[];
     return {
-      jobs: rows.map((r) => ({
-        id: String(r.id),
-        type: String(r.type),
-        state: String(r.state),
-        progress: Number(r.progress),
-        detail: (r.detail as string) ?? null,
-        error: (r.error as string) ?? null,
-        attempts: Number(r.attempts),
-        createdAt: String(r.created_at),
-        startedAt: (r.started_at as string) ?? null,
-        finishedAt: (r.finished_at as string) ?? null,
-      })),
+      jobs: rows.map((r) => {
+        let payload: Record<string, unknown> = {};
+        try {
+          payload = JSON.parse(String(r.payload_json ?? '{}'));
+        } catch {
+          /* ignore */
+        }
+        return {
+          id: String(r.id),
+          type: String(r.type),
+          state: String(r.state),
+          progress: Number(r.progress),
+          detail: (r.detail as string) ?? null,
+          error: (r.error as string) ?? null,
+          attempts: Number(r.attempts),
+          createdAt: String(r.created_at),
+          startedAt: (r.started_at as string) ?? null,
+          finishedAt: (r.finished_at as string) ?? null,
+          subject: subjectOf(String(r.type), payload),
+        };
+      }),
     };
   });
 
   app.post('/api/jobs/:id/cancel', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
+    if (!requireRole(req, reply, 'curator')) return reply;
     return { ok: cancelJob(db, id) };
   });
 
   app.post('/api/jobs/:id/retry', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
+    if (!requireRole(req, reply, 'curator')) return reply;
     return { ok: retryJob(db, id) };
   });
 }
@@ -63,8 +121,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
         dataDir: config.dataDir,
         cacheDir: config.cacheDir,
         modelsDir: config.modelsDir,
-        ebookDirs: config.ebookDirs,
-        audiobookDirs: config.audiobookDirs,
+        ...libraryRoots(db, config),
       },
       precedence:
         'Environment variables override in-app settings; in-app settings override defaults.',

@@ -66,10 +66,24 @@ export function enqueueJob(
   }
 }
 
-export function claimNextJob(db: DB): JobRow | null {
+/** Job types that run for hours on the CPU (whisper). Everything else is light. */
+export const HEAVY_JOB_TYPES = ['align'] as const;
+
+export function claimNextJob(
+  db: DB,
+  opts: { lane?: 'heavy' | 'light' | 'any' } = {},
+): JobRow | null {
+  const lane = opts.lane ?? 'any';
+  const heavy = HEAVY_JOB_TYPES.map((t) => `'${t}'`).join(',');
+  const where =
+    lane === 'heavy'
+      ? `AND type IN (${heavy})`
+      : lane === 'light'
+        ? `AND type NOT IN (${heavy})`
+        : '';
   const candidate = db
     .prepare(
-      `SELECT id FROM jobs WHERE state = 'queued' ORDER BY priority DESC, created_at LIMIT 1`,
+      `SELECT id FROM jobs WHERE state = 'queued' ${where} ORDER BY priority DESC, created_at LIMIT 1`,
     )
     .get() as { id: string } | undefined;
   if (!candidate) return null;

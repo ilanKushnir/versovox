@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Job, type Settings } from '@versovox/shared';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { useSession } from '../state/session';
 import { useToast } from '../components/ui';
 import { IconAlert, IconCheck, IconDownload, IconTrash } from '../components/icons';
@@ -8,6 +8,9 @@ import { formatBytes, formatDate } from '../lib/format';
 import { storageEstimate } from '../offline/downloads';
 import { type ModelInfo, type ModelsResponse } from '../lib/types';
 import { applyAppThemeColor } from '../lib/themeColor';
+import { Link } from 'react-router-dom';
+import { folderApi, LibraryFolders } from '../components/LibraryFolders';
+import { ROLE_LABELS, type Role } from '@versovox/shared';
 
 interface SettingsResponse {
   settings: Settings;
@@ -112,21 +115,46 @@ export function SettingsPage() {
         <p>Library, appearance, speech models, and this server's background work.</p>
       </header>
 
+      {isAdmin && (
+        <section className="settings-section settings-section--people" aria-label="People">
+          <div className="people-teaser">
+            <div>
+              <h2>People</h2>
+              <p className="settings-section__lede" style={{ margin: 0 }}>
+                Accounts, roles and invitations. Everyone keeps their own progress and bookmarks.
+              </p>
+            </div>
+            <Link className="btn btn--secondary" to="/settings/people">
+              Manage people
+            </Link>
+          </div>
+        </section>
+      )}
+
       <section className="settings-section" aria-label="Libraries">
         <h2>Libraries</h2>
         <p className="settings-section__lede">
-          Library folders are mounted read-only and configured by the server operator
-          (VX_EBOOK_DIRS, VX_AUDIOBOOK_DIRS). Versovox never writes into them.
+          Folders are only ever read — Versovox never writes into them. New titles are picked up by
+          the periodic rescan or right away with the button below.
         </p>
-        <dl style={{ margin: 0 }}>
-          <div className="kv">
-            <dt>Ebook folders</dt>
-            <dd>{data.paths.ebookDirs.join(', ') || 'Not configured'}</dd>
-          </div>
-          <div className="kv">
-            <dt>Audiobook folders</dt>
-            <dd>{data.paths.audiobookDirs.join(', ') || 'Not configured'}</dd>
-          </div>
+        {isAdmin ? (
+          <LibrariesEditor
+            data={data}
+            onSaved={(paths) => setData((d) => (d ? { ...d, paths: { ...d.paths, ...paths } } : d))}
+          />
+        ) : (
+          <dl style={{ margin: 0 }}>
+            <div className="kv">
+              <dt>Ebook folders</dt>
+              <dd>{data.paths.ebookDirs.join(', ') || 'Not configured'}</dd>
+            </div>
+            <div className="kv">
+              <dt>Audiobook folders</dt>
+              <dd>{data.paths.audiobookDirs.join(', ') || 'Not configured'}</dd>
+            </div>
+          </dl>
+        )}
+        <dl style={{ margin: 'var(--sp-4) 0 0' }}>
           <div className="kv">
             <dt>App data</dt>
             <dd>{data.paths.dataDir}</dd>
@@ -321,9 +349,12 @@ export function SettingsPage() {
       <section className="settings-section" aria-label="Account">
         <h2>Account</h2>
         <p style={{ fontSize: 14.5 }}>
-          Signed in as <strong>{user?.username}</strong> ({user?.role})
-          {via === 'proxy' ? ' through your identity provider.' : '.'}
+          Signed in as <strong>{user?.displayName ?? user?.username}</strong>
+          {user?.displayName ? ` (@${user.username})` : ''} ·{' '}
+          {ROLE_LABELS[(user?.role as Role) ?? 'reader']?.label ?? user?.role}
+          {via === 'proxy' ? ', through your identity provider.' : '.'}
         </p>
+        <AccountSelfService via={via} />
         {via === 'proxy' ? (
           <p style={{ fontSize: 13.5, color: 'var(--vx-text-soft)' }}>
             Sign-in is handled by the reverse proxy in front of Versovox; sign out from there.
@@ -335,6 +366,180 @@ export function SettingsPage() {
         )}
       </section>
     </main>
+  );
+}
+
+function LibrariesEditor({
+  data,
+  onSaved,
+}: {
+  data: SettingsResponse;
+  onSaved: (paths: { ebookDirs: string[]; audiobookDirs: string[] }) => void;
+}) {
+  const toast = useToast();
+  const [ebookDirs, setEbookDirs] = useState(data.paths.ebookDirs);
+  const [audioDirs, setAudioDirs] = useState(data.paths.audiobookDirs);
+  const [saving, setSaving] = useState(false);
+  const folders = useMemo(() => folderApi(), []);
+  const pinnedE = data.envPinned.includes('ebookDirs');
+  const pinnedA = data.envPinned.includes('audiobookDirs');
+  const dirty =
+    ebookDirs.join('\n') !== data.paths.ebookDirs.join('\n') ||
+    audioDirs.join('\n') !== data.paths.audiobookDirs.join('\n');
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api('/api/settings', {
+        method: 'PUT',
+        body: {
+          ...(pinnedE ? {} : { ebookDirs }),
+          ...(pinnedA ? {} : { audiobookDirs: audioDirs }),
+        },
+      });
+      onSaved({ ebookDirs, audiobookDirs: audioDirs });
+      await api('/api/library/rescan', { method: 'POST' }).catch(() => {});
+      toast.show('Folders saved — rescanning');
+    } catch {
+      toast.show('Could not save folders');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div>
+      <h3 className="settings-h3">Ebook folders</h3>
+      <LibraryFolders
+        kind="ebook"
+        value={ebookDirs}
+        onChange={setEbookDirs}
+        folders={folders}
+        disabled={pinnedE}
+        pinnedNote={pinnedE ? 'Pinned by VX_EBOOK_DIRS on the server.' : null}
+      />
+      <h3 className="settings-h3">Audiobook folders</h3>
+      <LibraryFolders
+        kind="audio"
+        value={audioDirs}
+        onChange={setAudioDirs}
+        folders={folders}
+        disabled={pinnedA}
+        pinnedNote={pinnedA ? 'Pinned by VX_AUDIOBOOK_DIRS on the server.' : null}
+      />
+      {dirty && (
+        <button
+          className="btn"
+          style={{ marginTop: 'var(--sp-3)' }}
+          disabled={saving}
+          onClick={() => void save()}
+        >
+          {saving ? 'Saving…' : 'Save folders & rescan'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AccountSelfService({ via }: { via: string }) {
+  const { user, refresh } = useSession();
+  const toast = useToast();
+  const [name, setName] = useState(user?.displayName ?? '');
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const saveName = async () => {
+    setBusy(true);
+    try {
+      await api('/api/auth/me', { method: 'PATCH', body: { displayName: name.trim() || null } });
+      await refresh();
+      toast.show('Name saved');
+    } catch {
+      toast.show('Could not save');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const changePw = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ revokedOtherSessions: number }>('/api/auth/password', {
+        method: 'POST',
+        body: { currentPassword: cur, newPassword: next },
+      });
+      setCur('');
+      setNext('');
+      toast.show(
+        r.revokedOtherSessions
+          ? `Password changed — signed out of ${r.revokedOtherSessions} other device${r.revokedOtherSessions === 1 ? '' : 's'}`
+          : 'Password changed',
+      );
+    } catch (err) {
+      toast.show(
+        err instanceof ApiError && err.code === 'bad-credentials'
+          ? 'Current password is wrong'
+          : err instanceof ApiError && err.code === 'invalid'
+            ? err.message.replace(/^invalid:?\s*/, '')
+            : 'Could not change the password',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="account-grid">
+      <div className="field">
+        <label htmlFor="ac-name">Display name</label>
+        <div className="linkbox">
+          <input
+            id="ac-name"
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={user?.username}
+          />
+          <button
+            className="btn btn--secondary"
+            disabled={busy || (name.trim() || '') === (user?.displayName ?? '')}
+            onClick={() => void saveName()}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+      {via !== 'proxy' && (
+        <div className="field">
+          <label htmlFor="ac-cur">Change password</label>
+          <div className="pw-row">
+            <input
+              id="ac-cur"
+              className="input"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Current"
+              value={cur}
+              onChange={(e) => setCur(e.target.value)}
+            />
+            <input
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              placeholder="New (10+ chars)"
+              minLength={10}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              aria-label="New password"
+            />
+            <button
+              className="btn btn--secondary"
+              disabled={busy || !cur || next.length < 10}
+              onClick={() => void changePw()}
+            >
+              Change
+            </button>
+          </div>
+          <span className="hint">Other devices are signed out; this one stays in.</span>
+        </div>
+      )}
+    </div>
   );
 }
 

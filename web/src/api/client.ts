@@ -75,7 +75,13 @@ async function handleUnauthorized(url: string): Promise<void> {
 
 export async function api<T>(
   url: string,
-  opts: { method?: string; body?: unknown; signal?: AbortSignal; keepalive?: boolean } = {},
+  opts: {
+    method?: string;
+    body?: unknown;
+    signal?: AbortSignal;
+    keepalive?: boolean;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<T> {
   const method = opts.method ?? 'GET';
   // Mutations always carry an explicit JSON body (`{}` when the call has
@@ -92,6 +98,7 @@ export async function api<T>(
       headers: {
         'x-vx-csrf': '1',
         ...(hasBody ? { 'content-type': 'application/json' } : {}),
+        ...(opts.headers ?? {}),
       },
       body: hasBody ? JSON.stringify(opts.body ?? {}) : undefined,
     });

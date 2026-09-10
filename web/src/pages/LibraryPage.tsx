@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { type BookSummary } from '@versovox/shared';
 import { api } from '../api/client';
-import { Cover, EmptyState, useToast } from '../components/ui';
-import { useSession } from '../state/session';
+import { Cover, EmptyState } from '../components/ui';
 import {
   IconAlert,
   IconBookOpen,
@@ -38,7 +37,6 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function LibraryPage() {
-  const { user } = useSession();
   const [data, setData] = useState<LibraryData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offlineBooks, setOfflineBooks] = useState<BookSummary[] | null>(null);
@@ -48,7 +46,6 @@ export function LibraryPage() {
   const [kind, setKind] = useState<Kind>('all');
   const [shelf, setShelf] = useState<Shelf>('none');
   const [sort, setSort] = useState<Sort>('title');
-  const toast = useToast();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const requestSeq = useRef(0);
 
@@ -112,16 +109,6 @@ export function LibraryPage() {
     };
   }, [data?.scanActive, load]);
 
-  const rescan = async () => {
-    try {
-      await api('/api/library/rescan', { method: 'POST' });
-      toast.show('Library rescan started');
-      void load();
-    } catch {
-      toast.show('Rescan failed — admin required');
-    }
-  };
-
   const books = useMemo(() => {
     const source = data?.books ?? offlineBooks ?? [];
     return shelf === 'downloaded' ? source.filter((b) => downloaded.has(b.id)) : source;
@@ -160,7 +147,17 @@ export function LibraryPage() {
       )}
 
       {showContinue && hero && (
-        <section className="hero" aria-label="Continue">
+        <section className="band band--continue" aria-labelledby="continue-h">
+          <div className="band__head">
+            <h2 id="continue-h" className="band__title">
+              Continue
+            </h2>
+            {continueBooks.length > 1 && (
+              <button className="band__more" onClick={() => setShelf('in-progress')}>
+                All in progress · {continueBooks.length}
+              </button>
+            )}
+          </div>
           <HeroCard book={hero} />
           {rail.length > 0 && (
             <div className="continue-rail">
@@ -172,134 +169,119 @@ export function LibraryPage() {
         </section>
       )}
 
-      <div className="toolbar">
-        <div className="searchbox">
-          <IconSearch size={17} />
-          <input
-            className="input"
-            type="search"
-            placeholder="Search title, author, series"
-            aria-label="Search library"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <div className="segmented segmented--inline" role="group" aria-label="Library type">
-          <button aria-pressed={kind === 'all'} onClick={() => setKind('all')}>
-            All
-          </button>
-          <button aria-pressed={kind === 'ebook'} onClick={() => setKind('ebook')}>
-            <IconBookOpen size={15} /> Ebooks
-          </button>
-          <button aria-pressed={kind === 'audio'} onClick={() => setKind('audio')}>
-            <IconHeadphones size={15} /> Audiobooks
-          </button>
-        </div>
-        <label className="visually-hidden" htmlFor="lib-sort">
-          Sort by
-        </label>
-        <select
-          id="lib-sort"
-          className="input"
-          style={{ width: 'auto', flex: '0 0 auto' }}
-          value={sort}
-          onChange={(e) => setSort(e.target.value as Sort)}
-        >
-          <option value="title">Title</option>
-          <option value="author">Author</option>
-          <option value="recent">Recently active</option>
-          <option value="added">Recently added</option>
-        </select>
-      </div>
-      <div className="chip-row" role="group" aria-label="Shelves">
-        {(
-          [
-            ['none', 'Everything', null],
-            ['in-progress', 'In progress', <IconPlay size={13} key="p" />],
-            ['paired', 'Paired editions', <IconLink size={13} key="l" />],
-            ['downloaded', 'Downloaded', <IconDownload size={13} key="d" />],
-          ] as [Shelf, string, React.ReactNode][]
-        ).map(([value, label, icon]) => (
-          <button
-            key={value}
-            className="chip"
-            aria-pressed={shelf === value}
-            onClick={() => setShelf(value)}
-          >
-            {icon}
-            {label}
-            {value === 'downloaded' && downloaded.size > 0 ? ` · ${downloaded.size}` : ''}
-          </button>
-        ))}
-      </div>
-
-      {data?.scanActive && (
-        <div className="banner" role="status" style={{ marginBlockStart: 'var(--sp-4)' }}>
-          <div className="spinner" style={{ width: 16, height: 16 }} />
-          Scanning your libraries — new books appear as they are indexed.
-        </div>
-      )}
-
-      {!data && !offlineBooks ? (
-        <div className="book-grid" aria-busy="true" style={{ marginBlockStart: 'var(--sp-5)' }}>
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i}>
-              <div className="skeleton" style={{ aspectRatio: '2/3' }} />
-            </div>
-          ))}
-        </div>
-      ) : books.length === 0 ? (
-        query || kind !== 'all' || shelf !== 'none' ? (
-          <EmptyState
-            icon={shelf === 'downloaded' ? <IconDownload size={40} /> : <IconSearch size={40} />}
-            title={shelf === 'downloaded' ? 'Nothing downloaded yet' : 'No matches'}
-          >
-            {shelf === 'downloaded'
-              ? 'Open a book and tap Download to keep it on this device for flights and dead zones.'
-              : 'Nothing in your library matches this search or filter.'}
-          </EmptyState>
-        ) : (
-          <EmptyState icon={<IconLibrary size={44} />} title="Your library is empty">
-            Versovox reads existing ebook and audiobook folders without changing them. Mount your
-            libraries (VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS) and run a scan.
-          </EmptyState>
-        )
-      ) : (
-        <>
-          <h2 className="section-title">
+      <section className="band band--library" aria-labelledby="library-h">
+        <div className="band__head">
+          <h2 id="library-h" className="band__title">
             {shelf === 'downloaded'
               ? 'Downloaded'
               : shelf === 'in-progress'
                 ? 'In progress'
                 : shelf === 'paired'
                   ? 'Paired editions'
-                  : kind === 'ebook'
-                    ? 'Ebooks'
-                    : kind === 'audio'
-                      ? 'Audiobooks'
-                      : 'All books'}{' '}
-            <span className="section-title__count">{books.length}</span>
-            {shelf === 'none' && kind === 'all' && !query && data && (
-              <span className="section-title__stats">
-                {stats.ebooks} ebooks · {stats.audio} audiobooks
-                {stats.paired > 0 ? ` · ${Math.round(stats.paired)} paired` : ''}
-              </span>
-            )}
+                  : 'Library'}
+            {books.length > 0 && <span className="section-title__count">{books.length}</span>}
           </h2>
+          {shelf === 'none' && kind === 'all' && !query && data && (
+            <span className="band__stats">
+              {stats.ebooks} ebooks · {stats.audio} audiobooks
+              {stats.paired > 0 ? ` · ${Math.round(stats.paired)} paired` : ''}
+            </span>
+          )}
+        </div>
+        <div className="toolbar">
+          <div className="searchbox">
+            <IconSearch size={17} />
+            <input
+              className="input"
+              type="search"
+              placeholder="Search title, author, series"
+              aria-label="Search library"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="segmented segmented--inline" role="group" aria-label="Library type">
+            <button aria-pressed={kind === 'all'} onClick={() => setKind('all')}>
+              All
+            </button>
+            <button aria-pressed={kind === 'ebook'} onClick={() => setKind('ebook')}>
+              <IconBookOpen size={15} /> Ebooks
+            </button>
+            <button aria-pressed={kind === 'audio'} onClick={() => setKind('audio')}>
+              <IconHeadphones size={15} /> Audiobooks
+            </button>
+          </div>
+          <label className="visually-hidden" htmlFor="lib-shelf">
+            Shelf
+          </label>
+          <select
+            id="lib-shelf"
+            className="input input--select"
+            value={shelf}
+            onChange={(e) => setShelf(e.target.value as Shelf)}
+          >
+            <option value="none">Everything</option>
+            <option value="in-progress">In progress</option>
+            <option value="paired">Paired editions</option>
+            <option value="downloaded">
+              Downloaded{downloaded.size > 0 ? ` (${downloaded.size})` : ''}
+            </option>
+          </select>
+          <label className="visually-hidden" htmlFor="lib-sort">
+            Sort by
+          </label>
+          <select
+            id="lib-sort"
+            className="input input--select"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as Sort)}
+          >
+            <option value="title">By title</option>
+            <option value="author">By author</option>
+            <option value="recent">Recently active</option>
+            <option value="added">Recently added</option>
+          </select>
+        </div>
+
+        {data?.scanActive && (
+          <div className="banner" role="status" style={{ marginBlockStart: 'var(--sp-4)' }}>
+            <div className="spinner" style={{ width: 16, height: 16 }} />
+            Scanning your libraries — new books appear as they are indexed.
+          </div>
+        )}
+
+        {!data && !offlineBooks ? (
+          <div className="book-grid" aria-busy="true" style={{ marginBlockStart: 'var(--sp-5)' }}>
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i}>
+                <div className="skeleton" style={{ aspectRatio: '2/3' }} />
+              </div>
+            ))}
+          </div>
+        ) : books.length === 0 ? (
+          query || kind !== 'all' || shelf !== 'none' ? (
+            <EmptyState
+              icon={shelf === 'downloaded' ? <IconDownload size={40} /> : <IconSearch size={40} />}
+              title={shelf === 'downloaded' ? 'Nothing downloaded yet' : 'No matches'}
+            >
+              {shelf === 'downloaded'
+                ? 'Open a book and tap Download to keep it on this device for flights and dead zones.'
+                : 'Nothing in your library matches this search or filter.'}
+            </EmptyState>
+          ) : (
+            <EmptyState icon={<IconLibrary size={44} />} title="Your library is empty">
+              Versovox reads existing ebook and audiobook folders without changing them. Mount your
+              libraries (VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS) and run a scan.
+            </EmptyState>
+          )
+        ) : (
           <div className="book-grid">
             {books.map((b) => (
               <BookCard key={b.id} book={b} offline={downloaded.has(b.id)} />
             ))}
           </div>
-        </>
-      )}
-      {user?.role === 'admin' && data && (
-        <div style={{ marginBlockStart: 'var(--sp-7)', textAlign: 'center' }}>
-          <button className="btn btn--ghost" onClick={() => void rescan()}>
-            Rescan libraries
-          </button>
-        </div>
-      )}
+        )}
+      </section>
     </main>
   );
 }

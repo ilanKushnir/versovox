@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -56,6 +56,59 @@ export interface TranscriptionRequest {
   onCheckpoint?: (cp: { nextTrack: number; words: TranscriptWord[] }) => void;
   /** Abort external processes (e.g. the job lease was lost). */
   signal?: AbortSignal;
+  /** Live progress: which track is being transcribed and how far along it is. */
+  onProgress?: (info: { track: number; trackCount: number; trackPct: number }) => void;
+}
+
+/**
+ * Run whisper-cli with `--print-progress`, forwarding its "progress = NN%"
+ * lines so a multi-hour transcription shows movement instead of a frozen
+ * bar. Enforces the timeout and abort signal like execFile would.
+ */
+function runWhisper(
+  bin: string,
+  args: string[],
+  opts: { timeoutMs: number; signal?: AbortSignal; onPct?: (pct: number) => void },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, ['--print-progress', ...args], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let tail = '';
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
+      if (err) reject(err);
+      else resolve();
+    };
+    const onAbort = () => {
+      child.kill('SIGKILL');
+      finish(new Error('whisper aborted'));
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new Error(`whisper timed out after ${Math.round(opts.timeoutMs / 60000)} min`));
+    }, opts.timeoutMs);
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      tail = (tail + text).slice(-4000);
+      for (const m of text.matchAll(/progress\s*=\s*(\d{1,3})%/g)) opts.onPct?.(Number(m[1]));
+    });
+    child.on('error', (err) => finish(err));
+    child.on('close', (code) => {
+      if (code === 0) finish();
+      else
+        finish(
+          new Error(
+            `whisper exited with code ${code}: ${tail.trim().split('\n').slice(-3).join(' | ')}`,
+          ),
+        );
+    });
+  });
 }
 
 export interface TranscriptionResult {
@@ -189,12 +242,13 @@ export class WhisperCliProvider implements TranscriptionProvider {
         const args = ['-ojf', '-of', outPrefix, input];
         if (req.whisperModel) args.unshift('-m', req.whisperModel);
         if (req.language) args.unshift('-l', req.language);
+        req.onProgress?.({ track: t, trackCount: req.trackPaths.length, trackPct: 0 });
         try {
-          await execFileP(req.whisperBin, args, {
-            maxBuffer: 64 * 1024 * 1024,
-            timeout: WHISPER_TIMEOUT_MS,
-            killSignal: 'SIGKILL',
+          await runWhisper(req.whisperBin, args, {
+            timeoutMs: WHISPER_TIMEOUT_MS,
             signal: req.signal,
+            onPct: (pct) =>
+              req.onProgress?.({ track: t, trackCount: req.trackPaths.length, trackPct: pct }),
           });
         } finally {
           if (input !== trackPath) fs.rmSync(input, { force: true });
@@ -215,6 +269,62 @@ export class WhisperCliProvider implements TranscriptionProvider {
       model: `whisper-cli:${path.basename(req.whisperModel || 'default')}`,
       words,
     };
+  }
+}
+
+/**
+ * Transcribe a short excerpt of one track (for the pairing probe): a clip of
+ * `seconds` starting at `startMs`. Returns normalized words with timestamps
+ * relative to the clip.
+ */
+export async function transcribeClip(
+  whisperBin: string,
+  modelPath: string,
+  language: string,
+  trackPath: string,
+  startMs: number,
+  seconds: number,
+  workDir: string,
+  signal?: AbortSignal,
+): Promise<TranscriptWord[]> {
+  fs.mkdirSync(workDir, { recursive: true });
+  const tmpDir = fs.mkdtempSync(path.join(workDir, 'probe-'));
+  const wav = path.join(tmpDir, 'clip.wav');
+  const outPrefix = path.join(tmpDir, 'clip');
+  try {
+    await execFileP(
+      'ffmpeg',
+      [
+        '-y',
+        '-v',
+        'error',
+        '-ss',
+        String(startMs / 1000),
+        '-t',
+        String(seconds),
+        '-i',
+        trackPath,
+        '-vn',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-f',
+        'wav',
+        wav,
+      ],
+      { maxBuffer: 1024 * 1024, timeout: TRANSCODE_TIMEOUT_MS, killSignal: 'SIGKILL', signal },
+    );
+    await runWhisper(whisperBin, ['-m', modelPath, '-l', language, '-ojf', '-of', outPrefix, wav], {
+      timeoutMs: 30 * 60_000,
+      signal,
+    });
+    const data = JSON.parse(fs.readFileSync(`${outPrefix}.json`, 'utf8')) as {
+      transcription?: WhisperSegment[];
+    };
+    return mergeWhisperTokens(data.transcription ?? [], 0);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 

@@ -74,7 +74,7 @@ describe('proxy header SSO', () => {
       remoteAddress: '10.1.2.3',
       headers: { 'x-authentik-username': 'guest' },
     });
-    expect(second.json()).toMatchObject({ user: { username: 'guest', role: 'user' } });
+    expect(second.json()).toMatchObject({ user: { username: 'guest', role: 'reader' } });
 
     // Listed admins are admins regardless of order.
     const admin = await app.inject({

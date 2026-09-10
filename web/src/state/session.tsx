@@ -7,6 +7,7 @@ export interface User {
   id: string;
   username: string;
   role: string;
+  displayName?: string | null;
 }
 
 /** How the current session was established (reverse-proxy SSO vs. password). */

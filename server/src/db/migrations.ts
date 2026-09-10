@@ -248,4 +248,31 @@ ALTER TABLE pairs ADD COLUMN language TEXT;
 ALTER TABLE pairs ADD COLUMN detected_language TEXT;
 `,
   },
+  {
+    version: 5,
+    sql: `
+-- People: display names, disable-without-delete, who added them, last sign-in.
+ALTER TABLE users ADD COLUMN display_name TEXT;
+ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE users ADD COLUMN created_by TEXT;
+ALTER TABLE users ADD COLUMN last_login_at TEXT;
+-- Roles are now admin / curator / reader; the old catch-all 'user' reads only.
+UPDATE users SET role = 'reader' WHERE role NOT IN ('admin', 'curator', 'reader');
+
+-- Invitations: a one-time link creates an account with a preset role. Only
+-- a hash of the token is stored, so a leaked database cannot mint accounts.
+CREATE TABLE invites (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL,
+  display_name TEXT,
+  username TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  used_by TEXT
+);
+`,
+  },
 ];

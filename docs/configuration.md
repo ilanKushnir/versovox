@@ -21,8 +21,8 @@ path to a file containing the secret (Docker secrets friendly), e.g.
 | `VX_DATA_DIR`              | `./data` (image: `/data`)          | SQLite + derived indexes. Local disk only.                                                                                                                                                              |
 | `VX_CACHE_DIR`             | `./cache` (image: `/cache`)        | Covers, transcripts. Reproducible.                                                                                                                                                                      |
 | `VX_MODELS_DIR`            | `./models` (image: `/models`)      | Optional speech model packs.                                                                                                                                                                            |
-| `VX_EBOOK_DIRS`            | —                                  | Comma-separated ebook roots (mounted `:ro`).                                                                                                                                                            |
-| `VX_AUDIOBOOK_DIRS`        | —                                  | Comma-separated audiobook roots (mounted `:ro`).                                                                                                                                                        |
+| `VX_EBOOK_DIRS`            | —                                  | Comma-separated ebook roots (mounted `:ro`). Optional: when unset, the setup wizard / Settings → Libraries store the roots in the database.                                                             |
+| `VX_AUDIOBOOK_DIRS`        | —                                  | Comma-separated audiobook roots (mounted `:ro`). Optional, as above.                                                                                                                                    |
 | `VX_SESSION_SECRET`        | auto-generated                     | HMAC key for session tokens. Set explicitly in production; rotating it signs everyone out. If unset, one is generated and persisted at `<data>/session-secret` (0600).                                  |
 | `VX_SETUP_TOKEN`           | auto-generated                     | One-time first-run bootstrap token required to create the admin account. If unset, generated on first start, printed in the log, stored at `<data>/setup-token` (0600). Consumed when the admin exists. |
 | `VX_TRUST_PROXY`           | `0`                                | Proxy trust for client IPs. `0` (default): forwarded headers ignored. `1`: trust local/private-network proxies. Otherwise: comma-separated proxy IPs/CIDRs.                                             |
@@ -44,6 +44,18 @@ path to a file containing the secret (Docker secrets friendly), e.g.
 ## In-app settings (Settings page)
 
 `defaultLanguage`, `transcribeProvider`, `whisperBin`, `whisperModel`,
-`jobConcurrency` (all env-pinnable), plus `autoPairThreshold` (default 0.92 —
-candidates below it always require manual review) and `storageBudgetMb`
-(reserved for future server-side caches).
+`jobConcurrency`, `ebookDirs`, `audiobookDirs` (all env-pinnable), plus
+`languageModels` / `autoDownloadDefaultModel` (Settings → Speech models),
+`autoPairThreshold` (default 0.92 — candidates below it always require
+manual review) and `storageBudgetMb` (reserved for future server-side
+caches).
+
+## First run
+
+With no accounts yet, the app shows a six-step wizard: bootstrap token →
+admin account → library folders (each folder is tested for existence,
+readability and a shallow count of EPUB/audio files, with a folder picker
+that lists what the server can see) → default narration language → review →
+initialising, which shows the first scan's live progress. Folders pinned by
+`VX_EBOOK_DIRS` / `VX_AUDIOBOOK_DIRS` are shown read-only in the wizard.
+Everything chosen there is editable later under Settings.

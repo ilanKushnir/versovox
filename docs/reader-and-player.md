@@ -85,13 +85,31 @@ Known limitations (deliberate for V1, documented rather than half-built):
 - Speed 0.5×–3× (fine slider plus presets) with pitch preserved
   (`preservesPitch`), remembered per book.
 - Sleep timer: 15/30/45/60 minutes or end of chapter, extendable.
-- Bookmarks at the current instant.
+- Bookmarks: the ribbon button toggles a bookmark at the current instant
+  (filled when the playhead is within 20 s of one); bookmarks appear as dots
+  on the scrubber and in a sheet with jump and delete. Any jump of more than
+  90 s (bookmark, chapter list, scrubber drag) leaves a **Back to m:ss** pill
+  so the previous place is one tap away.
+- The player is a fixed scene: it never scrolls, on iPad or anywhere else;
+  the cover is the only element that gives way on short viewports.
 - Media Session integration (lock-screen metadata, artwork, play/pause,
   seek, previous/next chapter, live position state) where the platform
   supports it.
 - Durable checkpoints: every heartbeat/pause/seek is written to IndexedDB
   before sync; a killed tab loses at most a few seconds and never regresses
   another device's explicit position (see docs/progress.md).
+
+## Bookmarks and getting back
+
+In the reader the ribbon button bookmarks the first sentence on the current
+page (or the passage at the top of the viewport in scroll mode), keeping a
+short excerpt; the button fills and a ribbon hangs from the top edge while a
+bookmarked page is shown, and tapping again removes it. Contents has a
+**Bookmarks & notes** tab listing bookmarks, highlights and notes with
+chapter, position and excerpt, each with jump and delete. Any deliberate jump
+(bookmark, chapter, search result, slider) that moves more than a page away
+shows a **Back to where you were** pill naming the chapter you left; it stays
+until used or dismissed.
 
 ## Two-way switching
 

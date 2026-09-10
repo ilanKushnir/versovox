@@ -24,7 +24,7 @@ import { nowIso } from '../db/index.js';
 
 const USERNAME_RE = /^[a-zA-Z0-9._@-]{1,64}$/;
 /** Never verifies: verifyPassword() requires the `scrypt$…` shape. */
-const UNUSABLE_PASSWORD = '!proxy-sso';
+export const UNUSABLE_PASSWORD = '!proxy-sso';
 
 export interface ProxyAuthConfig {
   header: string;
@@ -91,7 +91,7 @@ export function proxyAuthUser(
   db.exec('BEGIN IMMEDIATE');
   try {
     const count = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
-    const role = wantsAdmin || count === 0 ? 'admin' : 'user';
+    const role = wantsAdmin || count === 0 ? 'admin' : 'reader';
     db.prepare(
       'INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)',
     ).run(id, username, UNUSABLE_PASSWORD, role, nowIso());

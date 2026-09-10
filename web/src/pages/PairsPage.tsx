@@ -16,6 +16,7 @@ import {
   IconSwitch,
 } from '../components/icons';
 import { formatDuration, formatPct } from '../lib/format';
+import { PipelineDiagram, ProcessingQueue } from '../components/Processing';
 import { MANUAL_LINK_NOTE, UNALIGNED_PAIR_NOTE } from '../lib/pairLabel';
 
 type PairAction = 'confirm' | 'reject' | 'unlink' | 'align';
@@ -26,9 +27,10 @@ export function PairsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [howOpen, setHowOpen] = useState(false);
   const toast = useToast();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'curator';
 
   const load = useCallback(async () => {
     try {
@@ -133,14 +135,28 @@ export function PairsPage() {
           <h1>Pairing</h1>
           <p>
             Ebook and audiobook editions of the same work. Metadata alone never links anything:
-            strong matches are verified against the narration first, uncertain ones wait for you,
-            and switching precision is shown per pair.
+            strong matches are verified against the narration first, uncertain ones wait for you.
           </p>
         </div>
-        <button className="btn btn--secondary" onClick={() => setLinkOpen(true)}>
-          <IconLink size={16} /> Link manually
-        </button>
+        <div className="page-head__actions">
+          <button
+            className="btn btn--ghost"
+            onClick={() => setHowOpen((v) => !v)}
+            aria-expanded={howOpen}
+          >
+            How it works
+          </button>
+          <button className="btn btn--secondary" onClick={() => setLinkOpen(true)}>
+            <IconLink size={16} /> Link manually
+          </button>
+        </div>
       </header>
+      {howOpen && (
+        <section className="panel panel--soft" aria-label="How alignment works">
+          <PipelineDiagram />
+        </section>
+      )}
+      <ProcessingQueue canManage={isAdmin} onChange={() => void load()} />
       {linkOpen && (
         <ManualLinkSheet
           onClose={() => setLinkOpen(false)}
@@ -328,7 +344,7 @@ function PairCard({
             : 'unknown — will be detected';
 
   return (
-    <article className={`pair-card pair-card--${pair.status}`}>
+    <article id={`pair-${pair.id}`} className={`pair-card pair-card--${pair.status}`}>
       <div className="pair-card__editions">
         <EditionTile book={pair.ebook} kind="ebook" />
         <span className="pair-card__link" aria-hidden="true">

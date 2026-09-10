@@ -241,7 +241,7 @@ function offlineFallback() {
   return new Response(
     '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">' +
       '<title>Versovox — offline</title>' +
-      '<body style="font-family:system-ui;background:#FAF6EF;color:#1F2620;display:grid;place-items:center;min-height:100dvh;margin:0">' +
+      '<body style="font-family:system-ui;background:#F6F1E8;color:#1C1917;display:grid;place-items:center;min-height:100dvh;margin:0">' +
       '<div style="text-align:center;padding:24px"><h1 style="font-size:20px">You are offline</h1>' +
       '<p>Versovox could not load. Reconnect once, and the app will work offline afterwards.</p></div>',
     { headers: { 'content-type': 'text/html; charset=utf-8' } },

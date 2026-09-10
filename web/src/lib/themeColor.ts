@@ -7,8 +7,8 @@
  * form WebKit is documented to observe — and mirrors the colour onto the
  * root background so nothing behind the bar can flash the old colour.
  */
-const APP_LIGHT = '#faf6ef';
-const APP_DARK = '#101412';
+const APP_LIGHT = '#f6f1e8';
+const APP_DARK = '#16120f';
 
 export function setThemeColor(color: string): void {
   if (typeof document === 'undefined') return;

@@ -7,14 +7,33 @@ header. Schemas are zod-validated; canonical types live in
 
 ## Auth & setup
 
-| Method | Path                | Notes                                                            |
-| ------ | ------------------- | ---------------------------------------------------------------- |
-| GET    | `/api/health`       | public; liveness                                                 |
-| GET    | `/api/setup/status` | public; `{needsSetup}`                                           |
-| POST   | `/api/setup`        | public until first user exists; creates admin, starts first scan |
-| POST   | `/api/auth/login`   | rate limited                                                     |
-| POST   | `/api/auth/logout`  |                                                                  |
-| GET    | `/api/auth/me`      |                                                                  |
+| Method | Path                    | Notes                                                                                |
+| ------ | ----------------------- | ------------------------------------------------------------------------------------ |
+| GET    | `/api/health`           | public; liveness                                                                     |
+| GET    | `/api/setup/status`     | public; `{needsSetup, libraries, languages}` (wizard prefill)                        |
+| POST   | `/api/setup/verify`     | public until first user exists; checks the bootstrap token                           |
+| POST   | `/api/setup/test-paths` | admin, or `x-vx-setup-token` header before setup; folder checks                      |
+| GET    | `/api/setup/browse`     | admin, or `x-vx-setup-token` header before setup; folder picker                      |
+| POST   | `/api/setup`            | public until first user exists; creates admin (+ roots, language), starts first scan |
+| POST   | `/api/auth/login`       | rate limited; `403 account-disabled` for disabled accounts                           |
+| POST   | `/api/auth/logout`      |                                                                                      |
+| GET    | `/api/auth/me`          | `{user: {id, username, role, displayName}, via}`                                     |
+| PATCH  | `/api/auth/me`          | own display name                                                                     |
+| POST   | `/api/auth/password`    | own password (current + new); revokes other sessions                                 |
+
+## People (admin)
+
+| Method | Path                                 | Notes                                                               |
+| ------ | ------------------------------------ | ------------------------------------------------------------------- |
+| GET    | `/api/users`                         | accounts + pending invites                                          |
+| POST   | `/api/users`                         | `{username, password, role, displayName?}`                          |
+| PATCH  | `/api/users/:id`                     | `{role?, status?, displayName?, password?}`; last-admin/self guards |
+| POST   | `/api/users/:id/sign-out-everywhere` |                                                                     |
+| DELETE | `/api/users/:id`                     | removes the account and its personal data                           |
+| POST   | `/api/invites`                       | `{role, displayName?, username?, expiresInDays}` → one-time link    |
+| DELETE | `/api/invites/:id`                   | revoke                                                              |
+| GET    | `/api/invites/:token`                | public, rate limited; what the link offers                          |
+| POST   | `/api/invites/:token/accept`         | public; `{username, password, displayName?}` → account + session    |
 
 ## Library & books
 
@@ -56,8 +75,8 @@ header. Schemas are zod-validated; canonical types live in
 
 ## Jobs & settings
 
-| Method  | Path                              | Notes                         |
-| ------- | --------------------------------- | ----------------------------- |
-| GET     | `/api/jobs`                       | recent background jobs        |
-| POST    | `/api/jobs/:id/cancel` \| `retry` | admin                         |
-| GET/PUT | `/api/settings`                   | env-pinned keys are read-only |
+| Method  | Path                              | Notes                                                                                 |
+| ------- | --------------------------------- | ------------------------------------------------------------------------------------- |
+| GET     | `/api/jobs`                       | recent background jobs, with `subject` (pair/book/model) and live `progress`/`detail` |
+| POST    | `/api/jobs/:id/cancel` \| `retry` | admin or curator                                                                      |
+| GET/PUT | `/api/settings`                   | env-pinned keys are read-only                                                         |

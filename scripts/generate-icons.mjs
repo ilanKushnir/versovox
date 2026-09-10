@@ -26,15 +26,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.join(here, '..', 'web', 'public', 'icons');
 fs.mkdirSync(outDir, { recursive: true });
 
-/** The Versovox mark: a verso page whose edge becomes a sound wave. `pad` insets it for maskable. */
-function iconSvg(size, { pad = 0, bg = '#FAF6EF', ink = '#2F5D48' } = {}) {
+/** The Versovox mark: an open book whose right page rises into a sound wave. `pad` insets it for maskable. */
+function iconSvg(size, { pad = 0, bg = '#F6F1E8', ink = '#B4532A' } = {}) {
   const inner = size - pad * 2;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
   <rect width="${size}" height="${size}" fill="${bg}"/>
   <g transform="translate(${pad} ${pad}) scale(${inner / 24})">
-    <path d="M4 4.5A1.5 1.5 0 0 1 5.5 3h6.2c.7 0 1.3.6 1.3 1.3V20c0 .6-.5 1-1 1H5.5A1.5 1.5 0 0 1 4 19.5z" fill="${ink}"/>
-    <path d="M7 8h3.5M7 11.5h3.5M7 15h2.5" stroke="${bg}" stroke-width="1.4" stroke-linecap="round"/>
-    <path d="M15.5 9.5v5M18 7.5v9M20.5 10v4" stroke="${ink}" stroke-width="2" stroke-linecap="round"/>
+    <path d="M12 6.2C10.6 4.9 8.6 4.2 6.3 4.2H3.4c-.5 0-.9.4-.9.9v12.6c0 .5.4.9.9.9h2.9c2.3 0 4.3.7 5.7 2V6.2z" fill="${ink}"/>
+    <path d="M5.4 8.3h4M5.4 11.3h4M5.4 14.3h2.6" stroke="${bg}" stroke-width="1.3" stroke-linecap="round"/>
+    <path d="M14.4 12.8v3.6M17 10.2v8.2M19.6 12v4.6M22 13.4v2.2" stroke="${ink}" stroke-width="2.1" stroke-linecap="round"/>
+    <path d="M12 6.2v14.4" stroke="${ink}" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
   </g>
 </svg>`;
 }

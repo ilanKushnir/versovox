@@ -10,6 +10,7 @@ import { enqueueJob } from './jobs/queue.js';
 import { compactProgressHistory } from './progress/service.js';
 import { ensureDefaultModel, requeueAlignmentsWaitingFor } from './jobs/handlers.js';
 import { pruneLoginThrottle } from './auth/sessions.js';
+import { libraryRoots } from './domain/settings.js';
 
 const config = loadConfig();
 const db = openDatabase(config.dataDir);
@@ -42,7 +43,11 @@ if (config.inlineWorker) {
 
 // Initial scan if libraries are configured and DB has users already.
 const hasUsers = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c > 0;
-if (hasUsers && (config.ebookDirs.length || config.audiobookDirs.length)) {
+const hasRoots = () => {
+  const r = libraryRoots(db, config);
+  return r.ebookDirs.length > 0 || r.audiobookDirs.length > 0;
+};
+if (hasUsers && hasRoots()) {
   enqueueJob(db, 'scan', {}, { dedupeKey: 'scan' });
 }
 
@@ -57,11 +62,11 @@ try {
 
 // Periodic rescan so titles added to Calibre/Audiobookshelf/plain folders
 // show up without a manual click. Dedupe-keyed: never stacks up.
-if (config.scanIntervalMinutes > 0 && (config.ebookDirs.length || config.audiobookDirs.length)) {
+if (config.scanIntervalMinutes > 0) {
   const scanTimer = setInterval(() => {
     try {
       const users = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
-      if (users > 0) enqueueJob(db, 'scan', {}, { dedupeKey: 'scan' });
+      if (users > 0 && hasRoots()) enqueueJob(db, 'scan', {}, { dedupeKey: 'scan' });
     } catch (err) {
       ctx.log.error(`Scheduled rescan failed: ${(err as Error).message}`);
     }

@@ -48,7 +48,7 @@ async function drainJobs(maxJobs = 50): Promise<void> {
 }
 
 function authed(opts: {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   url: string;
   payload?: unknown;
 }) {
@@ -102,7 +102,36 @@ describe('Versovox API', () => {
 
   it('requires setup on first run, gates it on the bootstrap token, creates admin', async () => {
     const status = await app.inject({ url: '/api/setup/status' });
-    expect(status.json()).toEqual({ needsSetup: true, setupTokenSource: 'env' });
+    expect(status.json()).toMatchObject({ needsSetup: true, setupTokenSource: 'env' });
+
+    // Wizard helpers are gated on the bootstrap token while no admin exists.
+    const noTokenPaths = await app.inject({
+      method: 'POST',
+      url: '/api/setup/test-paths',
+      headers: { 'x-vx-csrf': '1' },
+      payload: { paths: [fixtures] },
+    });
+    expect(noTokenPaths.statusCode).toBe(403);
+    const checked = await app.inject({
+      method: 'POST',
+      url: '/api/setup/test-paths',
+      headers: { 'x-vx-csrf': '1', 'x-vx-setup-token': SETUP_TOKEN },
+      payload: { paths: [path.join(fixtures, 'ebooks'), path.join(tmp, 'nope')], kind: 'ebook' },
+    });
+    expect(checked.statusCode).toBe(200);
+    const results = (checked.json() as { results: { ok: boolean; matches: number | null }[] })
+      .results;
+    expect(results[0]!.ok).toBe(true);
+    expect(results[0]!.matches).toBeGreaterThan(0);
+    expect(results[1]!.ok).toBe(false);
+    const browse = await app.inject({
+      url: `/api/setup/browse?path=${encodeURIComponent(fixtures)}`,
+      headers: { 'x-vx-setup-token': SETUP_TOKEN },
+    });
+    expect(browse.statusCode).toBe(200);
+    expect((browse.json() as { entries: { name: string }[] }).entries.map((e) => e.name)).toEqual(
+      expect.arrayContaining(['ebooks', 'audiobooks']),
+    );
 
     // No token at all: schema rejection.
     const noToken = await app.inject({
@@ -746,5 +775,149 @@ describe('Versovox API', () => {
     ).json() as { pair: { status: string } };
     expect(relink.pair.status).toBe('confirmed');
     await drainJobs();
+  });
+
+  it('manages people: roles, invites, disabling, self-service password', async () => {
+    // Direct creation (admin only), no open registration anywhere.
+    const anon = await app.inject({
+      method: 'POST',
+      url: '/api/users',
+      headers: { 'x-vx-csrf': '1' },
+      payload: { username: 'nobody', password: 'nobody-password-123' },
+    });
+    expect(anon.statusCode).toBe(401);
+
+    const created = await authed({
+      method: 'POST',
+      url: '/api/users',
+      payload: {
+        username: 'quinn',
+        password: 'quinn-password-123',
+        role: 'curator',
+        displayName: 'Quinn',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const quinnId = (created.json() as { user: { id: string; role: string } }).user.id;
+
+    // Curator: may act on pairs and jobs, may not manage users or settings.
+    const qLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'x-vx-csrf': '1' },
+      payload: { username: 'quinn', password: 'quinn-password-123' },
+    });
+    expect(qLogin.statusCode).toBe(200);
+    const qCookie = qLogin.headers['set-cookie']!.toString().split(';')[0]!;
+    const asQuinn = (opts: {
+      method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+      url: string;
+      payload?: unknown;
+    }) =>
+      app.inject({
+        method: opts.method ?? 'GET',
+        url: opts.url,
+        payload: opts.payload as never,
+        headers: {
+          cookie: qCookie,
+          'x-vx-csrf': '1',
+          ...(opts.payload !== undefined ? { 'content-type': 'application/json' } : {}),
+        },
+      });
+    expect((await asQuinn({ url: '/api/users' })).statusCode).toBe(403);
+    expect(
+      (await asQuinn({ method: 'POST', url: `/api/pairs/${pairId}/align`, payload: {} }))
+        .statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await asQuinn({
+          method: 'PUT' as never,
+          url: '/api/settings',
+          payload: { defaultLanguage: 'he' },
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    // Reader via invite link: token is single-use and expires.
+    const inv = await authed({
+      method: 'POST',
+      url: '/api/invites',
+      payload: { role: 'reader', displayName: 'Rae', expiresInDays: 3 },
+    });
+    expect(inv.statusCode).toBe(201);
+    const { token } = inv.json() as { token: string };
+    const peek = await app.inject({ url: `/api/invites/${token}` });
+    expect(peek.json()).toMatchObject({ role: 'reader', displayName: 'Rae' });
+    const accept = await app.inject({
+      method: 'POST',
+      url: `/api/invites/${token}/accept`,
+      headers: { 'x-vx-csrf': '1' },
+      payload: { username: 'rae', password: 'rae-password-12345' },
+    });
+    expect(accept.statusCode).toBe(201);
+    expect((accept.json() as { user: { role: string } }).user.role).toBe('reader');
+    const again = await app.inject({
+      method: 'POST',
+      url: `/api/invites/${token}/accept`,
+      headers: { 'x-vx-csrf': '1' },
+      payload: { username: 'rae2', password: 'rae-password-12345' },
+    });
+    expect(again.statusCode).toBe(404);
+    const raeCookie = accept.headers['set-cookie']!.toString().split(';')[0]!;
+    // Readers cannot touch pairs.
+    const raeAlign = await app.inject({
+      method: 'POST',
+      url: `/api/pairs/${pairId}/align`,
+      headers: { cookie: raeCookie, 'x-vx-csrf': '1' },
+    });
+    expect(raeAlign.statusCode).toBe(403);
+
+    // Progress is per user: Rae sees none of the admin's.
+    const raeBooks = await app.inject({ url: '/api/library', headers: { cookie: raeCookie } });
+    const raeCont = (raeBooks.json() as { continueRail: string[] }).continueRail;
+    expect(raeCont).toEqual([]);
+
+    // Self-service password change revokes other sessions only.
+    const pw = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password',
+      headers: { cookie: raeCookie, 'x-vx-csrf': '1', 'content-type': 'application/json' },
+      payload: { currentPassword: 'rae-password-12345', newPassword: 'rae-new-password-999' },
+    });
+    expect(pw.statusCode).toBe(200);
+    expect(
+      (await app.inject({ url: '/api/auth/me', headers: { cookie: raeCookie } })).statusCode,
+    ).toBe(200);
+
+    // Disabling kills sessions and blocks login; last admin is protected.
+    const disable = await authed({
+      method: 'PATCH',
+      url: `/api/users/${quinnId}`,
+      payload: { status: 'disabled' },
+    });
+    expect(disable.statusCode).toBe(200);
+    expect((await asQuinn({ url: '/api/auth/me' })).statusCode).toBe(401);
+    const qLogin2 = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'x-vx-csrf': '1' },
+      payload: { username: 'quinn', password: 'quinn-password-123' },
+    });
+    expect(qLogin2.statusCode).toBe(403);
+    const me = (await authed({ url: '/api/auth/me' })).json() as { user: { id: string } };
+    const demote = await authed({
+      method: 'PATCH',
+      url: `/api/users/${me.user.id}`,
+      payload: { role: 'reader' },
+    });
+    expect(demote.statusCode).toBe(409);
+    const del = await authed({ method: 'DELETE', url: `/api/users/${quinnId}` });
+    expect(del.statusCode).toBe(200);
+    const list = (await authed({ url: '/api/users' })).json() as { users: { username: string }[] };
+    // The setup race earlier is won by either astra or mallory.
+    const names = list.users.map((u) => u.username).sort();
+    expect(names).toHaveLength(2);
+    expect(names).toContain('rae');
   });
 });

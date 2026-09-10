@@ -18,6 +18,8 @@ const DEFAULTS: Settings = {
   storageBudgetMb: 0,
   languageModels: {},
   autoDownloadDefaultModel: true,
+  ebookDirs: [],
+  audiobookDirs: [],
 };
 
 /** Settings keys that can be pinned by env vars, mapped to config fields. */
@@ -27,7 +29,27 @@ const ENV_MAP: Partial<Record<keyof Settings, keyof EnvConfig>> = {
   whisperBin: 'whisperBin',
   whisperModel: 'whisperModel',
   jobConcurrency: 'jobConcurrency',
+  ebookDirs: 'ebookDirs',
+  audiobookDirs: 'audiobookDirs',
 };
+
+/**
+ * Library roots: VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS when set, otherwise the
+ * folders chosen in the setup wizard or Settings. Always read through here
+ * so the scanner, the API and the boot sequence agree.
+ */
+export function libraryRoots(
+  db: DB,
+  env: EnvConfig,
+): { ebookDirs: string[]; audiobookDirs: string[] } {
+  const { values } = resolveSettings(db, env);
+  // Programmatic config (tests, embedding) may pass roots without env
+  // pinning; they apply until the wizard/Settings store something.
+  return {
+    ebookDirs: values.ebookDirs.length ? values.ebookDirs : env.ebookDirs,
+    audiobookDirs: values.audiobookDirs.length ? values.audiobookDirs : env.audiobookDirs,
+  };
+}
 
 export function getStoredSettings(db: DB): Partial<Settings> {
   const rows = db.prepare('SELECT key, value_json FROM settings').all() as {

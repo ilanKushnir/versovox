@@ -35,8 +35,28 @@
   resolved route pattern and the decoded path, marks the four public routes
   explicitly (`config.public`), and rejects malformed encodings with 400;
   a regression test covers the encoded-prefix case.
-- Pairing decisions (link/unlink/confirm/reject/align), rescans, job
-  control, settings changes, and library root paths are admin-only.
+- **Roles.** `admin` (everything: people, libraries, models, settings),
+  `curator` (pairing decisions — link/unlink/confirm/reject/align — and job
+  cancel/retry), `reader` (read and listen). Rescans, settings, model
+  downloads, and people management stay admin-only. Every account keeps its
+  own progress, annotations, and offline copies; nothing is shared between
+  users.
+- **No open registration.** Accounts exist only because an admin created
+  them (with a password told in person) or issued a one-time **invite
+  link** (`/join/<token>`). Invite tokens are 192-bit random values stored
+  only as a SHA-256 hash, carry a preset role, expire (1–30 days, default
+  7), are consumed atomically on acceptance, and can be revoked. Reading an
+  invite reveals only its role and display name; the endpoints are rate
+  limited per IP.
+- **Disabling** an account deletes its sessions immediately and refuses
+  login (`403 account-disabled`); role changes and admin password resets
+  also sign the user out everywhere. The last active admin can be neither
+  demoted, disabled, nor deleted, and admins cannot lock themselves out.
+- **Setup wizard helpers** (`/api/setup/test-paths`, `/api/setup/browse`)
+  answer only for an admin session or, before an admin exists, a request
+  carrying the bootstrap token in the `x-vx-setup-token` header. They are
+  read-only directory probes (existence, readability, a capped shallow
+  count of book files) and never write to disk.
 
 ## Reverse-proxy single sign-on (optional)
 
@@ -55,7 +75,9 @@ oauth2-proxy can let that proxy sign users in:
 - Users are provisioned on first sight with an unusable password hash;
   `VX_PROXY_AUTH_ADMINS` names the admins, and on an empty instance the
   first proxied user becomes admin (the proxy already decides who may reach
-  Versovox at all). Setup-token bootstrap is closed once any user exists.
+  Versovox at all); everyone else starts as a `reader` and an admin can
+  promote them under Settings → People. Setup-token bootstrap is closed
+  once any user exists.
 - Proxied requests are authenticated per request (no Versovox cookie is
   issued); signing out is the proxy's job, and the UI says so.
 

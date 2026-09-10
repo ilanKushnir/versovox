@@ -11,7 +11,10 @@ import { SessionProvider, useSession } from './state/session';
 import { ToastProvider } from './components/ui';
 import { IconLibrary, IconLink, IconSettings, VersoMark } from './components/icons';
 import { startProgressLifecycle } from './progress/engine';
-import { LoginPage, SetupPage } from './pages/AuthPages';
+import { LoginPage } from './pages/AuthPages';
+import { SetupWizard } from './pages/SetupWizard';
+import { JoinPage } from './pages/JoinPage';
+import { PeoplePage } from './pages/PeoplePage';
 import { LibraryPage } from './pages/LibraryPage';
 import { BookPage } from './pages/BookPage';
 import { ReaderPage } from './reader/ReaderPage';
@@ -33,8 +36,9 @@ function Shell() {
       </div>
     );
   }
-  if (phase === 'setup') return <SetupPage />;
-  if (phase === 'login') return <LoginPage />;
+  if (phase === 'setup') return <SetupWizard />;
+  const join = /^\/join\/([A-Za-z0-9_-]+)$/.exec(location.pathname);
+  if (phase === 'login') return join ? <JoinPage token={join[1]!} /> : <LoginPage />;
   // 'offline' still renders the app: downloaded titles remain readable, and
   // privileged actions surface their own errors until reconnect.
 
@@ -86,6 +90,7 @@ const router = createBrowserRouter([
       { path: '/listen/:id', element: <PlayerPage /> },
       { path: '/pairs', element: <PairsPage /> },
       { path: '/settings', element: <SettingsPage /> },
+      { path: '/settings/people', element: <PeoplePage /> },
       { path: '*', element: <LibraryPage /> },
     ],
   },

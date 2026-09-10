@@ -65,13 +65,18 @@ loss-resistant progress.)
 - **Plays well with your reverse proxy**: optional header-based single
   sign-on from Authentik / Authelia / oauth2-proxy, trusted only from the
   proxy's own address (docs/security.md).
+- **A household, not a single login**: a first-run wizard tests your library
+  folders and creates the admin; after that you add people or send one-time
+  invite links, with three roles (admin, curator, reader) and per-person
+  progress, bookmarks and downloads. No open sign-up.
 
 ## Quick start
 
 ```bash
 cp .env.example .env    # set VX_SESSION_SECRET (openssl rand -hex 32)
 docker compose up -d --build
-# open http://localhost:8383 — create the admin account (no defaults)
+# open http://localhost:8383 — the setup wizard asks for the one-time token
+# printed in the log, creates the admin, and tests your library folders
 ```
 
 The stock compose file mounts a bundled sample library — original short

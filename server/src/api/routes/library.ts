@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { type BookSummary } from '@versovox/shared';
+import { libraryRoots } from '../../domain/settings.js';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';
 import { handoffStatus, latestAlignment, isSwitchable } from '../../alignment/service.js';
@@ -138,11 +139,8 @@ export function registerLibraryRoutes(app: FastifyInstance, ctx: AppContext): vo
 
   app.get('/api/library/roots', async (req, reply) => {
     if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
-    return {
-      ebookDirs: ctx.config.ebookDirs,
-      audiobookDirs: ctx.config.audiobookDirs,
-      readOnly: true,
-    };
+    const roots = libraryRoots(db, ctx.config);
+    return { ...roots, readOnly: true };
   });
   app.get('/api/books/:id', async (req, reply) => {
     const { id } = req.params as { id: string };

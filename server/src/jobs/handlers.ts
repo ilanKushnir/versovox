@@ -17,7 +17,7 @@ import { extractCover, probeAudio } from '../audio/probe.js';
 import { CANDIDATE_THRESHOLD, scorePair } from '../pairing/score.js';
 import { alignBook, type EbookSentenceInput, type TranscriptWord } from '../alignment/align.js';
 import { storeAlignment } from '../alignment/service.js';
-import { detectLanguage, getProvider } from '../transcription/providers.js';
+import { detectLanguage, getProvider, transcribeClip } from '../transcription/providers.js';
 import {
   anyMultilingualModel,
   DEFAULT_MODEL_ID,
@@ -30,7 +30,7 @@ import {
   resolveModelForLanguage,
 } from '../transcription/models.js';
 import { languageCode } from '../pairing/score.js';
-import { resolveSettings } from '../domain/settings.js';
+import { libraryRoots, resolveSettings } from '../domain/settings.js';
 import {
   enqueueJob,
   jobCheckpoint,
@@ -184,7 +184,8 @@ export function ensureDefaultModel(ctx: AppContext): void {
 export async function runScan(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {
   const { db, config } = ctx;
   jobProgress(db, job.id, job.lease_token, 0.05, 'Scanning library roots');
-  const report = scanRoots(config.ebookDirs, config.audiobookDirs);
+  const roots = libraryRoots(db, config);
+  const report = scanRoots(roots.ebookDirs, roots.audiobookDirs);
   guard.assertHeld();
   const result = applyScan(db, report);
   jobProgress(
@@ -896,6 +897,82 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     }
   }
 
+  // ── Fast content probe for CANDIDATES ─────────────────────────────────
+  // A full transcription takes hours per book. Before spending them on a
+  // metadata match that might be a different edition, transcribe two short
+  // clips (90 s at ~25 % and ~60 % of the book) and check that their words
+  // actually occur in the ebook. Pass → the pair is linked ('auto') and the
+  // full alignment continues below; fail → stays a candidate with a note and
+  // the operator decides. Sidecar-transcript setups skip the probe.
+  if (
+    String(pair.status) === 'candidate' &&
+    settings.transcribeProvider === 'whisper-cli' &&
+    trackPaths.length > 0
+  ) {
+    const bin = settings.whisperBin || config.whisperBin;
+    const ebookTokens = new Set<string>();
+    for (const chapter of sentencesText)
+      for (const s of chapter) for (const w of s.split(' ')) if (w.length > 3) ebookTokens.add(w);
+    const totalMs = trackRows.reduce((a, t) => a + Number(t.duration_ms ?? 0), 0);
+    const clipAt = (frac: number) => {
+      const abs = Math.max(0, Math.floor(totalMs * frac));
+      let idx = 0;
+      for (let i = 0; i < trackRows.length; i++)
+        if (abs >= Number(trackRows[i]!.start_ms_absolute)) idx = i;
+      return { path: trackPaths[idx]!, startMs: abs - Number(trackRows[idx]!.start_ms_absolute) };
+    };
+    const scores: number[] = [];
+    for (const [i, frac] of [0.25, 0.6].entries()) {
+      jobProgress(
+        db,
+        job.id,
+        job.lease_token,
+        0.16 + i * 0.02,
+        `Checking the narration matches the text (sample ${i + 1} of 2)`,
+      );
+      const clip = clipAt(frac);
+      const words = await transcribeClip(
+        bin,
+        whisperModel,
+        language,
+        clip.path,
+        clip.startMs,
+        90,
+        path.join(config.cacheDir, 'whisper-work'),
+      );
+      guard.assertHeld();
+      const candidates = words.map((w) => w.w).filter((w) => w.length > 3);
+      const hits = candidates.filter((w) => ebookTokens.has(w)).length;
+      scores.push(candidates.length >= 20 ? hits / candidates.length : 0);
+    }
+    const probeScore = scores.reduce((a, b) => a + b, 0) / Math.max(1, scores.length);
+    const evidence = JSON.parse(String(pair.evidence_json ?? '{}'));
+    evidence.contentScore = Math.round(probeScore * 1000) / 1000;
+    evidence.notes = (evidence.notes ?? []).filter(
+      (n: string) => !n.startsWith('Narration sample'),
+    );
+    const pass = probeScore >= PROBE_COMPAT_MIN && Number(pair.score) >= settings.autoPairThreshold;
+    evidence.notes.push(
+      pass
+        ? `Narration sample matched the text (${Math.round(probeScore * 100)}% of sampled words found) — linked automatically; full alignment follows.`
+        : `Narration sample matched only ${Math.round(probeScore * 100)}% of sampled words — not linked automatically. Confirm manually if this really is the same edition.`,
+    );
+    guard.assertHeld();
+    db.prepare('UPDATE pairs SET evidence_json = ? WHERE id = ?').run(
+      JSON.stringify(evidence),
+      pairId,
+    );
+    if (pass) {
+      db.prepare(
+        `UPDATE pairs SET status = 'auto', decided_at = ? WHERE id = ? AND status = 'candidate'`,
+      ).run(nowIso(), pairId);
+      pair.status = 'auto';
+    } else {
+      jobProgress(db, job.id, job.lease_token, 1, 'Probe did not pass — waiting for your decision');
+      return;
+    }
+  }
+
   // Transcript cache: keyed by source content hash + provider + language.
   const sourceHash = String(audio.content_hash ?? sha256hex(trackPaths.join('|')));
   const cached = db
@@ -920,6 +997,18 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
       whisperBin: settings.whisperBin || config.whisperBin,
       whisperModel,
       checkpoint,
+      onProgress: (info) => {
+        const done = (info.track + info.trackPct / 100) / Math.max(1, info.trackCount);
+        jobProgress(
+          db,
+          job.id,
+          job.lease_token,
+          0.2 + 0.4 * done,
+          `Transcribing ${info.trackCount > 1 ? `part ${info.track + 1} of ${info.trackCount} · ` : ''}${info.trackPct}%${
+            whisperModel ? ` · ${path.basename(whisperModel).replace(/^ggml-|\.bin$/g, '')}` : ''
+          }`,
+        );
+      },
       onCheckpoint: (cp) => jobCheckpoint(db, job.id, job.lease_token, cp),
     });
     words = result.words;
@@ -943,7 +1032,13 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     );
   }
 
-  jobProgress(db, job.id, job.lease_token, 0.6, 'Aligning text and narration');
+  jobProgress(
+    db,
+    job.id,
+    job.lease_token,
+    0.6,
+    `Aligning ${words.length.toLocaleString()} words to ${sentences.reduce((a, c) => a + c.length, 0).toLocaleString()} sentences`,
+  );
   const input: EbookSentenceInput[] = [];
   sentences.forEach((chapter, spineIdx) => {
     chapter.forEach((s, i) => {
@@ -1007,6 +1102,8 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
 
 /** Minimum sampled content overlap before auto-linking is allowed. */
 export const CONTENT_COMPAT_MIN = 0.5;
+/** Minimum share of sampled narration words that must occur in the ebook (probe). */
+export const PROBE_COMPAT_MIN = 0.55;
 
 function sampleContentScore(sentences: EbookSentenceInput[], words: TranscriptWord[]): number {
   if (sentences.length === 0 || words.length === 0) return 0;

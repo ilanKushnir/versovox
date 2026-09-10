@@ -123,6 +123,97 @@
   column-fill: auto;
   will-change: transform;
 }
+.reader-ribbon {
+  position: absolute;
+  /* Hangs from under the top chrome; from the page edge once the chrome hides. */
+  top: calc(44px + var(--sp-2) * 2 + var(--vx-safe-top));
+  transition: top var(--vx-duration-base) var(--vx-ease);
+  inset-inline-end: clamp(18px, 6%, 48px);
+  width: 22px;
+  height: 34px;
+  z-index: 4;
+  pointer-events: none;
+  color: var(--rd-bookmark, var(--rd-link));
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.15));
+  animation: vx-ribbon-in var(--vx-duration-slow) var(--vx-ease);
+}
+.chrome-hidden .reader-ribbon {
+  top: var(--vx-safe-top);
+}
+@keyframes vx-ribbon-in {
+  from {
+    transform: translateY(-40%);
+    opacity: 0;
+  }
+}
+.icon-btn.is-marked {
+  color: var(--rd-bookmark, var(--vx-primary));
+}
+.bm-row {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-block-end: 1px solid var(--vx-border);
+  background: none;
+  text-align: start;
+  color: var(--vx-text);
+  cursor: pointer;
+}
+.bm-row:hover {
+  background: var(--vx-surface);
+}
+.bm-row__icon {
+  color: var(--vx-primary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.bm-row__body {
+  flex: 1;
+  min-width: 0;
+}
+.bm-row__where {
+  font-size: 12px;
+  color: var(--vx-text-soft);
+  margin-bottom: 2px;
+}
+.bm-row__text {
+  font-family: var(--vx-font-reading);
+  font-size: 14.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.bm-row__delete {
+  flex-shrink: 0;
+  color: var(--vx-text-soft);
+}
+.sheet-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 var(--sp-4);
+  border-block-end: 1px solid var(--vx-border);
+}
+.sheet-tabs button {
+  border: 0;
+  background: none;
+  padding: 10px 4px;
+  margin-inline-end: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vx-text-soft);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.sheet-tabs button[aria-selected='true'] {
+  color: var(--vx-text);
+  border-bottom-color: var(--vx-primary);
+}
+
 .reader-dim {
   position: absolute;
   inset: 0;
@@ -305,10 +396,10 @@
 }
 
 ::highlight(vx-h) {
-  background-color: var(--rd-highlight, rgb(201 162 39 / 0.32));
+  background-color: var(--rd-highlight, rgb(214 160 52 / 0.35));
 }
 ::highlight(vx-handoff) {
-  background-color: var(--rd-handoff, rgb(47 93 72 / 0.22));
+  background-color: var(--rd-handoff, rgb(180 83 42 / 0.2));
 }
 
 /* reading settings sheet (Apple Books-style) */
@@ -372,24 +463,24 @@
   font-weight: 600;
 }
 .rs-swatch--paper .rs-swatch__disc {
-  background: #faf6ef;
-  color: #1f2620;
+  background: #f6f1e8;
+  color: #1c1917;
 }
 .rs-swatch--sepia .rs-swatch__disc {
-  background: #f3e8d2;
-  color: #382e1f;
+  background: #f1e5cf;
+  color: #3a2f22;
 }
 .rs-swatch--night .rs-swatch__disc {
-  background: #101412;
-  color: #d9d4c7;
+  background: #16120f;
+  color: #ddd5c6;
 }
 .rs-swatch--contrast .rs-swatch__disc {
   background: #000;
   color: #fff;
 }
 .rs-swatch--auto .rs-swatch__disc {
-  background: linear-gradient(115deg, #faf6ef 50%, #101412 50%);
-  color: #1f2620;
+  background: linear-gradient(115deg, #f6f1e8 50%, #16120f 50%);
+  color: #1c1917;
   text-shadow: 0 0 6px rgb(255 255 255 / 0.6);
 }
 .rs-size {
@@ -572,6 +663,8 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* the player is a fixed scene, never a scrolling page */
+  overscroll-behavior: none;
   --pl-ambient: var(--vx-primary);
   background:
     radial-gradient(
@@ -756,16 +849,73 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: clamp(var(--sp-3), 2.4dvh, var(--sp-5));
+  gap: clamp(var(--sp-2), 2dvh, var(--sp-5));
   min-height: 0;
   width: 100%;
   max-width: 520px;
   margin: 0 auto;
-  overflow-y: auto;
+  overflow: hidden;
   padding-block: var(--sp-2);
 }
 .player-main > * {
   flex-shrink: 0;
+}
+/* The cover is the only thing that gives way when height is short. */
+.player-main > .player-coverwrap {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.player-scrub__bookmarks {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 0;
+  pointer-events: none;
+}
+.player-scrub__bookmark {
+  position: absolute;
+  top: 9px;
+  width: 10px;
+  height: 10px;
+  margin-inline-start: -5px;
+  border-radius: 50%;
+  background: var(--vx-accent);
+  box-shadow: 0 0 0 2px var(--vx-bg);
+}
+.player-scrub__bookmark.is-near {
+  transform: scale(1.35);
+  background: var(--vx-primary);
+}
+
+/* Return-to-where-you-were pill (reader + player) */
+.return-pill {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(96px + var(--vx-safe-bottom));
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 8px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--vx-text) 18%, transparent);
+  background: color-mix(in srgb, var(--vx-surface-raised) 92%, transparent);
+  color: var(--vx-text);
+  box-shadow: var(--vx-shadow-2);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  animation: vx-slide-up var(--vx-duration-base) var(--vx-ease);
+}
+.reader-page .return-pill {
+  background: color-mix(in srgb, var(--rd-bg) 90%, var(--rd-text) 8%);
+  color: var(--rd-text);
+  border-color: color-mix(in srgb, var(--rd-text) 22%, transparent);
+}
+.return-pill .return-pill__x {
+  opacity: 0.6;
+  margin-inline-start: 4px;
 }
 .player-cover {
   max-width: min(62vw, 320px);

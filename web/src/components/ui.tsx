@@ -161,7 +161,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 /* ----------------------------------------------------------------- Cover */
 
-const COVER_TINTS = ['#2F5D48', '#6D4D21', '#2B4460', '#5A3550', '#3A5A28', '#7A3B2E'];
+const COVER_TINTS = ['#8C3F1F', '#5E4A8A', '#2F4A5C', '#6B3A44', '#4E5A2E', '#8A6A2F'];
 
 export function Cover({
   book,
@@ -188,7 +188,7 @@ export function Cover({
   return (
     <span
       className={`book-card__fallback ${className ?? ''}`}
-      style={{ background: tint, color: '#F6F2E8' }}
+      style={{ background: tint, color: '#F8F2E8' }}
       aria-hidden="true"
     >
       <span style={{ fontSize: 13, fontWeight: 650, lineHeight: 1.25 }}>{book.title}</span>

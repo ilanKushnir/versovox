@@ -15,6 +15,8 @@ import {
   IconBack,
   IconBookmark,
   IconCheck,
+  IconClose,
+  IconTrash,
   IconHeadphones,
   IconSearch,
   IconSun,
@@ -51,9 +53,9 @@ const DARK_MQ = '(prefers-color-scheme: dark)';
 
 /** Reader page backgrounds, mirrored from tokens.css for the status bar. */
 const THEME_BG: Record<ReturnType<typeof effectiveTheme>, string> = {
-  paper: '#faf6ef',
-  sepia: '#f3e8d2',
-  night: '#101412',
+  paper: '#f6f1e8',
+  sepia: '#f1e5cf',
+  night: '#16120f',
   contrast: '#000000',
 };
 
@@ -85,6 +87,13 @@ export function ReaderPage() {
   const [noteDraft, setNoteDraft] = useState('');
   /** Mirror of currentOffsetRef for rendering: page turns set it, scroll updates it live. */
   const [liveOffset, setLiveOffset] = useState(0);
+  /** Where the reader was before a jump (bookmark, contents, search, slider). */
+  const [returnPoint, setReturnPoint] = useState<{
+    spineIdx: number;
+    charOffset: number;
+    label: string;
+  } | null>(null);
+  const [contentsTab, setContentsTab] = useState<'toc' | 'marks'>('toc');
 
   const [systemDark, setSystemDark] = useState(
     () => typeof matchMedia === 'function' && matchMedia(DARK_MQ).matches,
@@ -557,6 +566,16 @@ export function ReaderPage() {
     (s: number, charOffset = 0, intent: 'seek' | 'open' = 'seek', fragment?: string) => {
       if (!manifest) return;
       const clamped = Math.max(0, Math.min(s, manifest.chapters.length - 1));
+      // A jump of more than a page away leaves a way back.
+      if (
+        intent === 'seek' &&
+        (clamped !== spineIdx || Math.abs(charOffset - currentOffsetRef.current) > 400)
+      ) {
+        const fromTitle = manifest.chapters[spineIdx]?.title ?? `Chapter ${spineIdx + 1}`;
+        setReturnPoint(
+          (rp) => rp ?? { spineIdx, charOffset: currentOffsetRef.current, label: fromTitle },
+        );
+      }
       handoffCleanupRef.current?.();
       pendingTargetRef.current = { charOffset, fragment };
       if (clamped === spineIdx) {
@@ -736,6 +755,90 @@ export function ReaderPage() {
     [manifest, selection, sentences, spineIdx, id, toast],
   );
 
+  /** Bookmarks in this chapter, with "is it on the page I am looking at". */
+  const bookmarks = annotations.filter(
+    (a) => a.kind === 'bookmark' && a.locator.medium === 'ebook',
+  );
+  const bookmarkOnPage = (a: Annotation): boolean => {
+    if (a.locator.medium !== 'ebook' || a.locator.spineIdx !== spineIdx) return false;
+    const off = a.locator.charOffset ?? 0;
+    if (prefs.mode === 'paginated') return pageForOffset(off) === page;
+    const map = textMapRef.current;
+    const scroller = scrollerRef.current;
+    if (!map || !scroller) return false;
+    const r = rangeForSpan(map, off, off + 1)?.getBoundingClientRect();
+    const box = scroller.getBoundingClientRect();
+    return !!r && r.top >= box.top - 4 && r.top <= box.bottom;
+  };
+  const currentBookmark = bookmarks.find(bookmarkOnPage) ?? null;
+
+  const toggleBookmark = useCallback(async () => {
+    if (!manifest) return;
+    if (currentBookmark) {
+      try {
+        await api(`/api/annotations/${currentBookmark.id}`, { method: 'DELETE' });
+        setAnnotations((a) => a.filter((x) => x.id !== currentBookmark.id));
+        toast.show('Bookmark removed');
+      } catch {
+        toast.show('Could not remove the bookmark — are you offline?');
+      }
+      return;
+    }
+    // Bookmark the first sentence on this page, keeping its text so the
+    // list is readable later.
+    const start = currentOffsetRef.current;
+    const sent =
+      sentences.find((s) => start >= s.start && start < s.end) ??
+      sentences.find((s) => s.start >= start);
+    const map = textMapRef.current;
+    const excerpt =
+      sent && map
+        ? (rangeForSpan(map, sent.start, sent.end)?.toString().trim().slice(0, 240) ?? null)
+        : null;
+    const body = {
+      kind: 'bookmark',
+      locator: {
+        medium: 'ebook',
+        spineIdx,
+        charOffset: sent?.start ?? start,
+        sentenceId: sent?.id,
+        pct: pctFor(manifest, spineIdx, sent?.start ?? start),
+      },
+      selectedText: excerpt,
+    };
+    try {
+      const res = await api<{ annotation: Annotation }>(`/api/books/${id}/annotations`, {
+        method: 'POST',
+        body,
+      });
+      setAnnotations((a) => [...a, res.annotation]);
+      toast.show(
+        prefs.mode === 'paginated' ? `Bookmarked page ${page + 1}` : 'Bookmarked this passage',
+        {
+          label: 'Bookmarks',
+          onClick: () => {
+            setContentsTab('marks');
+            setSheet('toc');
+          },
+        },
+      );
+    } catch {
+      toast.show('Could not save — are you offline?');
+    }
+  }, [manifest, currentBookmark, sentences, spineIdx, page, prefs.mode, id, toast]);
+
+  const deleteAnnotation = useCallback(
+    async (annId: string) => {
+      try {
+        await api(`/api/annotations/${annId}`, { method: 'DELETE' });
+        setAnnotations((a) => a.filter((x) => x.id !== annId));
+      } catch {
+        toast.show('Could not delete — are you offline?');
+      }
+    },
+    [toast],
+  );
+
   const switchToAudio = useCallback(async () => {
     if (!detail?.book.pair || !manifest) return;
     const sent = sentences.find(
@@ -837,11 +940,12 @@ export function ReaderPage() {
           <IconSearch />
         </button>
         <button
-          className="icon-btn"
-          onClick={() => void addAnnotation('bookmark')}
-          aria-label="Bookmark this position"
+          className={`icon-btn ${currentBookmark ? 'is-marked' : ''}`}
+          onClick={() => void toggleBookmark()}
+          aria-pressed={!!currentBookmark}
+          aria-label={currentBookmark ? 'Remove bookmark from this page' : 'Bookmark this page'}
         >
-          <IconBookmark />
+          <IconBookmark filled={!!currentBookmark} />
         </button>
         <button
           className="icon-btn"
@@ -853,6 +957,11 @@ export function ReaderPage() {
       </div>
 
       <div className="reader-viewport" ref={viewportRef} dir={rtl ? 'rtl' : 'ltr'}>
+        {currentBookmark && (
+          <svg className="reader-ribbon" viewBox="0 0 22 34" aria-hidden="true">
+            <path d="M0 0h22v34l-11-8-11 8z" fill="currentColor" />
+          </svg>
+        )}
         {prefs.mode === 'paginated' ? (
           <>
             <button
@@ -948,6 +1057,31 @@ export function ReaderPage() {
         )}
       </div>
 
+      {returnPoint && (
+        <button
+          className="return-pill"
+          onClick={() => {
+            const rp = returnPoint;
+            setReturnPoint(null);
+            pendingTargetRef.current = { charOffset: rp.charOffset };
+            if (rp.spineIdx === spineIdx) gotoChapter(spineIdx, rp.charOffset, 'seek');
+            else setSpineIdx(rp.spineIdx);
+          }}
+        >
+          <IconBack size={15} /> Back to where you were · {returnPoint.label}
+          <span
+            className="return-pill__x"
+            role="button"
+            aria-label="Dismiss"
+            onClick={(e) => {
+              e.stopPropagation();
+              setReturnPoint(null);
+            }}
+          >
+            <IconClose size={14} />
+          </span>
+        </button>
+      )}
       {prefs.brightness < 0.995 && (
         <div className="reader-dim" style={{ opacity: 1 - prefs.brightness }} aria-hidden="true" />
       )}
@@ -967,7 +1101,7 @@ export function ReaderPage() {
           >
             Note
           </button>
-          <button onClick={() => void addAnnotation('bookmark')}>Bookmark</button>
+          <button onClick={() => void addAnnotation('bookmark')}>Bookmark here</button>
         </div>
       )}
 
@@ -1048,21 +1182,102 @@ export function ReaderPage() {
 
       {sheet === 'toc' && manifest && (
         <Sheet title="Contents" onClose={() => setSheet('none')}>
-          {manifest.toc.length === 0 && <p>No table of contents in this book.</p>}
-          {manifest.toc.map((t, i) => (
+          <div className="sheet-tabs" role="tablist" style={{ margin: '-16px -16px 8px' }}>
             <button
-              key={i}
-              className="list-row"
-              style={{ paddingInlineStart: 16 + t.depth * 16 }}
-              aria-current={t.spineIdx === spineIdx ? 'true' : undefined}
-              onClick={() => {
-                setSheet('none');
-                gotoChapter(t.spineIdx, 0, 'seek', t.fragment ?? undefined);
-              }}
+              role="tab"
+              aria-selected={contentsTab === 'toc'}
+              onClick={() => setContentsTab('toc')}
             >
-              <span className="grow">{t.title}</span>
+              Chapters
             </button>
-          ))}
+            <button
+              role="tab"
+              aria-selected={contentsTab === 'marks'}
+              onClick={() => setContentsTab('marks')}
+            >
+              Bookmarks & notes
+              {annotations.length > 0 ? ` · ${annotations.length}` : ''}
+            </button>
+          </div>
+          {contentsTab === 'marks' &&
+            (annotations.length === 0 ? (
+              <p style={{ color: 'var(--vx-text-soft)' }}>
+                No bookmarks yet. Tap the ribbon icon while reading to mark a page; select text to
+                highlight or add a note.
+              </p>
+            ) : (
+              [...annotations]
+                .sort((a, b) => a.locator.pct - b.locator.pct)
+                .map((a) => (
+                  <div
+                    key={a.id}
+                    className="bm-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      if (a.locator.medium !== 'ebook') return;
+                      setSheet('none');
+                      gotoChapter(a.locator.spineIdx, a.locator.charOffset ?? 0, 'seek');
+                    }}
+                    onKeyDown={(e) => {
+                      if ((e.key === 'Enter' || e.key === ' ') && a.locator.medium === 'ebook') {
+                        setSheet('none');
+                        gotoChapter(a.locator.spineIdx, a.locator.charOffset ?? 0, 'seek');
+                      }
+                    }}
+                  >
+                    <span className="bm-row__icon">
+                      <IconBookmark size={16} filled={a.kind === 'bookmark'} />
+                    </span>
+                    <span className="bm-row__body">
+                      <span className="bm-row__where">
+                        {a.kind === 'bookmark'
+                          ? 'Bookmark'
+                          : a.kind === 'note'
+                            ? 'Note'
+                            : 'Highlight'}{' '}
+                        ·{' '}
+                        {manifest.chapters[a.locator.medium === 'ebook' ? a.locator.spineIdx : 0]
+                          ?.title ?? 'Chapter'}{' '}
+                        · {formatPct(a.locator.pct)}
+                      </span>
+                      <span className="bm-row__text">
+                        {a.selectedText ?? a.note ?? 'Bookmarked page'}
+                        {a.kind === 'note' && a.note && a.selectedText ? ` — ${a.note}` : ''}
+                      </span>
+                    </span>
+                    <button
+                      className="icon-btn bm-row__delete"
+                      style={{ width: 36, height: 36 }}
+                      aria-label="Delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void deleteAnnotation(a.id);
+                      }}
+                    >
+                      <IconTrash size={15} />
+                    </button>
+                  </div>
+                ))
+            ))}
+          {contentsTab === 'toc' && manifest.toc.length === 0 && (
+            <p>No table of contents in this book.</p>
+          )}
+          {contentsTab === 'toc' &&
+            manifest.toc.map((t, i) => (
+              <button
+                key={i}
+                className="list-row"
+                style={{ paddingInlineStart: 16 + t.depth * 16 }}
+                aria-current={t.spineIdx === spineIdx ? 'true' : undefined}
+                onClick={() => {
+                  setSheet('none');
+                  gotoChapter(t.spineIdx, 0, 'seek', t.fragment ?? undefined);
+                }}
+              >
+                <span className="grow">{t.title}</span>
+              </button>
+            ))}
         </Sheet>
       )}
 

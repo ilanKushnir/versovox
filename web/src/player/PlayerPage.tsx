@@ -8,6 +8,8 @@ import { bookAudioSupport } from '../lib/audioSupport';
 import { Cover, Sheet, useToast } from '../components/ui';
 import {
   IconBack,
+  IconClose,
+  IconTrash,
   IconBookmark,
   IconBookOpen,
   IconChapterNext,
@@ -82,6 +84,9 @@ export function PlayerPage() {
   const [sleepChapterEnd, setSleepChapterEnd] = useState(false);
   const [sleepTick, setSleepTick] = useState(0);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  /** Position before a deliberate jump (bookmark, chapter list, scrubber drag). */
+  const [returnPoint, setReturnPoint] = useState<{ absMs: number } | null>(null);
+  const returnArmedRef = useRef(true);
   const [handoffMarkerPct, setHandoffMarkerPct] = useState<number | null>(null);
   const [ambient, setAmbient] = useState<string | null>(null);
 
@@ -381,6 +386,14 @@ export function PlayerPage() {
     (absMs: number, intent: 'seek' | 'heartbeat' = 'seek') => {
       if (tracks.length === 0) return;
       const clamped = Math.max(0, Math.min(absMs, Math.max(0, totalMs - 200)));
+      if (
+        intent === 'seek' &&
+        returnArmedRef.current &&
+        Math.abs(clamped - bookMsRef.current) > 90_000
+      ) {
+        const from = bookMsRef.current;
+        setReturnPoint((rp) => rp ?? { absMs: from });
+      }
       let t = 0;
       for (let i = 0; i < tracks.length; i++) {
         if (clamped >= tracks[i]!.startMsAbsolute) t = i;
@@ -544,14 +557,45 @@ export function PlayerPage() {
     }
   }, [detail, locatorNow, id, navigate, toast]);
 
-  const addBookmark = async () => {
+  const audioBookmarks = annotations.filter((a) => a.locator.medium === 'audio');
+  const bookmarkAbsMs = (a: Annotation): number =>
+    a.locator.medium === 'audio'
+      ? (tracks[a.locator.trackIdx]?.startMsAbsolute ?? 0) + a.locator.positionMs
+      : 0;
+  /** A bookmark within 20 s of the playhead counts as "this moment". */
+  const nearBookmark =
+    audioBookmarks.find((a) => Math.abs(bookmarkAbsMs(a) - bookMs) < 20_000) ?? null;
+
+  const deleteBookmark = async (annId: string) => {
     try {
+      await api(`/api/annotations/${annId}`, { method: 'DELETE' });
+      setAnnotations((a) => a.filter((x) => x.id !== annId));
+    } catch {
+      toast.show('Could not delete — are you offline?');
+    }
+  };
+
+  const toggleBookmark = async () => {
+    if (nearBookmark) {
+      await deleteBookmark(nearBookmark.id);
+      toast.show('Bookmark removed');
+      return;
+    }
+    try {
+      const chapterTitle = currentChapter?.title ?? null;
       const res = await api<{ annotation: Annotation }>(`/api/books/${id}/annotations`, {
         method: 'POST',
-        body: { kind: 'bookmark', locator: locatorNow() },
+        body: {
+          kind: 'bookmark',
+          locator: locatorNow(),
+          selectedText: chapterTitle ? `${chapterTitle} · ${formatDuration(bookMs)}` : null,
+        },
       });
       setAnnotations((a) => [...a, res.annotation]);
-      toast.show(`Bookmarked at ${formatDuration(bookMs)}`);
+      toast.show(`Bookmarked at ${formatDuration(bookMs)}`, {
+        label: 'Bookmarks',
+        onClick: () => setSheet('bookmarks'),
+      });
     } catch {
       toast.show('Could not save bookmark');
     }
@@ -601,7 +645,6 @@ export function PlayerPage() {
     : sleepUntil
       ? formatDuration(Math.max(0, sleepUntil - Date.now()))
       : null;
-  const audioBookmarks = annotations.filter((a) => a.locator.medium === 'audio');
   const pair =
     detail.book.pair && detail.book.pair.status !== 'candidate' ? detail.book.pair : null;
 
@@ -639,11 +682,12 @@ export function PlayerPage() {
               : detail.book.format.toUpperCase()}
         </span>
         <button
-          className="icon-btn"
-          onClick={() => void addBookmark()}
-          aria-label="Bookmark this moment"
+          className={`icon-btn ${nearBookmark ? 'is-marked' : ''}`}
+          onClick={() => void toggleBookmark()}
+          aria-pressed={!!nearBookmark}
+          aria-label={nearBookmark ? 'Remove bookmark at this moment' : 'Bookmark this moment'}
         >
-          <IconBookmark />
+          <IconBookmark filled={!!nearBookmark} />
         </button>
       </div>
 
@@ -676,6 +720,17 @@ export function PlayerPage() {
                   />
                 ) : null,
               )}
+            {totalMs > 0 && audioBookmarks.length > 0 && (
+              <span className="player-scrub__bookmarks">
+                {audioBookmarks.map((a) => (
+                  <span
+                    key={a.id}
+                    className={`player-scrub__bookmark ${nearBookmark?.id === a.id ? 'is-near' : ''}`}
+                    style={{ insetInlineStart: `${(bookmarkAbsMs(a) / totalMs) * 100}%` }}
+                  />
+                ))}
+              </span>
+            )}
             {handoffMarkerPct != null && (
               <span
                 className="handoff-marker"
@@ -933,36 +988,81 @@ export function PlayerPage() {
           )}
         </Sheet>
       )}
+      {returnPoint && (
+        <button
+          className="return-pill"
+          onClick={() => {
+            const rp = returnPoint;
+            setReturnPoint(null);
+            returnArmedRef.current = false;
+            seekTo(rp.absMs);
+            returnArmedRef.current = true;
+          }}
+        >
+          <IconBack size={15} /> Back to {formatDuration(returnPoint.absMs)}
+          <span
+            className="return-pill__x"
+            role="button"
+            aria-label="Dismiss"
+            onClick={(e) => {
+              e.stopPropagation();
+              setReturnPoint(null);
+            }}
+          >
+            <IconClose size={14} />
+          </span>
+        </button>
+      )}
       {sheet === 'bookmarks' && (
         <Sheet title="Bookmarks" onClose={() => setSheet('none')}>
           {audioBookmarks.length === 0 && (
             <p style={{ color: 'var(--vx-text-soft)', margin: 0 }}>
-              No bookmarks yet. Tap the bookmark icon at the top while listening.
+              No bookmarks yet. Tap the ribbon icon at the top while listening — tap it again at the
+              same spot to remove the mark.
             </p>
           )}
-          {audioBookmarks.map((a) => (
-            <button
-              key={a.id}
-              className="list-row"
-              onClick={() => {
-                setSheet('none');
-                const l = a.locator;
-                if (l.medium === 'audio') {
-                  seekTo((tracks[l.trackIdx]?.startMsAbsolute ?? 0) + l.positionMs);
-                }
-              }}
-            >
-              <IconBookmark size={15} filled />
-              <span className="grow">{a.note ?? 'Bookmark'}</span>
-              <span className="soft">
-                {a.locator.medium === 'audio'
-                  ? formatDuration(
-                      (tracks[a.locator.trackIdx]?.startMsAbsolute ?? 0) + a.locator.positionMs,
-                    )
-                  : ''}
-              </span>
-            </button>
-          ))}
+          {[...audioBookmarks]
+            .sort((a, b) => bookmarkAbsMs(a) - bookmarkAbsMs(b))
+            .map((a) => (
+              <div
+                key={a.id}
+                className="bm-row"
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setSheet('none');
+                  seekTo(bookmarkAbsMs(a));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    setSheet('none');
+                    seekTo(bookmarkAbsMs(a));
+                  }
+                }}
+              >
+                <span className="bm-row__icon">
+                  <IconBookmark size={16} filled />
+                </span>
+                <span className="bm-row__body">
+                  <span className="bm-row__where">
+                    {formatDuration(bookmarkAbsMs(a))}
+                    {nearBookmark?.id === a.id ? ' · here' : ''}
+                  </span>
+                  <span className="bm-row__text">{a.note ?? a.selectedText ?? 'Bookmark'}</span>
+                </span>
+                <button
+                  className="icon-btn bm-row__delete"
+                  style={{ width: 36, height: 36 }}
+                  aria-label="Delete bookmark"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void deleteBookmark(a.id);
+                  }}
+                >
+                  <IconTrash size={15} />
+                </button>
+              </div>
+            ))}
         </Sheet>
       )}
     </div>

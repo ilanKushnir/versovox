@@ -2,6 +2,7 @@ import { type AppContext } from '../context.js';
 import {
   claimNextJob,
   finishJob,
+  HEAVY_JOB_TYPES,
   LEASE_MS,
   LeaseLostError,
   makeLeaseGuard,
@@ -26,10 +27,17 @@ export interface WorkerHandle {
   stop: () => Promise<void>;
 }
 
+/**
+ * Two lanes: `concurrency` slots for heavy jobs (multi-hour whisper runs) and
+ * one always-available slot for light jobs (scans, indexing, pairing, model
+ * downloads), so a transcription can never hold the library hostage.
+ */
 export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle {
-  let running = 0;
+  let runningHeavy = 0;
+  let runningLight = 0;
   let stopped = false;
   let staleSweepAt = 0;
+  const isHeavy = (type: string) => (HEAVY_JOB_TYPES as readonly string[]).includes(type);
 
   const tick = () => {
     if (stopped) return;
@@ -43,16 +51,27 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
         ctx.log.error(`Stale job sweep failed: ${(err as Error).message}`);
       }
     }
-    while (running < concurrency) {
+    for (;;) {
+      const lane =
+        runningHeavy < concurrency
+          ? runningLight < 1
+            ? 'any'
+            : 'heavy'
+          : runningLight < 1
+            ? 'light'
+            : null;
+      if (!lane) return;
       let job;
       try {
-        job = claimNextJob(ctx.db);
+        job = claimNextJob(ctx.db, { lane });
       } catch (err) {
         ctx.log.error(`Job claim failed: ${(err as Error).message}`);
         return;
       }
       if (!job) return;
-      running += 1;
+      const heavy = isHeavy(job.type);
+      if (heavy) runningHeavy += 1;
+      else runningLight += 1;
 
       // Shared ownership guard: the background heartbeat renews through it,
       // and the SAME guard travels into the handler so every side effect is
@@ -84,7 +103,8 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
         } catch (err) {
           ctx.log.error(`Failed to finish job ${job.id}: ${(err as Error).message}`);
         }
-        running -= 1;
+        if (heavy) runningHeavy -= 1;
+        else runningLight -= 1;
       };
       const handler = JOB_HANDLERS[job.type];
       if (!handler) {
@@ -120,7 +140,7 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
       clearInterval(interval);
       // Give in-flight jobs a moment to checkpoint.
       const deadline = Date.now() + 5000;
-      while (running > 0 && Date.now() < deadline) {
+      while (runningHeavy + runningLight > 0 && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 100));
       }
     },

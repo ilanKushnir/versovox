@@ -13,6 +13,7 @@ export interface SessionUser {
   id: string;
   username: string;
   role: string;
+  displayName?: string | null;
 }
 
 function hmacToken(secret: string, token: string): string {
@@ -47,24 +48,47 @@ export function resolveSession(db: DB, secret: string, token: string): SessionUs
   if (!token || token.length > 128) return null;
   const row = db
     .prepare(
-      `SELECT s.id AS session_id, s.expires_at, u.id, u.username, u.role
+      `SELECT s.id AS session_id, s.expires_at, u.id, u.username, u.role, u.display_name, u.status
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hmac = ?`,
     )
     .get(hmacToken(secret, token)) as
-    | { session_id: string; expires_at: string; id: string; username: string; role: string }
+    | {
+        session_id: string;
+        expires_at: string;
+        id: string;
+        username: string;
+        role: string;
+        display_name: string | null;
+        status: string;
+      }
     | undefined;
   if (!row) return null;
-  if (Date.parse(row.expires_at) < Date.now()) {
+  if (Date.parse(row.expires_at) < Date.now() || row.status !== 'active') {
+    // Disabling an account revokes its sessions on next use.
     db.prepare('DELETE FROM sessions WHERE id = ?').run(row.session_id);
     return null;
   }
   db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').run(nowIso(), row.session_id);
-  return { id: row.id, username: row.username, role: row.role };
+  return { id: row.id, username: row.username, role: row.role, displayName: row.display_name };
 }
 
 export function destroySession(db: DB, secret: string, token: string): void {
   db.prepare('DELETE FROM sessions WHERE token_hmac = ?').run(hmacToken(secret, token));
+}
+
+/** Sign a user out everywhere, optionally keeping one session (the caller's). */
+export function destroyUserSessions(
+  db: DB,
+  userId: string,
+  keepToken?: { secret: string; token: string },
+): number {
+  const res = keepToken
+    ? db
+        .prepare('DELETE FROM sessions WHERE user_id = ? AND token_hmac <> ?')
+        .run(userId, hmacToken(keepToken.secret, keepToken.token))
+    : db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  return Number(res.changes);
 }
 
 /**
