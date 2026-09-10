@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { type FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { type BookSummary } from '@tandemleaf/shared';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';
@@ -61,11 +62,20 @@ export function bookRowToSummary(
   };
 }
 
+const libraryQuerySchema = z.object({
+  query: z.string().max(200).optional(),
+  kind: z.enum(['ebook', 'audio']).optional(),
+  filter: z.enum(['paired', 'in-progress', 'finished']).optional(),
+  sort: z.enum(['title', 'author', 'recent', 'added']).optional(),
+});
+
 export function registerLibraryRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
 
-  app.get('/api/library', async (req) => {
-    const q = (req.query ?? {}) as Record<string, string>;
+  app.get('/api/library', async (req, reply) => {
+    const parsedQuery = libraryQuerySchema.safeParse(req.query ?? {});
+    if (!parsedQuery.success) return reply.code(400).send({ error: 'bad-query' });
+    const q = parsedQuery.data;
     const rows = db
       .prepare(`SELECT * FROM books WHERE scan_state != 'missing' ORDER BY title COLLATE NOCASE`)
       .all() as Record<string, unknown>[];
@@ -126,12 +136,14 @@ export function registerLibraryRoutes(app: FastifyInstance, ctx: AppContext): vo
     return { jobId: id, queued: id !== null };
   });
 
-  app.get('/api/library/roots', async () => ({
-    ebookDirs: ctx.config.ebookDirs,
-    audiobookDirs: ctx.config.audiobookDirs,
-    readOnly: true,
-  }));
-
+  app.get('/api/library/roots', async (req, reply) => {
+    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
+    return {
+      ebookDirs: ctx.config.ebookDirs,
+      audiobookDirs: ctx.config.audiobookDirs,
+      readOnly: true,
+    };
+  });
   app.get('/api/books/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const row = db.prepare('SELECT * FROM books WHERE id = ?').get(id) as

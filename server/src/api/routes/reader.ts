@@ -42,8 +42,12 @@ export function registerReaderRoutes(app: FastifyInstance, ctx: AppContext): voi
     const file = path.join(book.dir, `ch_${n}.html`);
     if (!fs.existsSync(file)) return reply.code(404).send({ error: 'no-chapter' });
     reply.header('content-type', 'text/html; charset=utf-8');
-    // Sanitized fragment; the reader injects it into its own shadow DOM. CSP
-    // on the app shell plus sanitization keep it inert.
+    // Sanitized fragment that the reader fetches as text and injects into its
+    // own DOM under the app CSP. If a browser is pointed at this URL
+    // directly, `sandbox` gives the document an opaque origin (no cookies,
+    // no same-origin DOM) and `default-src 'none'` blocks every load — so a
+    // sanitizer bypass still has no script or exfiltration channel.
+    reply.header('content-security-policy', "sandbox; default-src 'none'");
     reply.header('cache-control', 'private, max-age=3600');
     return reply.send(fs.createReadStream(file));
   });

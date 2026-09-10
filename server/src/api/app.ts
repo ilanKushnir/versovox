@@ -14,7 +14,25 @@ import { registerAnnotationRoutes } from './routes/annotations.js';
 import { registerPairRoutes } from './routes/pairs.js';
 import { registerJobRoutes, registerOfflineRoutes, registerSettingsRoutes } from './routes/misc.js';
 
-const PUBLIC_PATHS = new Set(['/api/health', '/api/setup/status', '/api/setup', '/api/auth/login']);
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** Route is reachable without a session (still CSRF-checked). */
+    public?: boolean;
+  }
+}
+
+/**
+ * Decoded request path. The router matches on the DECODED path, so a guard
+ * keyed on the raw `req.url` would let `/%61pi/...` reach `/api/...` routes
+ * unauthenticated. Returns null for malformed encodings.
+ */
+export function decodedPathname(url: string): string | null {
+  try {
+    return decodeURIComponent(new URL(url, 'http://tandemleaf.invalid').pathname);
+  } catch {
+    return null;
+  }
+}
 
 const CSP = [
   "default-src 'self'",
@@ -54,22 +72,35 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'same-origin');
     reply.header('x-frame-options', 'DENY');
-    if (!req.url.startsWith('/api/books/')) {
+    if (!(decodedPathname(req.url) ?? '').startsWith('/api/books/')) {
       // Book chapter fragments/assets carry their own stricter handling.
       reply.header('content-security-policy', CSP);
     }
     attachUser(ctx, req);
-    if (req.url.startsWith('/api/') && !PUBLIC_PATHS.has(req.url.split('?')[0]!)) {
-      if (!csrfCheck(req)) {
-        return reply.code(403).send({ error: 'csrf' });
-      }
-      if (!requireUser(req, reply)) return reply;
-    } else if (req.url.startsWith('/api/') && !csrfCheck(req)) {
-      return reply.code(403).send({ error: 'csrf' });
-    }
+    const pathname = decodedPathname(req.url);
+    if (pathname === null) return reply.code(400).send({ error: 'bad-url' });
+    // Gate on BOTH the matched route pattern and the decoded path, so an
+    // encoded prefix can neither reach a route nor dodge the check.
+    const routeUrl = req.routeOptions?.url ?? '';
+    const isApi = routeUrl.startsWith('/api/') || pathname.startsWith('/api/');
+    if (!isApi) return;
+    if (!csrfCheck(req)) return reply.code(403).send({ error: 'csrf' });
+    if (req.routeOptions?.config?.public === true) return;
+    if (!requireUser(req, reply)) return reply;
   });
 
-  app.get('/api/health', async () => ({
+  // Never leak internal error messages (paths, SQL, stack fragments).
+  app.setErrorHandler((err: unknown, req, reply) => {
+    const e = err as { statusCode?: number; code?: string };
+    const status = e.statusCode && e.statusCode >= 400 ? e.statusCode : 500;
+    if (status >= 500) {
+      req.log.error({ err }, 'unhandled route error');
+      return reply.code(500).send({ error: 'internal' });
+    }
+    return reply.code(status).send({ error: typeof e.code === 'string' ? e.code : 'error' });
+  });
+
+  app.get('/api/health', { config: { public: true } }, async () => ({
     status: 'ok',
     version: '0.1.0',
     time: new Date().toISOString(),
@@ -101,7 +132,7 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
       },
     });
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) {
+      if ((decodedPathname(req.url) ?? '/api/').startsWith('/api/')) {
         return reply.code(404).send({ error: 'not-found' });
       }
       reply.header('content-security-policy', CSP);
@@ -110,7 +141,9 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
     });
   } else {
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not-found' });
+      if ((decodedPathname(req.url) ?? '/api/').startsWith('/api/')) {
+        return reply.code(404).send({ error: 'not-found' });
+      }
       return reply
         .code(503)
         .type('text/plain')

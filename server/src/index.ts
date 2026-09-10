@@ -8,6 +8,7 @@ import { type AppContext } from './context.js';
 import { startWorker } from './jobs/worker.js';
 import { enqueueJob } from './jobs/queue.js';
 import { compactProgressHistory } from './progress/service.js';
+import { pruneLoginThrottle } from './auth/sessions.js';
 
 const config = loadConfig();
 const db = openDatabase(config.dataDir);
@@ -44,12 +45,27 @@ if (hasUsers && (config.ebookDirs.length || config.audiobookDirs.length)) {
   enqueueJob(db, 'scan', {}, { dedupeKey: 'scan' });
 }
 
+// Periodic rescan so titles added to Calibre/Audiobookshelf/plain folders
+// show up without a manual click. Dedupe-keyed: never stacks up.
+if (config.scanIntervalMinutes > 0 && (config.ebookDirs.length || config.audiobookDirs.length)) {
+  const scanTimer = setInterval(() => {
+    try {
+      const users = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
+      if (users > 0) enqueueJob(db, 'scan', {}, { dedupeKey: 'scan' });
+    } catch (err) {
+      ctx.log.error(`Scheduled rescan failed: ${(err as Error).message}`);
+    }
+  }, config.scanIntervalMinutes * 60_000);
+  scanTimer.unref?.();
+}
+
 // Daily heartbeat-history compaction.
 const compactTimer = setInterval(
   () => {
     try {
       const n = compactProgressHistory(db);
       if (n > 0) ctx.log.info(`Compacted ${n} old heartbeat events`);
+      pruneLoginThrottle(db);
     } catch (err) {
       ctx.log.error(`Compaction failed: ${(err as Error).message}`);
     }

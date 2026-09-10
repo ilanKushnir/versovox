@@ -1,4 +1,5 @@
 import {
+  progressEventSchema,
   resolveResume,
   type Locator,
   type ProgressAck,
@@ -6,7 +7,7 @@ import {
   type ProgressIntent,
   type ProgressState,
 } from '@tandemleaf/shared';
-import { api, isOffline } from '../api/client';
+import { api, ApiError, isOffline } from '../api/client';
 import { idbAll, idbDelete, idbGet, idbPut, STORES } from './idb';
 
 /**
@@ -47,33 +48,62 @@ export function onProgressSync(fn: Listener): () => void {
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let flushing = false;
 
-export async function recordCheckpoint(
-  bookId: string,
-  intent: ProgressIntent,
-  locator: Locator,
-  opts: { flush?: boolean } = {},
-): Promise<void> {
-  seq += 1;
-  // Declare which server revision this action was based on (causal ordering
-  // beats clock ordering during reconciliation; clocks are just a hint).
-  let baseRevision: number | undefined;
-  try {
-    const known = await idbGet<ProgressState>(STORES.serverState, bookId);
-    baseRevision = known?.revision;
-  } catch {
-    baseRevision = undefined;
+/** Last server revision seen per book, mirrored in memory so an event can be
+ *  built synchronously (pagehide gives us no time for an IndexedDB read). */
+const knownRevision = new Map<string, number>();
+
+/** Locators are validated server-side; keep them in range at the source so a
+ *  slightly-over-duration audio position can never poison the queue. */
+function sanitizeLocator(locator: Locator): Locator {
+  const pct = Math.min(1, Math.max(0, Number.isFinite(locator.pct) ? locator.pct : 0));
+  if (locator.medium === 'audio') {
+    return {
+      ...locator,
+      pct,
+      positionMs: Math.max(0, Math.round(locator.positionMs || 0)),
+      bookMs: locator.bookMs === undefined ? undefined : Math.max(0, Math.round(locator.bookMs)),
+    };
   }
-  const event: ProgressEvent = {
+  return {
+    ...locator,
+    pct,
+    charOffset:
+      locator.charOffset === undefined ? undefined : Math.max(0, Math.round(locator.charOffset)),
+  };
+}
+
+function buildEvent(bookId: string, intent: ProgressIntent, locator: Locator): ProgressEvent {
+  seq += 1;
+  return {
     eventId: crypto.randomUUID(),
     bookId,
     deviceId,
     sessionId,
     seq,
     occurredAt: new Date().toISOString(),
-    baseRevision,
+    // Declare which server revision this action was based on (causal ordering
+    // beats clock ordering during reconciliation; clocks are just a hint).
+    baseRevision: knownRevision.get(bookId),
     intent,
-    locator,
+    locator: sanitizeLocator(locator),
   };
+}
+
+export async function recordCheckpoint(
+  bookId: string,
+  intent: ProgressIntent,
+  locator: Locator,
+  opts: { flush?: boolean } = {},
+): Promise<void> {
+  if (!knownRevision.has(bookId)) {
+    try {
+      const known = await idbGet<ProgressState>(STORES.serverState, bookId);
+      if (known) knownRevision.set(bookId, known.revision);
+    } catch {
+      /* no cached state */
+    }
+  }
+  const event = buildEvent(bookId, intent, locator);
   // IndexedDB first — never lose a checkpoint to a dropped connection.
   await idbPut(STORES.pendingEvents, event.eventId, event);
   if (opts.flush !== false) scheduleFlush(intent !== 'heartbeat');
@@ -95,19 +125,60 @@ export function setActiveLocatorProvider(fn: ActiveLocatorProvider): () => void 
 }
 
 /**
- * visibilitychange/pagehide path: write the live position to IndexedDB
- * first (durable even if the tab dies mid-flush), then attempt a keepalive
- * network flush.
+ * visibilitychange/pagehide path. The page may be frozen or killed within
+ * milliseconds, so the live position is sent IMMEDIATELY with a keepalive
+ * request (no IndexedDB round-trip first) and written to IndexedDB in
+ * parallel; the queued copy is removed only once the server acknowledges
+ * it. Everything already queued is flushed the same way.
  */
 export function persistActiveLocatorAndFlush(): void {
   const current = activeLocatorProvider?.();
   if (current) {
-    void recordCheckpoint(current.bookId, 'heartbeat', current.locator, { flush: false }).then(() =>
-      flushPending(true),
-    );
-  } else {
-    void flushPending(true);
+    const event = buildEvent(current.bookId, 'heartbeat', current.locator);
+    const stored = idbPut(STORES.pendingEvents, event.eventId, event).catch(() => {});
+    void api<ProgressAck>('/api/progress/events', {
+      method: 'POST',
+      body: { events: [event] },
+      keepalive: true,
+    })
+      .then(async (ack) => {
+        await stored;
+        await handleAck(ack);
+      })
+      .catch(() => {
+        /* stays queued in IndexedDB; the next flush retries */
+      });
   }
+  void flushPending(true, /* bypassInFlightGuard */ true);
+}
+
+async function handleAck(ack: ProgressAck): Promise<void> {
+  for (const r of ack.results) {
+    // applied / recorded / duplicate are all durable server outcomes; a
+    // rejected event is malformed and would be rejected forever.
+    await idbDelete(STORES.pendingEvents, r.eventId);
+  }
+  if (ack.state) {
+    knownRevision.set(ack.state.bookId, ack.state.revision);
+    await idbPut(STORES.serverState, ack.state.bookId, ack.state);
+  }
+  listeners.forEach((l) => l());
+}
+
+/**
+ * A batch the server refuses outright (4xx) would block every later event
+ * for every book, forever. Drop only the events that fail the shared schema
+ * locally; if all validate the failure is transient and they stay queued.
+ */
+async function quarantineInvalid(events: ProgressEvent[]): Promise<number> {
+  let dropped = 0;
+  for (const ev of events) {
+    if (!progressEventSchema.safeParse(ev).success) {
+      await idbDelete(STORES.pendingEvents, ev.eventId);
+      dropped += 1;
+    }
+  }
+  return dropped;
 }
 
 export function scheduleFlush(soon = false): void {
@@ -115,13 +186,18 @@ export function scheduleFlush(soon = false): void {
   flushTimer = setTimeout(() => void flushPending(), soon ? 250 : 5000);
 }
 
-export async function flushPending(useKeepalive = false): Promise<void> {
-  if (flushing) return;
+export async function flushPending(
+  useKeepalive = false,
+  bypassInFlightGuard = false,
+): Promise<void> {
+  if (flushing && !bypassInFlightGuard) return;
+  const ownsGuard = !flushing;
   flushing = true;
+  let events: ProgressEvent[] = [];
   try {
     const pending = await idbAll<ProgressEvent>(STORES.pendingEvents);
     if (pending.length === 0) return;
-    const events = pending
+    events = pending
       .map((p) => p.value)
       .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt) || a.seq - b.seq)
       .slice(0, 200);
@@ -130,19 +206,16 @@ export async function flushPending(useKeepalive = false): Promise<void> {
       body: { events },
       keepalive: useKeepalive,
     });
-    for (const r of ack.results) {
-      // applied / recorded / duplicate are all durable server outcomes.
-      if (r.status !== 'rejected') await idbDelete(STORES.pendingEvents, r.eventId);
-    }
-    if (ack.state) {
-      await idbPut(STORES.serverState, ack.state.bookId, ack.state);
-    }
-    listeners.forEach((l) => l());
+    await handleAck(ack);
   } catch (err) {
-    if (!isOffline(err)) console.warn('progress flush failed', err);
-    // Events stay queued; the next flush retries.
+    if (isOffline(err)) return; // events stay queued; the next flush retries
+    console.warn('progress flush failed', err);
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 401) {
+      const dropped = await quarantineInvalid(events);
+      if (dropped > 0) console.warn(`dropped ${dropped} malformed progress event(s)`);
+    }
   } finally {
-    flushing = false;
+    if (ownsGuard) flushing = false;
   }
 }
 
@@ -154,7 +227,10 @@ export async function resumeLocator(
   try {
     const res = await api<{ state: ProgressState | null }>(`/api/progress/${bookId}`);
     server = res.state;
-    if (server) await idbPut(STORES.serverState, bookId, server);
+    if (server) {
+      knownRevision.set(bookId, server.revision);
+      await idbPut(STORES.serverState, bookId, server);
+    }
   } catch {
     server = (await idbGet<ProgressState>(STORES.serverState, bookId)) ?? null;
   }

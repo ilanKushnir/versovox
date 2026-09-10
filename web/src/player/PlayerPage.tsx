@@ -10,6 +10,8 @@ import {
   IconBack,
   IconBookmark,
   IconBookOpen,
+  IconChapterNext,
+  IconChapterPrev,
   IconMoon,
   IconPause,
   IconPlay,
@@ -19,17 +21,46 @@ import {
   IconToc,
 } from '../components/icons';
 import { formatDuration, formatPct } from '../lib/format';
+import { ambientColorFromImage } from '../lib/ambient';
 
-const SPEEDS = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+const SPEEDS = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+const SKIP_CHOICES = [10, 15, 30, 45, 60];
 const SLEEP_OPTIONS = [
   { label: 'Off', minutes: 0 },
   { label: '15 min', minutes: 15 },
   { label: '30 min', minutes: 30 },
   { label: '45 min', minutes: 45 },
+  { label: '1 hour', minutes: 60 },
   { label: 'End of chapter', minutes: -1 },
 ];
 
-type SheetKind = 'none' | 'chapters' | 'speed' | 'sleep' | 'bookmarks';
+type SheetKind = 'none' | 'chapters' | 'playback' | 'sleep' | 'bookmarks';
+
+interface SkipPrefs {
+  back: number;
+  fwd: number;
+}
+
+function loadSkip(): SkipPrefs {
+  try {
+    const raw = JSON.parse(localStorage.getItem('tl-skip') ?? '');
+    if (SKIP_CHOICES.includes(raw.back) && SKIP_CHOICES.includes(raw.fwd)) return raw;
+  } catch {
+    /* defaults */
+  }
+  return { back: 15, fwd: 30 };
+}
+
+/** Per-book speed override, falling back to the global default. */
+function loadSpeed(bookId: string): number {
+  try {
+    const perBook = Number(localStorage.getItem(`tl-speed:${bookId}`));
+    if (perBook > 0) return perBook;
+    return Number(localStorage.getItem('tl-speed')) || 1;
+  } catch {
+    return 1;
+  }
+}
 
 export function PlayerPage() {
   const { id = '' } = useParams();
@@ -44,42 +75,76 @@ export function PlayerPage() {
   const [positionMs, setPositionMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
-  const [speed, setSpeed] = useState(() => Number(localStorage.getItem('tl-speed')) || 1);
+  const [speed, setSpeed] = useState(() => loadSpeed(id));
+  const [skip, setSkip] = useState<SkipPrefs>(loadSkip);
   const [sheet, setSheet] = useState<SheetKind>('none');
   const [sleepUntil, setSleepUntil] = useState<number | null>(null);
   const [sleepChapterEnd, setSleepChapterEnd] = useState(false);
+  const [sleepTick, setSleepTick] = useState(0);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [handoffMarkerPct, setHandoffMarkerPct] = useState<number | null>(null);
+  const [ambient, setAmbient] = useState<string | null>(null);
 
+  /**
+   * Seek to apply once the current track's metadata is loaded. Read at
+   * event time (never snapshotted into an effect closure): the resume
+   * position arrives after the element has already loaded track 0, so the
+   * seek must be applied whenever it appears, not only on src changes.
+   */
   const pendingSeekRef = useRef<{ trackIdx: number; positionMs: number; autoplay: boolean } | null>(
     null,
   );
+  const [seekVersion, setSeekVersion] = useState(0);
   const lastHeartbeatRef = useRef(0);
+  const lastPositionStateRef = useRef(0);
   const scrubbing = useRef(false);
 
   const tracks = detail?.tracks ?? [];
   const totalMs = useMemo(() => tracks.reduce((a, t) => a + t.durationMs, 0), [tracks]);
   const bookMs = (tracks[trackIdx]?.startMsAbsolute ?? 0) + positionMs;
+  const bookMsRef = useRef(bookMs);
+  bookMsRef.current = bookMs;
 
   const chapters = detail?.chapters ?? [];
-  const currentChapter = useMemo(() => {
-    let found: (typeof chapters)[number] | null = null;
-    for (const c of chapters) {
-      if (c.startMs != null && c.startMs <= bookMs + 250) found = c;
+  const chapterIndex = useMemo(() => {
+    let found = -1;
+    for (let i = 0; i < chapters.length; i++) {
+      const c = chapters[i]!;
+      if (c.startMs != null && c.startMs <= bookMs + 250) found = i;
       else break;
     }
     return found;
   }, [chapters, bookMs]);
+  const currentChapter = chapterIndex >= 0 ? chapters[chapterIndex]! : null;
+  const chapterEndMs = currentChapter?.endMs ?? chapters[chapterIndex + 1]?.startMs ?? totalMs;
+  const chapterStartMs = currentChapter?.startMs ?? 0;
+  const chapterPct =
+    chapterEndMs > chapterStartMs
+      ? Math.min(1, Math.max(0, (bookMs - chapterStartMs) / (chapterEndMs - chapterStartMs)))
+      : 0;
 
   const locatorNow = useCallback(
     (): AudioLocator => ({
       medium: 'audio',
       trackIdx,
-      positionMs: Math.round(positionMs),
-      bookMs: Math.round(bookMs),
-      pct: totalMs > 0 ? Math.min(1, bookMs / totalMs) : 0,
+      positionMs: Math.max(0, Math.round(positionMs)),
+      bookMs: Math.max(0, Math.round(bookMs)),
+      pct: totalMs > 0 ? Math.min(1, Math.max(0, bookMs / totalMs)) : 0,
     }),
     [trackIdx, positionMs, bookMs, totalMs],
+  );
+  const locatorFor = useCallback(
+    (t: number, within: number): AudioLocator => {
+      const abs = (tracks[t]?.startMsAbsolute ?? 0) + within;
+      return {
+        medium: 'audio',
+        trackIdx: t,
+        positionMs: Math.max(0, Math.round(within)),
+        bookMs: Math.max(0, Math.round(abs)),
+        pct: totalMs > 0 ? Math.min(1, Math.max(0, abs / totalMs)) : 0,
+      };
+    },
+    [tracks, totalMs],
   );
 
   // Honest format support: detected-but-unplayable formats (e.g. FLAC/OGG on
@@ -108,6 +173,11 @@ export function PlayerPage() {
         const d = await api<BookDetail>(`/api/books/${id}`);
         if (!alive) return;
         setDetail(d);
+        const total = d.tracks.reduce((a, x) => a + x.durationMs, 0);
+        const pctOf = (t: number, p: number) =>
+          total > 0
+            ? Math.min(1, Math.max(0, ((d.tracks[t]?.startMsAbsolute ?? 0) + p) / total))
+            : 0;
         const anns = await api<{ annotations: Annotation[] }>(`/api/books/${id}/annotations`).catch(
           () => ({ annotations: [] as Annotation[] }),
         );
@@ -118,7 +188,7 @@ export function PlayerPage() {
         const handoff = searchParams.get('handoff') === '1';
         if (posParam !== null) {
           let t = trackParam !== null ? Number(trackParam) || 0 : -1;
-          let p = Number(posParam) || 0;
+          let p = Math.max(0, Number(posParam) || 0);
           if (t < 0) {
             // pos interpreted as absolute bookMs (chapter links).
             t = 0;
@@ -127,9 +197,9 @@ export function PlayerPage() {
             }
             p = p - d.tracks[t]!.startMsAbsolute;
           }
+          t = Math.min(Math.max(0, t), Math.max(0, d.tracks.length - 1));
           pendingSeekRef.current = { trackIdx: t, positionMs: p, autoplay: handoff };
           if (handoff) {
-            const total = d.tracks.reduce((a, x) => a + x.durationMs, 0);
             const abs = (d.tracks[t]?.startMsAbsolute ?? 0) + p;
             setHandoffMarkerPct(total > 0 ? abs / total : null);
             const gran = searchParams.get('granularity');
@@ -143,37 +213,37 @@ export function PlayerPage() {
             medium: 'audio',
             trackIdx: t,
             positionMs: Math.round(p),
-            pct: 0,
+            bookMs: Math.round((d.tracks[t]?.startMsAbsolute ?? 0) + p),
+            pct: pctOf(t, p),
           });
         } else {
           const resume = await resumeLocator(id);
           if (!alive) return;
           if (resume && resume.locator.medium === 'audio') {
             pendingSeekRef.current = {
-              trackIdx: Math.min(resume.locator.trackIdx, d.tracks.length - 1),
+              trackIdx: Math.min(resume.locator.trackIdx, Math.max(0, d.tracks.length - 1)),
               positionMs: resume.locator.positionMs,
               autoplay: false,
             };
           } else {
             pendingSeekRef.current = { trackIdx: 0, positionMs: 0, autoplay: false };
           }
-          void recordCheckpoint(
-            id,
-            'open',
-            pendingSeekRef.current
-              ? {
-                  medium: 'audio',
-                  trackIdx: pendingSeekRef.current.trackIdx,
-                  positionMs: Math.round(pendingSeekRef.current.positionMs),
-                  pct: 0,
-                }
-              : { medium: 'audio', trackIdx: 0, positionMs: 0, pct: 0 },
-          );
+          const target = pendingSeekRef.current;
+          void recordCheckpoint(id, 'open', {
+            medium: 'audio',
+            trackIdx: target.trackIdx,
+            positionMs: Math.round(target.positionMs),
+            bookMs: Math.round(
+              (d.tracks[target.trackIdx]?.startMsAbsolute ?? 0) + target.positionMs,
+            ),
+            pct: pctOf(target.trackIdx, target.positionMs),
+          });
         }
         const target = pendingSeekRef.current;
         if (target) {
           setTrackIdx(target.trackIdx);
           setPositionMs(target.positionMs);
+          setSeekVersion((v) => v + 1);
         }
       } catch {
         if (alive) setError('Could not load this audiobook.');
@@ -184,50 +254,101 @@ export function PlayerPage() {
     };
   }, [id]);
 
+  // Ambient background tint from the cover.
+  useEffect(() => {
+    if (!detail?.book.hasCover) return;
+    let cancelled = false;
+    ambientColorFromImage(`/api/books/${id}/cover`).then((c) => {
+      if (!cancelled && c) setAmbient(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail, id]);
+
   /* -------------------------------------------------------- audio wiring */
 
   const src = tracks.length > 0 ? `/api/books/${id}/track/${trackIdx}` : undefined;
+
+  /** Apply the pending seek if it targets the loaded track. */
+  const applyPendingSeek = useCallback(() => {
+    const el = audioRef.current;
+    const target = pendingSeekRef.current;
+    if (!el || !target || target.trackIdx !== trackIdx || el.readyState < 1) return;
+    pendingSeekRef.current = null;
+    el.currentTime = target.positionMs / 1000;
+    setPositionMs(target.positionMs);
+    if (target.autoplay) void el.play().catch(() => {});
+  }, [trackIdx]);
 
   useEffect(() => {
     const el = audioRef.current;
     if (!el || !src) return;
     el.playbackRate = speed;
     el.preservesPitch = true;
-    const target = pendingSeekRef.current;
-    const onLoaded = () => {
-      if (target && target.trackIdx === trackIdx) {
-        el.currentTime = target.positionMs / 1000;
-        pendingSeekRef.current = null;
-        if (target.autoplay) void el.play().catch(() => {});
-      }
-    };
-    el.addEventListener('loadedmetadata', onLoaded);
-    return () => el.removeEventListener('loadedmetadata', onLoaded);
-  }, [src, trackIdx, speed]);
+    // Metadata may already be loaded (resume arrived after track 0 loaded):
+    // apply now, and otherwise as soon as it loads.
+    applyPendingSeek();
+    el.addEventListener('loadedmetadata', applyPendingSeek);
+    return () => el.removeEventListener('loadedmetadata', applyPendingSeek);
+  }, [src, trackIdx, seekVersion, applyPendingSeek]);
 
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
     el.playbackRate = speed;
     el.preservesPitch = true;
-    localStorage.setItem('tl-speed', String(speed));
-  }, [speed]);
+    try {
+      localStorage.setItem('tl-speed', String(speed));
+      localStorage.setItem(`tl-speed:${id}`, String(speed));
+    } catch {
+      /* private mode */
+    }
+  }, [speed, id]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('tl-skip', JSON.stringify(skip));
+    } catch {
+      /* private mode */
+    }
+  }, [skip]);
+
+  // Sleep countdown needs a clock even while paused/scrubbing.
+  useEffect(() => {
+    if (!sleepUntil) return;
+    const t = setInterval(() => setSleepTick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [sleepUntil]);
+
+  const publishPositionState = useCallback(() => {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+    const el = audioRef.current;
+    if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: el.duration,
+        playbackRate: el.playbackRate,
+        position: Math.min(el.duration, Math.max(0, el.currentTime)),
+      });
+    } catch {
+      /* unsupported values */
+    }
+  }, []);
 
   const onTimeUpdate = () => {
     const el = audioRef.current;
-    if (!el || scrubbing.current) return;
+    if (!el) return;
     const ms = el.currentTime * 1000;
-    setPositionMs(ms);
+    if (!scrubbing.current) setPositionMs(ms);
     const now = Date.now();
+    if (now - lastPositionStateRef.current > 1000) {
+      lastPositionStateRef.current = now;
+      publishPositionState();
+    }
     if (playing && now - lastHeartbeatRef.current > 15_000) {
       lastHeartbeatRef.current = now;
-      void recordCheckpoint(id, 'heartbeat', {
-        medium: 'audio',
-        trackIdx,
-        positionMs: Math.round(ms),
-        bookMs: Math.round((tracks[trackIdx]?.startMsAbsolute ?? 0) + ms),
-        pct: totalMs > 0 ? ((tracks[trackIdx]?.startMsAbsolute ?? 0) + ms) / totalMs : 0,
-      });
+      void recordCheckpoint(id, 'heartbeat', locatorFor(trackIdx, ms));
     }
     // Sleep timer.
     if (sleepUntil && now >= sleepUntil) {
@@ -235,7 +356,8 @@ export function PlayerPage() {
       setSleepUntil(null);
       toast.show('Sleep timer: paused');
     }
-    if (sleepChapterEnd && currentChapter?.endMs != null && bookMs >= currentChapter.endMs - 400) {
+    const abs = (tracks[trackIdx]?.startMsAbsolute ?? 0) + ms;
+    if (sleepChapterEnd && currentChapter && abs >= chapterEndMs - 400) {
       el.pause();
       setSleepChapterEnd(false);
       toast.show('End of chapter: paused');
@@ -247,6 +369,7 @@ export function PlayerPage() {
       pendingSeekRef.current = { trackIdx: trackIdx + 1, positionMs: 0, autoplay: true };
       setTrackIdx(trackIdx + 1);
       setPositionMs(0);
+      setSeekVersion((v) => v + 1);
     } else {
       setPlaying(false);
       void recordCheckpoint(id, 'finish', { ...locatorNow(), pct: 1 });
@@ -257,32 +380,27 @@ export function PlayerPage() {
   const seekTo = useCallback(
     (absMs: number, intent: 'seek' | 'heartbeat' = 'seek') => {
       if (tracks.length === 0) return;
-      const clamped = Math.max(0, Math.min(absMs, totalMs - 200));
+      const clamped = Math.max(0, Math.min(absMs, Math.max(0, totalMs - 200)));
       let t = 0;
       for (let i = 0; i < tracks.length; i++) {
         if (clamped >= tracks[i]!.startMsAbsolute) t = i;
       }
       const within = clamped - tracks[t]!.startMsAbsolute;
       const el = audioRef.current;
-      if (t === trackIdx && el && el.readyState > 0) {
+      if (t === trackIdx && el && el.readyState >= 1) {
         el.currentTime = within / 1000;
       } else {
         pendingSeekRef.current = { trackIdx: t, positionMs: within, autoplay: playing };
         setTrackIdx(t);
+        setSeekVersion((v) => v + 1);
       }
       setPositionMs(within);
-      if (intent === 'seek') {
-        void recordCheckpoint(id, 'seek', {
-          medium: 'audio',
-          trackIdx: t,
-          positionMs: Math.round(within),
-          bookMs: Math.round(clamped),
-          pct: totalMs > 0 ? clamped / totalMs : 0,
-        });
-      }
+      if (intent === 'seek') void recordCheckpoint(id, 'seek', locatorFor(t, within));
     },
-    [tracks, totalMs, trackIdx, playing, id],
+    [tracks, totalMs, trackIdx, playing, id, locatorFor],
   );
+  const seekToRef = useRef(seekTo);
+  seekToRef.current = seekTo;
 
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
@@ -294,35 +412,87 @@ export function PlayerPage() {
   // Pause → durable checkpoint with explicit intent.
   const onPause = () => {
     setPlaying(false);
+    publishPositionState();
     void recordCheckpoint(id, 'pause', locatorNow());
   };
+
+  const goChapter = useCallback(
+    (delta: number) => {
+      if (chapters.length === 0) return;
+      // "Previous" within the first few seconds of a chapter goes to the
+      // chapter before; otherwise it restarts the current one.
+      let target = chapterIndex + delta;
+      if (delta < 0 && currentChapter && bookMs - chapterStartMs > 4000) target = chapterIndex;
+      target = Math.max(0, Math.min(chapters.length - 1, target));
+      const c = chapters[target];
+      if (c?.startMs != null) seekTo(c.startMs);
+    },
+    [chapters, chapterIndex, currentChapter, bookMs, chapterStartMs, seekTo],
+  );
+  const goChapterRef = useRef(goChapter);
+  goChapterRef.current = goChapter;
 
   /* -------------------------------------------------------- MediaSession */
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || !detail) return;
-    const ms = navigator.mediaSession;
-    ms.metadata = new MediaMetadata({
+    navigator.mediaSession.metadata = new MediaMetadata({
       title: currentChapter?.title ?? detail.book.title,
       artist: detail.book.author ?? 'TandemLeaf',
       album: detail.book.title,
-      artwork: detail.book.hasCover ? [{ src: `/api/books/${id}/cover`, sizes: '512x512' }] : [],
+      artwork: detail.book.hasCover
+        ? [{ src: `${location.origin}/api/books/${id}/cover`, sizes: '512x512' }]
+        : [],
     });
-    ms.setActionHandler('play', () => void audioRef.current?.play());
-    ms.setActionHandler('pause', () => audioRef.current?.pause());
-    ms.setActionHandler('seekbackward', () => seekTo(bookMs - 15000));
-    ms.setActionHandler('seekforward', () => seekTo(bookMs + 30000));
-    ms.setActionHandler('seekto', (d) => {
-      if (d.seekTime != null) seekTo((tracks[trackIdx]?.startMsAbsolute ?? 0) + d.seekTime * 1000);
+  }, [detail, currentChapter, id]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !detail) return;
+    const ms = navigator.mediaSession;
+    const set = (action: MediaSessionAction, handler: MediaSessionActionHandler | null): void => {
+      try {
+        ms.setActionHandler(action, handler);
+      } catch {
+        /* action unsupported on this platform */
+      }
+    };
+    set('play', () => void audioRef.current?.play());
+    set('pause', () => audioRef.current?.pause());
+    set('seekbackward', (d) =>
+      seekToRef.current(bookMsRef.current - (d.seekOffset ?? skip.back) * 1000),
+    );
+    set('seekforward', (d) =>
+      seekToRef.current(bookMsRef.current + (d.seekOffset ?? skip.fwd) * 1000),
+    );
+    set('previoustrack', () => goChapterRef.current(-1));
+    set('nexttrack', () => goChapterRef.current(1));
+    set('seekto', (d) => {
+      if (d.seekTime != null) {
+        const start = tracks[trackIdx]?.startMsAbsolute ?? 0;
+        seekToRef.current(start + d.seekTime * 1000);
+      }
     });
     return () => {
-      ms.setActionHandler('play', null);
-      ms.setActionHandler('pause', null);
-      ms.setActionHandler('seekbackward', null);
-      ms.setActionHandler('seekforward', null);
-      ms.setActionHandler('seekto', null);
+      for (const a of [
+        'play',
+        'pause',
+        'seekbackward',
+        'seekforward',
+        'previoustrack',
+        'nexttrack',
+        'seekto',
+      ] as MediaSessionAction[]) {
+        set(a, null);
+      }
     };
-  }, [detail, currentChapter, bookMs, seekTo, id, tracks, trackIdx]);
+  }, [detail, skip.back, skip.fwd, tracks, trackIdx]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  }, [playing]);
+
+  useEffect(publishPositionState, [speed, trackIdx, publishPositionState]);
 
   // Keyboard controls.
   useEffect(() => {
@@ -332,16 +502,16 @@ export function PlayerPage() {
         e.preventDefault();
         togglePlay();
       } else if (e.key === 'ArrowLeft' || e.key === 'j') {
-        seekTo(bookMs - 15000);
+        seekTo(bookMs - skip.back * 1000);
       } else if (e.key === 'ArrowRight' || e.key === 'l') {
-        seekTo(bookMs + 30000);
+        seekTo(bookMs + skip.fwd * 1000);
       } else if (e.key === 'Escape') {
         navigate(`/book/${id}`);
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [togglePlay, seekTo, bookMs, sheet, navigate, id]);
+  }, [togglePlay, seekTo, bookMs, sheet, navigate, id, skip]);
 
   const switchToText = useCallback(async () => {
     if (!detail?.book.pair) return;
@@ -367,7 +537,7 @@ export function PlayerPage() {
       navigate(
         `/read/${detail.book.pair.otherBookId}?spine=${to.spineIdx}&char=${to.charOffset ?? 0}${
           to.sentenceId ? `&sentence=${to.sentenceId}` : ''
-        }&handoff=1`,
+        }&handoff=1&granularity=${res.resolution.granularity}`,
       );
     } catch {
       toast.show('Switching failed — server unreachable?');
@@ -424,14 +594,22 @@ export function PlayerPage() {
   }
 
   const remainingMs = Math.max(0, totalMs - bookMs);
+  const chapterLeftMs = Math.max(0, chapterEndMs - bookMs);
+  void sleepTick;
   const sleepLabel = sleepChapterEnd
-    ? 'Chapter'
+    ? 'Chapter end'
     : sleepUntil
-      ? formatDuration(sleepUntil - Date.now())
+      ? formatDuration(Math.max(0, sleepUntil - Date.now()))
       : null;
+  const audioBookmarks = annotations.filter((a) => a.locator.medium === 'audio');
+  const pair =
+    detail.book.pair && detail.book.pair.status !== 'candidate' ? detail.book.pair : null;
 
   return (
-    <div className="player-page">
+    <div
+      className="player-page"
+      style={ambient ? ({ '--pl-ambient': ambient } as React.CSSProperties) : undefined}
+    >
       <audio
         ref={audioRef}
         src={src}
@@ -442,6 +620,7 @@ export function PlayerPage() {
         onEnded={onEnded}
         onWaiting={() => setBuffering(true)}
         onPlaying={() => setBuffering(false)}
+        onRateChange={publishPositionState}
         onError={() => setError('This audio format could not be played by your browser.')}
       />
       <div className="player-top">
@@ -452,10 +631,12 @@ export function PlayerPage() {
         >
           <IconBack />
         </button>
-        <span style={{ fontSize: 13, color: 'var(--tl-text-soft)', fontWeight: 600 }}>
-          {tracks.length > 1
-            ? `Part ${trackIdx + 1} of ${tracks.length}`
-            : detail.book.format.toUpperCase()}
+        <span className="player-top__label">
+          {chapters.length > 0 && chapterIndex >= 0
+            ? `Chapter ${chapterIndex + 1} of ${chapters.length}`
+            : tracks.length > 1
+              ? `Part ${trackIdx + 1} of ${tracks.length}`
+              : detail.book.format.toUpperCase()}
         </span>
         <button
           className="icon-btn"
@@ -467,28 +648,44 @@ export function PlayerPage() {
       </div>
 
       <div className="player-main">
-        <Cover
-          book={detail.book}
-          className={detail.book.hasCover ? 'player-cover' : 'player-cover player-cover--book'}
-        />
+        <div className={`player-coverwrap ${playing ? 'is-playing' : ''}`}>
+          <Cover
+            book={detail.book}
+            className={detail.book.hasCover ? 'player-cover' : 'player-cover player-cover--book'}
+          />
+        </div>
         <div className="player-titles">
           <h1>{detail.book.title}</h1>
+          <div className="player-titles__author">{detail.book.author ?? ''}</div>
           <div className="chapter">
-            {currentChapter?.title ?? detail.book.author ?? ''}
-            {buffering ? ' · buffering…' : ''}
+            {currentChapter?.title ?? (buffering ? 'Buffering…' : '')}
+            {buffering && currentChapter ? ' · buffering…' : ''}
           </div>
         </div>
 
-        <div className="player-scrub" style={{ position: 'relative' }}>
-          {handoffMarkerPct != null && (
-            <span
-              className="handoff-marker"
-              style={{ insetInlineStart: `${handoffMarkerPct * 100}%` }}
-              title="Handoff from reading"
-            />
-          )}
+        <div className="player-scrub">
+          <div className="player-scrub__track" aria-hidden="true">
+            {chapters.length > 1 &&
+              totalMs > 0 &&
+              chapters.map((c) =>
+                c.startMs != null && c.startMs > 0 ? (
+                  <span
+                    key={c.idx}
+                    className="player-scrub__tick"
+                    style={{ insetInlineStart: `${(c.startMs / totalMs) * 100}%` }}
+                  />
+                ) : null,
+              )}
+            {handoffMarkerPct != null && (
+              <span
+                className="handoff-marker"
+                style={{ insetInlineStart: `${handoffMarkerPct * 100}%` }}
+                title="Handoff from reading"
+              />
+            )}
+          </div>
           <input
-            className="slider"
+            className="slider slider--player"
             type="range"
             min={0}
             max={Math.max(1, totalMs)}
@@ -498,6 +695,8 @@ export function PlayerPage() {
             aria-valuetext={`${formatDuration(bookMs)} of ${formatDuration(totalMs)}`}
             onPointerDown={() => (scrubbing.current = true)}
             onPointerUp={() => (scrubbing.current = false)}
+            onPointerCancel={() => (scrubbing.current = false)}
+            onLostPointerCapture={() => (scrubbing.current = false)}
             onChange={(e) => {
               const v = Number(e.target.value);
               setPositionMs(v - (tracks[trackIdx]?.startMsAbsolute ?? 0));
@@ -506,33 +705,64 @@ export function PlayerPage() {
           />
           <div className="player-times">
             <span>{formatDuration(bookMs)}</span>
+            <span className="player-times__chapter">
+              {currentChapter ? `${formatDuration(chapterLeftMs)} left in chapter` : ''}
+            </span>
             <span>-{formatDuration(remainingMs)}</span>
           </div>
+          {currentChapter && (
+            <div className="player-chapterbar" aria-hidden="true">
+              <span style={{ width: `${chapterPct * 100}%` }} />
+            </div>
+          )}
         </div>
 
         <div className="player-controls">
           <button
-            className="icon-btn"
-            onClick={() => seekTo(bookMs - 15000)}
-            aria-label="Back 15 seconds"
+            className="icon-btn icon-btn--small"
+            onClick={() => goChapter(-1)}
+            aria-label="Previous chapter"
+            disabled={chapters.length === 0}
           >
-            <IconSkipBack size={34} />
+            <IconChapterPrev size={26} />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => seekTo(bookMs - skip.back * 1000)}
+            aria-label={`Back ${skip.back} seconds`}
+          >
+            <IconSkipBack size={36} label={String(skip.back)} />
           </button>
           <button className="play-btn" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'}>
             {playing ? <IconPause size={38} /> : <IconPlay size={40} />}
           </button>
           <button
             className="icon-btn"
-            onClick={() => seekTo(bookMs + 30000)}
-            aria-label="Forward 30 seconds"
+            onClick={() => seekTo(bookMs + skip.fwd * 1000)}
+            aria-label={`Forward ${skip.fwd} seconds`}
           >
-            <IconSkipFwd size={34} />
+            <IconSkipFwd size={36} label={String(skip.fwd)} />
+          </button>
+          <button
+            className="icon-btn icon-btn--small"
+            onClick={() => goChapter(1)}
+            aria-label="Next chapter"
+            disabled={chapters.length === 0}
+          >
+            <IconChapterNext size={26} />
           </button>
         </div>
 
         <div className="player-secondary">
-          <button className="chip" onClick={() => setSheet('speed')} aria-label="Playback speed">
+          <button className="chip" onClick={() => setSheet('playback')} aria-label="Playback speed">
             <IconSpeed size={15} /> {speed}×
+          </button>
+          <button
+            className="chip"
+            onClick={() => setSheet('sleep')}
+            aria-pressed={sleepLabel != null}
+          >
+            <IconMoon size={15} /> {sleepLabel ?? 'Sleep'}
           </button>
           {chapters.length > 0 && (
             <button className="chip" onClick={() => setSheet('chapters')}>
@@ -541,71 +771,123 @@ export function PlayerPage() {
           )}
           <button
             className="chip"
-            onClick={() => setSheet('sleep')}
-            aria-pressed={sleepLabel != null}
+            onClick={() => setSheet('bookmarks')}
+            aria-label={`Bookmarks (${audioBookmarks.length})`}
           >
-            <IconMoon size={15} /> {sleepLabel ?? 'Sleep'}
+            <IconBookmark size={15} /> {audioBookmarks.length || ''}
           </button>
-          {annotations.length > 0 && (
-            <button className="chip" onClick={() => setSheet('bookmarks')}>
-              <IconBookmark size={15} /> {annotations.length}
-            </button>
-          )}
-          {detail.book.pair && detail.book.pair.status !== 'candidate' && (
-            <button
-              className="chip"
-              onClick={() => void switchToText()}
-              disabled={!detail.book.pair.switchable}
-              title={
-                detail.book.pair.switchable
-                  ? 'Switch to the ebook at this sentence'
-                  : 'Alignment not ready — switching unavailable'
-              }
-            >
-              <IconBookOpen size={15} /> Read
-            </button>
-          )}
         </div>
+
+        {pair && (
+          <button
+            className="tandem-pill"
+            onClick={() => void switchToText()}
+            disabled={!pair.switchable}
+            title={
+              pair.switchable
+                ? 'Open the ebook at this sentence'
+                : 'Alignment not ready — switching unavailable'
+            }
+          >
+            <IconBookOpen size={18} />
+            <span>
+              {pair.switchable ? 'Read from here' : 'Ebook edition · aligning…'}
+              <small>
+                {pair.switchable
+                  ? 'Switch to the ebook at the same sentence'
+                  : 'Switching unlocks once the pair is aligned'}
+              </small>
+            </span>
+          </button>
+        )}
       </div>
 
       {sheet === 'chapters' && (
         <Sheet title="Chapters" onClose={() => setSheet('none')}>
-          {chapters.map((c) => (
+          {chapters.map((c, i) => (
             <button
               key={c.idx}
               className="list-row"
-              aria-current={c.idx === currentChapter?.idx ? 'true' : undefined}
+              aria-current={i === chapterIndex ? 'true' : undefined}
               onClick={() => {
                 setSheet('none');
                 if (c.startMs != null) seekTo(c.startMs);
               }}
             >
+              <span className="soft" style={{ width: 24, textAlign: 'end' }}>
+                {i + 1}
+              </span>
               <span className="grow">{c.title}</span>
-              <span className="soft">{c.startMs != null ? formatDuration(c.startMs) : ''}</span>
+              <span className="soft">
+                {c.startMs != null && c.endMs != null
+                  ? formatDuration(c.endMs - c.startMs)
+                  : c.startMs != null
+                    ? formatDuration(c.startMs)
+                    : ''}
+              </span>
             </button>
           ))}
         </Sheet>
       )}
-      {sheet === 'speed' && (
-        <Sheet title="Playback speed" onClose={() => setSheet('none')}>
-          <div className="chip-row" style={{ flexWrap: 'wrap' }}>
-            {SPEEDS.map((s) => (
-              <button
-                key={s}
-                className="chip"
-                aria-pressed={speed === s}
-                onClick={() => {
-                  setSpeed(s);
-                  setSheet('none');
-                }}
-              >
-                {s}×
-              </button>
-            ))}
+      {sheet === 'playback' && (
+        <Sheet title="Playback" onClose={() => setSheet('none')}>
+          <div className="rs-group">
+            <div className="rs-label">Speed — {speed}×</div>
+            <input
+              className="slider"
+              style={{ color: 'var(--tl-interactive)' }}
+              type="range"
+              min={0.5}
+              max={3}
+              step={0.05}
+              value={speed}
+              aria-label="Playback speed"
+              onChange={(e) => setSpeed(Number(e.target.value))}
+            />
+            <div className="chip-row" style={{ flexWrap: 'wrap', marginTop: 8 }}>
+              {SPEEDS.map((s) => (
+                <button
+                  key={s}
+                  className="chip"
+                  aria-pressed={Math.abs(speed - s) < 0.001}
+                  onClick={() => setSpeed(s)}
+                >
+                  {s}×
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--tl-text-soft)', margin: '8px 0 0' }}>
+              Pitch is preserved at all speeds. Remembered per book.
+            </p>
           </div>
-          <p style={{ fontSize: 13, color: 'var(--tl-text-soft)' }}>
-            Pitch is preserved at all speeds.
-          </p>
+          <div className="rs-group">
+            <div className="rs-label">Skip back</div>
+            <div className="segmented" role="group" aria-label="Skip back seconds">
+              {SKIP_CHOICES.map((s) => (
+                <button
+                  key={s}
+                  aria-pressed={skip.back === s}
+                  onClick={() => setSkip({ ...skip, back: s })}
+                >
+                  {s}s
+                </button>
+              ))}
+            </div>
+            <div className="rs-label" style={{ marginTop: 12 }}>
+              Skip forward
+            </div>
+            <div className="segmented" role="group" aria-label="Skip forward seconds">
+              {SKIP_CHOICES.map((s) => (
+                <button
+                  key={s}
+                  aria-pressed={skip.fwd === s}
+                  onClick={() => setSkip({ ...skip, fwd: s })}
+                >
+                  {s}s
+                </button>
+              ))}
+            </div>
+          </div>
         </Sheet>
       )}
       {sheet === 'sleep' && (
@@ -640,35 +922,47 @@ export function PlayerPage() {
               </button>
             ))}
           </div>
+          {sleepUntil && (
+            <button
+              className="btn btn--secondary"
+              style={{ marginTop: 12 }}
+              onClick={() => setSleepUntil((s) => (s ?? Date.now()) + 15 * 60_000)}
+            >
+              Add 15 minutes
+            </button>
+          )}
         </Sheet>
       )}
       {sheet === 'bookmarks' && (
         <Sheet title="Bookmarks" onClose={() => setSheet('none')}>
-          {annotations
-            .filter((a) => a.locator.medium === 'audio')
-            .map((a) => (
-              <button
-                key={a.id}
-                className="list-row"
-                onClick={() => {
-                  setSheet('none');
-                  const l = a.locator;
-                  if (l.medium === 'audio') {
-                    seekTo((tracks[l.trackIdx]?.startMsAbsolute ?? 0) + l.positionMs);
-                  }
-                }}
-              >
-                <IconBookmark size={15} filled />
-                <span className="grow">{a.note ?? 'Bookmark'}</span>
-                <span className="soft">
-                  {a.locator.medium === 'audio'
-                    ? formatDuration(
-                        (tracks[a.locator.trackIdx]?.startMsAbsolute ?? 0) + a.locator.positionMs,
-                      )
-                    : ''}
-                </span>
-              </button>
-            ))}
+          {audioBookmarks.length === 0 && (
+            <p style={{ color: 'var(--tl-text-soft)', margin: 0 }}>
+              No bookmarks yet. Tap the bookmark icon at the top while listening.
+            </p>
+          )}
+          {audioBookmarks.map((a) => (
+            <button
+              key={a.id}
+              className="list-row"
+              onClick={() => {
+                setSheet('none');
+                const l = a.locator;
+                if (l.medium === 'audio') {
+                  seekTo((tracks[l.trackIdx]?.startMsAbsolute ?? 0) + l.positionMs);
+                }
+              }}
+            >
+              <IconBookmark size={15} filled />
+              <span className="grow">{a.note ?? 'Bookmark'}</span>
+              <span className="soft">
+                {a.locator.medium === 'audio'
+                  ? formatDuration(
+                      (tracks[a.locator.trackIdx]?.startMsAbsolute ?? 0) + a.locator.positionMs,
+                    )
+                  : ''}
+              </span>
+            </button>
+          ))}
         </Sheet>
       )}
     </div>

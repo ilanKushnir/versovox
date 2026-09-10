@@ -73,6 +73,10 @@ self.addEventListener('activate', (event) => {
 });
 
 const TRACK_RE = /^\/api\/books\/[^/]+\/track\/\d+$/;
+/* Book detail JSON embeds progress and pairing state: it changes while a
+   download's static content does not, so it is served network-first and
+   the cached copy only refreshed/used as the offline fallback. */
+const DETAIL_RE = /^\/api\/books\/[^/]+$/;
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
@@ -85,11 +89,16 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches
-            .open(SHELL_CACHE)
-            .then((c) => c.put('/', copy))
-            .catch(() => {});
+          // Only a real app shell may become the offline fallback — never a
+          // proxy's 502 page while the container restarts.
+          const type = res.headers.get('content-type') || '';
+          if (res.ok && type.includes('text/html')) {
+            const copy = res.clone();
+            caches
+              .open(SHELL_CACHE)
+              .then((c) => c.put('/', copy))
+              .catch(() => {});
+          }
           return res;
         })
         .catch(() =>
@@ -109,6 +118,25 @@ self.addEventListener('fetch', (event) => {
   // and only while the session is not known to be revoked. When the gate
   // refuses, the request falls through to the network — whose 401 lets the
   // open app discover the revocation and purge.
+  if (DETAIL_RE.test(url.pathname)) {
+    event.respondWith(
+      fetch(req)
+        .then(async (res) => {
+          if (res.ok) {
+            const cache = await caches.open(OFFLINE_CACHE);
+            // Refresh only titles that were explicitly downloaded.
+            if (await cache.match(req, { ignoreVary: true })) await cache.put(req, res.clone());
+          }
+          return res;
+        })
+        .catch(async () => {
+          const hit = await caches.match(req, { cacheName: OFFLINE_CACHE, ignoreVary: true });
+          if (hit && (await authGate.allowCachedPrivate())) return hit;
+          return Response.error();
+        }),
+    );
+    return;
+  }
   if (url.pathname.startsWith('/api/books/')) {
     event.respondWith(
       caches.match(req, { cacheName: OFFLINE_CACHE, ignoreVary: true }).then(async (hit) => {

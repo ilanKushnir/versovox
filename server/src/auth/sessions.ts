@@ -103,3 +103,9 @@ export class LoginThrottle {
     this.db.prepare('DELETE FROM login_throttle WHERE key = ?').run(key);
   }
 }
+
+/** Drop expired throttle windows so attacker-chosen keys cannot pile up. */
+export function pruneLoginThrottle(db: DB): number {
+  const res = db.prepare('DELETE FROM login_throttle WHERE reset_at < ?').run(Date.now());
+  return Number(res.changes);
+}

@@ -6,7 +6,6 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
   "background_color": "#FAF6EF",
   "theme_color": "#FAF6EF",
   "categories": ["books", "entertainment"],

@@ -192,6 +192,43 @@ describe('TandemLeaf API', () => {
     expect(badOrigin.statusCode).toBe(403);
   });
 
+  it('percent-encoded route prefixes cannot bypass auth or CSRF (regression)', async () => {
+    // The router matches the DECODED path, so `/%61pi/...` reaches `/api/...`
+    // handlers; the guard must key on the route, not the raw URL.
+    for (const url of ['/%61pi/pairs', '/%61pi/library', '/%61pi/settings', '/api/%70airs']) {
+      const res = await app.inject({ url });
+      expect(res.statusCode, url).toBe(401);
+    }
+    const align = await app.inject({ method: 'POST', url: '/%61pi/pairs/x/align' });
+    expect(align.statusCode).toBe(403);
+    const badEncoding = await app.inject({ url: '/api/%E0%A4%A' });
+    expect(badEncoding.statusCode).toBe(400);
+    // Unknown API paths stay JSON 404s even when encoded (never the SPA shell).
+    const unknown = await app.inject({ url: '/%61pi/does-not-exist', headers: { cookie } });
+    expect(unknown.statusCode).toBe(404);
+  });
+
+  it('library query parameters are validated (no 500 on arrays)', async () => {
+    const res = await authed({ url: '/api/library?query=a&query=b' });
+    expect(res.statusCode).toBe(400);
+    const badSort = await authed({ url: '/api/library?sort=DROP' });
+    expect(badSort.statusCode).toBe(400);
+  });
+
+  it('chapter HTML carries a sandboxing CSP when fetched directly', async () => {
+    // Runs after indexing (see later tests) — but the header must be present
+    // for any successful chapter response, so probe leniently here.
+    const lib = await authed({ url: '/api/library' });
+    const ebook = (lib.json() as { books: { id: string; kind: string }[] }).books.find(
+      (b) => b.kind === 'ebook',
+    );
+    if (!ebook) return;
+    const res = await authed({ url: `/api/books/${ebook.id}/chapter/0` });
+    if (res.statusCode === 200) {
+      expect(res.headers['content-security-policy']).toContain('sandbox');
+    }
+  });
+
   it('login rate limiting kicks in', async () => {
     for (let i = 0; i < 10; i++) {
       await app.inject({

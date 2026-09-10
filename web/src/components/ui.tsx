@@ -57,13 +57,18 @@ export function Sheet({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // The latest onClose lives in a ref so a parent re-render (the player
+  // re-renders on every timeupdate) never re-runs the focus effect and
+  // yanks focus away from the control the user is on.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     // Focus trap: Tab cycles inside the dialog; Escape closes; the element
     // that opened the sheet gets focus back when it closes.
     const opener = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -81,7 +86,7 @@ export function Sheet({
       document.removeEventListener('keydown', onKey);
       opener?.focus?.();
     };
-  }, [onClose]);
+  }, []);
   return createPortal(
     <>
       <div className="sheet-backdrop" onClick={onClose} aria-hidden="true" />
@@ -109,27 +114,44 @@ export function Sheet({
 
 /* ----------------------------------------------------------------- Toast */
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 interface ToastCtx {
-  show: (msg: string) => void;
+  show: (msg: string, action?: ToastAction) => void;
 }
 const ToastContext = createContext<ToastCtx>({ show: () => {} });
 export const useToast = () => useContext(ToastContext);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [msg, setMsg] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; action?: ToastAction } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const show = useCallback((m: string) => {
-    setMsg(m);
+  const show = useCallback((msg: string, action?: ToastAction) => {
+    setToast({ msg, action });
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setMsg(null), 3200);
+    timer.current = setTimeout(() => setToast(null), action ? 8000 : 3200);
   }, []);
   return (
     <ToastContext.Provider value={{ show }}>
       {children}
-      {msg &&
+      {toast &&
         createPortal(
           <div className="toast" role="status" aria-live="polite">
-            <div>{msg}</div>
+            <div>
+              {toast.msg}
+              {toast.action && (
+                <button
+                  className="toast__action"
+                  onClick={() => {
+                    toast.action?.onClick();
+                    setToast(null);
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
+            </div>
           </div>,
           document.body,
         )}

@@ -53,6 +53,7 @@ export interface BookManifest {
   author: string | null;
   language: string | null;
   direction: 'ltr' | 'rtl';
+  directionDeclared?: boolean;
   totalChars: number;
   chapters: ChapterManifest[];
   toc: { title: string; spineIdx: number; fragment: string | null; depth: number }[];
@@ -176,6 +177,7 @@ export async function extractEpub(
       author: epub.meta.author,
       language: epub.meta.language,
       direction: epub.meta.direction,
+      directionDeclared: epub.meta.directionDeclared,
       totalChars: cum,
       chapters,
       toc,

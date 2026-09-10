@@ -20,3 +20,6 @@ qa-output/
 .tastemaker/log.json
 *.tsbuildinfo
 .playwright-mcp/
+
+# Local Claude Code launch config
+.claude/

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { WhisperCliProvider } from './providers.js';
+import { mergeWhisperTokens, WhisperCliProvider } from './providers.js';
 
 /**
  * Whisper output-location safety: source libraries are read-only mounts, so
@@ -106,5 +106,31 @@ describe('WhisperCliProvider', () => {
     });
     expect(result.words[0]!.s).toBe(60_000);
     expect(result.words[1]!.e).toBe(61_900);
+  });
+});
+
+describe('mergeWhisperTokens', () => {
+  it('glues BPE pieces into words, skips special tokens, spans timings', () => {
+    const words = mergeWhisperTokens(
+      [
+        {
+          offsets: { from: 0, to: 3000 },
+          tokens: [
+            { text: '[_BEG_]', offsets: { from: 0, to: 0 } },
+            { text: ' The', offsets: { from: 0, to: 200 } },
+            { text: ' light', offsets: { from: 250, to: 500 } },
+            { text: 'house', offsets: { from: 500, to: 800 } },
+            { text: ',', offsets: { from: 800, to: 820 } },
+            { text: ' stood', offsets: { from: 900, to: 1200 } },
+            { text: '.', offsets: { from: 1200, to: 1250 } },
+            { text: '[_TT_150]', offsets: { from: 3000, to: 3000 } },
+          ],
+        },
+      ],
+      10_000,
+    );
+    expect(words.map((w) => w.w)).toEqual(['the', 'lighthouse', 'stood']);
+    expect(words[1]).toEqual({ w: 'lighthouse', s: 10_250, e: 10_820 });
+    expect(words[2]!.e).toBe(11_250);
   });
 });

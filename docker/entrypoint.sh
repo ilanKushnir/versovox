@@ -19,9 +19,10 @@ if [ "$(id -u)" = "0" ]; then
   fi
   for d in "${TL_DATA_DIR:-/data}" "${TL_CACHE_DIR:-/cache}" "${TL_MODELS_DIR:-/models}"; do
     if [ -d "$d" ]; then
-      chown "$PUID:$PGID" "$d" 2>/dev/null || true
-      # Only fix ownership of TandemLeaf's own files, never a library mount.
-      find "$d" -maxdepth 2 ! -user "$PUID" -exec chown "$PUID:$PGID" {} + 2>/dev/null || true
+      chown -h "$PUID:$PGID" "$d" 2>/dev/null || true
+      # Only fix ownership of TandemLeaf's own files, never a library mount,
+      # and never follow a symlink out of the volume.
+      find "$d" -maxdepth 2 ! -type l ! -user "$PUID" -exec chown -h "$PUID:$PGID" {} + 2>/dev/null || true
     fi
   done
   exec gosu "$PUID:$PGID" "$@"

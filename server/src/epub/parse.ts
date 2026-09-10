@@ -22,6 +22,8 @@ export interface EpubMeta {
   series: string | null;
   seriesIdx: number | null;
   direction: 'ltr' | 'rtl';
+  /** Whether the OPF spine declared page-progression-direction. */
+  directionDeclared: boolean;
   publisher: string | null;
   description: string | null;
 }
@@ -186,6 +188,7 @@ export function parseEpub(files: EpubStore): ParsedEpub {
     series,
     seriesIdx,
     direction: pkg.spine?.['@_page-progression-direction'] === 'rtl' ? 'rtl' : 'ltr',
+    directionDeclared: ['rtl', 'ltr'].includes(String(pkg.spine?.['@_page-progression-direction'])),
     publisher: asText(md.publisher).trim() || null,
     description: asText(md.description).trim() || null,
   };
@@ -258,7 +261,9 @@ function parseNavToc(
   const navPath = opfRelative(opfDir, navHref);
   const raw = readMetadata(files, navPath);
   if (!raw) return null;
-  const html = raw.toString('utf8');
+  // A navigation document is small; cap it so the tolerant regex pass below
+  // cannot be driven into quadratic backtracking by a crafted file.
+  const html = raw.subarray(0, 1024 * 1024).toString('utf8');
   // The nav doc is XHTML; extract the toc <nav> block and its anchors with
   // list depth. A tolerant regex pass is sufficient and avoids executing or
   // fully interpreting book HTML here (sanitization happens elsewhere).
@@ -330,13 +335,17 @@ function parseNcxToc(
   return entries.length ? entries : null;
 }
 
+function codePoint(n: number): string {
+  return Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '\ufffd';
+}
+
 function decodeEntities(s: string): string {
   return s
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => codePoint(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => codePoint(parseInt(h, 16)))
     .replace(/&nbsp;/g, ' ');
 }

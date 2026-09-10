@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_PREFS, loadPrefs, savePrefs } from './prefs';
+import {
+  computePageLayout,
+  DEFAULT_PREFS,
+  effectiveTheme,
+  loadPrefs,
+  pageCountFor,
+  savePrefs,
+} from './prefs';
 
 const store = new Map<string, string>();
 vi.stubGlobal('localStorage', {
@@ -29,5 +36,57 @@ describe('reader prefs', () => {
   it('survives corrupt storage', () => {
     store.set('tl-reader-prefs', '{not json');
     expect(loadPrefs()).toEqual(DEFAULT_PREFS);
+  });
+});
+
+describe('page layout', () => {
+  it('single column: text lands at the same inset on every page', () => {
+    // A 375px phone with 24px margins: one column of 327px, and the stride
+    // between page origins must equal the column pitch the browser lays out
+    // (column width + column gap) — that pitch is what the transform steps by.
+    const l = computePageLayout(375, 24, 'auto');
+    expect(l.columns).toBe(1);
+    expect(l.width).toBe(375);
+    const columnWidth = l.width - 2 * l.pad;
+    expect(l.stride).toBe(columnWidth + l.columnGap);
+    // Page n's first column starts n·stride after page 0's; translating by
+    // -n·stride therefore puts it exactly at the 24px inset.
+    expect((l.pad + 2 * l.stride) % l.stride).toBe(l.pad);
+  });
+
+  it('two columns on wide viewports, capped and centred', () => {
+    const l = computePageLayout(1440, 24, 'auto');
+    expect(l.columns).toBe(2);
+    expect(l.width).toBeLessThanOrEqual(1180);
+    expect(l.inset).toBe(Math.floor((1440 - l.width) / 2));
+    const columnWidth = (l.width - 2 * l.pad - l.columnGap) / 2;
+    expect(l.stride).toBeCloseTo(2 * (columnWidth + l.columnGap), 6);
+  });
+
+  it('respects an explicit column preference', () => {
+    expect(computePageLayout(1440, 24, 'one').columns).toBe(1);
+    expect(computePageLayout(700, 24, 'two').columns).toBe(2);
+  });
+
+  it('derives the page count from the content scrollWidth', () => {
+    const l = computePageLayout(375, 24, 'one');
+    // Three columns: last right edge = pad + 3·(cw+gap) − gap, plus end padding.
+    const cw = l.width - 2 * l.pad;
+    const scrollWidth = l.pad + 3 * (cw + l.columnGap) - l.columnGap + l.pad;
+    expect(pageCountFor(scrollWidth, l)).toBe(3);
+    expect(pageCountFor(0, l)).toBe(1);
+  });
+
+  it('auto theme follows the system appearance', () => {
+    expect(effectiveTheme('auto', true)).toBe('night');
+    expect(effectiveTheme('auto', false)).toBe('paper');
+    expect(effectiveTheme('sepia', true)).toBe('sepia');
+  });
+
+  it('migrates the retired serif font choice', () => {
+    store.set('tl-reader-prefs', JSON.stringify({ font: 'serif' }));
+    expect(loadPrefs().font).toBe('iowan');
+    store.set('tl-reader-prefs', JSON.stringify({ font: 'comic' }));
+    expect(loadPrefs().font).toBe(DEFAULT_PREFS.font);
   });
 });

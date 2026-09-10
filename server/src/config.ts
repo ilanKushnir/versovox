@@ -49,6 +49,8 @@ const envSchema = z.object({
   whisperBin: z.string().default(''),
   whisperModel: z.string().default(''),
   defaultLanguage: z.string().default('en'),
+  /** Minutes between automatic library rescans; 0 disables (manual only). */
+  scanIntervalMinutes: z.coerce.number().int().min(0).max(10_080).default(60),
   logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 
@@ -109,6 +111,7 @@ export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): En
     whisperBin: readEnv('TL_WHISPER_BIN'),
     whisperModel: readEnv('TL_WHISPER_MODEL'),
     defaultLanguage: readEnv('TL_DEFAULT_LANGUAGE'),
+    scanIntervalMinutes: readEnv('TL_SCAN_INTERVAL_MINUTES'),
     logLevel: readEnv('TL_LOG_LEVEL'),
   };
   const envPinned = Object.entries(raw)

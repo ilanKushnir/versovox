@@ -81,6 +81,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
   };
 
   app.post('/api/pairs/:id/confirm', async (req, reply) => {
+    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
     const { id } = req.params as { id: string };
     if (!decide(id, 'confirmed', req.user!.id)) return reply.code(404).send({ error: 'not-found' });
     enqueueJob(db, 'align', { pairId: id }, { dedupeKey: `align:${id}` });
@@ -89,6 +90,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
   });
 
   app.post('/api/pairs/:id/reject', async (req, reply) => {
+    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
     const { id } = req.params as { id: string };
     if (!decide(id, 'rejected', req.user!.id)) return reply.code(404).send({ error: 'not-found' });
     const row = db.prepare('SELECT * FROM pairs WHERE id = ?').get(id) as Record<string, unknown>;
@@ -97,6 +99,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   /** Unlink returns an auto/confirmed pair to rejected (durable decision). */
   app.post('/api/pairs/:id/unlink', async (req, reply) => {
+    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
     const { id } = req.params as { id: string };
     if (!decide(id, 'rejected', req.user!.id)) return reply.code(404).send({ error: 'not-found' });
     const row = db.prepare('SELECT * FROM pairs WHERE id = ?').get(id) as Record<string, unknown>;
@@ -105,6 +108,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   /** Manual link between an ebook and an audiobook. */
   app.post('/api/pairs/link', async (req, reply) => {
+    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
     const parsed = z.object({ ebookId: z.string(), audioId: z.string() }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid' });
     const { ebookId, audioId } = parsed.data;
@@ -140,6 +144,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
   });
 
   app.post('/api/pairs/:id/align', async (req, reply) => {
+    if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
     const { id } = req.params as { id: string };
     const row = db.prepare('SELECT * FROM pairs WHERE id = ?').get(id) as
       Record<string, unknown> | undefined;

@@ -22,6 +22,8 @@ export interface ReaderManifest {
   author: string | null;
   language: string | null;
   direction: 'ltr' | 'rtl';
+  /** False when the OPF declared no page-progression-direction (older indexes omit it). */
+  directionDeclared?: boolean;
   totalChars: number;
   chapters: {
     idx: number;

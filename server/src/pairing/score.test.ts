@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_AUTO_THRESHOLD, scorePair, type PairInputs } from './score.js';
+import { DEFAULT_AUTO_THRESHOLD, scorePair, type PairInputs, languageCode } from './score.js';
 
 function inputs(overrides: {
   ebook?: Partial<PairInputs['ebook']>;
@@ -72,5 +72,21 @@ describe('scorePair', () => {
     const { score } = scorePair(inputs({ audio: { title: 'The Lantern of Oak Harbor' } }));
     expect(score).toBeGreaterThan(0.55);
     expect(score).toBeLessThan(DEFAULT_AUTO_THRESHOLD);
+  });
+});
+
+describe('languageCode', () => {
+  it('maps ISO 639-2 audio tags to the 2-letter codes EPUBs use', () => {
+    expect(languageCode('eng')).toBe('en');
+    expect(languageCode('heb')).toBe('he');
+    expect(languageCode('ger')).toBe('de');
+    expect(languageCode('en-US')).toBe('en');
+    expect(languageCode('he_IL')).toBe('he');
+  });
+  it('treats undetermined/unknown tags as no evidence', () => {
+    expect(languageCode('und')).toBeNull();
+    expect(languageCode('')).toBeNull();
+    expect(languageCode(null)).toBeNull();
+    expect(languageCode('xyz')).toBeNull();
   });
 });

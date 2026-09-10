@@ -35,7 +35,7 @@ export async function probeAudio(filePath: string): Promise<AudioProbe> {
       '-show_streams',
       filePath,
     ],
-    { maxBuffer: 32 * 1024 * 1024 },
+    { maxBuffer: 32 * 1024 * 1024, timeout: 60_000, killSignal: 'SIGKILL' },
   );
   const data = JSON.parse(stdout);
   const fmt = data.format ?? {};

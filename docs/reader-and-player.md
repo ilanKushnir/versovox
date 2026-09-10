@@ -19,19 +19,34 @@ successfully.
 Implemented:
 
 - Paginated (CSS multi-column with swipe/tap/keyboard page turns) and
-  continuous-scroll modes.
-- Table of contents (EPUB 3 nav with NCX fallback), in-book search with
-  jump-to-result, book-position slider.
-- Themes: Paper, Sepia, Night, High contrast — independent of the app theme.
-- Typography: Literata (bundled, OFL) / system serif / sans, size, variable
-  weight, line height, margins, ragged/justified, hyphenation toggle.
+  continuous-scroll modes. Pages are centred in a capped page box; on wide
+  screens the paginated mode shows a **two-page spread** (Auto / One page /
+  Two pages), and the scroll mode ends every chapter with a "Next chapter"
+  control.
+- Table of contents (EPUB 3 nav with NCX fallback, including sub-chapter
+  fragment entries), footnote and internal fragment links, in-book search
+  with jump-to-result, book-position slider, "N pages left in chapter".
+- Themes: Auto (follows the system appearance), Paper, Sepia, Night, High
+  contrast — independent of the app theme; the iPhone status bar follows the
+  reader theme in standalone mode. A page-dimming slider (screen brightness
+  without leaving the app) sits next to the text-size stepper.
+- Typography: Literata (bundled, OFL), Iowan Old Style, Charter, Palatino,
+  Georgia, Baskerville (system faces with fallbacks), system sans; size
+  stepper, variable weight, line height, margins, ragged/justified,
+  hyphenation toggle. The chapter is tagged with the book's language so
+  hyphenation and RTL fallback are language-aware.
 - Bookmarks, highlights, and notes on text selections, anchored to sentence
   IDs/character offsets (rendered with the CSS Custom Highlight API; on
   browsers without it the annotations still save and list, they just are not
   painted in the text).
 - Progress with revision-checked sync, percent, page-within-chapter.
-- RTL books (`page-progression-direction`), tested with the bundled Hebrew
-  sample: mirrored pagination, RTL columns, direction-aware arrow keys.
+- RTL books (`page-progression-direction`, or inferred from a Hebrew /
+  Arabic / Persian / Urdu language tag when the OPF declares no direction),
+  tested with the bundled Hebrew sample: mirrored pagination, RTL columns,
+  direction-aware arrow keys.
+- Turning past the last page marks the book finished; a page turn after
+  the tab regains focus re-claims progress for this device, and if another
+  device has since read further a toast offers to jump there.
 - Hideable chrome, iPhone safe areas, reduced-motion support.
 - Internal links navigate inside the book; external links open in a new tab
   with `rel=noopener`; images load from authenticated asset routes.
@@ -58,22 +73,30 @@ Known limitations (deliberate for V1, documented rather than half-built):
   tracks), with automatic track advance.
 - Chapters from embedded m4b/mp3 metadata, or one chapter per file for
   multi-file books; chapter sheet with jump.
-- Scrubber with elapsed/remaining, −15s/+30s, play/pause, keyboard controls
-  (space/j/k/l/arrows).
-- Speed 0.75×–2× with pitch preserved (`preservesPitch`).
-- Sleep timer: 15/30/45 minutes or end of chapter.
+- Scrubber with chapter tick marks, elapsed/remaining, time left in the
+  current chapter and a chapter progress line; previous/next chapter,
+  configurable skip amounts (10–60 s each way), play/pause, keyboard
+  controls (space/j/k/l/arrows). The page takes an ambient tint from the
+  cover.
+- Speed 0.5×–3× (fine slider plus presets) with pitch preserved
+  (`preservesPitch`), remembered per book.
+- Sleep timer: 15/30/45/60 minutes or end of chapter, extendable.
 - Bookmarks at the current instant.
-- Media Session integration (lock-screen metadata, play/pause/seek) where
-  the platform supports it.
+- Media Session integration (lock-screen metadata, artwork, play/pause,
+  seek, previous/next chapter, live position state) where the platform
+  supports it.
 - Durable checkpoints: every heartbeat/pause/seek is written to IndexedDB
   before sync; a killed tab loses at most a few seconds and never regresses
   another device's explicit position (see docs/progress.md).
 
 ## Two-way switching
 
-When a pair is aligned, the reader shows **Listen** and the player shows
-**Read**. Switching resolves your position through the alignment graph and
-reports its actual precision instead of a blanket "exact" claim:
+When a pair is aligned, the reader shows **Listen from here**, the player
+shows **Read from here**, and the book page and library hero offer
+**Listen/Read instead** — every one of them resolves your saved position
+through the alignment graph, so opening the other edition lands at the
+same place rather than at that edition's own last position. The precision
+is reported honestly instead of a blanket "exact" claim:
 
 - `sentence` granularity with `source: exact` only when the current sentence
   itself is verified at high confidence;
@@ -97,7 +120,10 @@ progress history.
 Per-title downloads verify every entry (byte size + SHA-256 from the
 server's offline manifest) before caching, include every referenced derived
 asset (illustrations), and only mark the package complete after everything
-verified. Audio tracks download and store in bounded 8 MB chunks (no
+verified. With the server unreachable the library shows a **Downloaded**
+shelf built entirely from local storage, so airplane mode starts from
+something useful; the book detail JSON is served network-first so pairing
+and progress state never freeze at download time. Audio tracks download and store in bounded 8 MB chunks (no
 whole-book buffering on iPhone) and are served offline with correct HTTP
 Range (206/Content-Range) behavior. **Annotations are online-only in V1**:
 creating bookmarks/highlights/notes needs the server and fails with an

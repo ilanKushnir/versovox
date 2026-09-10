@@ -24,31 +24,42 @@ loss-resistant progress.)
 - **Unified library** over read-only mounts: EPUB + m4b/mp3/m4a (flac/ogg/
   opus detected too), multi-file audiobooks, covers, search/filter/sort,
   continue rail, honest per-book scan states.
-- **EPUB reader**: paginated & scroll modes, TOC, in-book search, four
-  themes, bundled Literata + typography controls (size/weight/leading/
-  margins/justify/hyphenation), bookmarks/highlights/notes, RTL support,
-  calm hideable chrome. Publisher CSS is intentionally not applied in V1
-  (see docs/reader-and-player.md for exact limitations).
-- **Audiobook player**: chapters (embedded or per-file), scrubber with
-  elapsed/remaining, ±15/30s, 0.75–2× speed with pitch preserved, sleep
-  timer, bookmarks, Media Session, one-handed layout.
+- **EPUB reader** in the Apple Books mould: paginated (two-page spreads on
+  wide screens) & scroll modes, TOC with fragment/footnote links, in-book
+  search, Auto/Paper/Sepia/Night/Contrast themes, page dimming, seven
+  typefaces (bundled Literata plus system book faces), size stepper,
+  weight/leading/margins/justify/hyphenation, "pages left in chapter",
+  bookmarks/highlights/notes, RTL support (declared or inferred from the
+  language), calm hideable chrome. Publisher CSS is intentionally not
+  applied in V1 (see docs/reader-and-player.md for exact limitations).
+- **Audiobook player**: chapters (embedded or per-file) with prev/next,
+  scrubber with chapter ticks and time-left-in-chapter, configurable skips,
+  0.5–3× speed with pitch preserved (remembered per book), sleep timer,
+  bookmarks, lock-screen Media Session with live position, and an ambient
+  tint taken from the cover.
 - **Pairing review**: explainable evidence (title/author/identifiers/
   language/length/content overlap), automatic linking only above a
   conservative threshold, manual link/unlink, edition-mismatch warnings,
   alignment coverage & per-minute confidence.
 - **Exact two-way switching** on aligned pairs: reader ⇄ player at the same
-  sentence, with a temporary handoff marker, degrading honestly (sentence →
-  paragraph → refusal with a reason).
+  sentence — from inside the reader/player, from the book page, and from
+  the library's "Listen/Read instead" — with a temporary handoff marker,
+  degrading honestly (sentence → paragraph → refusal with a reason).
 - **Loss-resistant progress**: IndexedDB-first idempotent events, append-only
   server history with revisions, explicit-intent reconciliation — a stale
   background tab can never override your deliberate rewind.
 - **Installable PWA**: offline app shell, explicit per-title downloads with
-  real progress/size/removal, offline reading & listening of downloaded
-  titles, iPhone standalone polish (safe areas, no browser chrome).
+  real progress/size/removal, a Downloaded shelf that works with no
+  network at all, offline reading & listening of downloaded titles, iPhone
+  standalone polish (safe areas, status bar following the reader theme, no
+  browser chrome).
+- **Libraries refresh themselves**: periodic rescans (default hourly) pick
+  up titles added through Calibre-Web Automated, Audiobookshelf, or plain
+  folders; pairing waits for indexing to finish so nothing is missed.
 - **No cloud required, no bundled speech model**: alignment consumes sidecar
-  word-timestamp transcripts (deterministic) or an experimental local
-  whisper.cpp adapter — your choice, documented honestly in
-  docs/alignment.md.
+  word-timestamp transcripts (deterministic) or a local whisper.cpp binary
+  you mount into `/models` (audio is transcoded for it automatically, per
+  language model of your choice) — documented honestly in docs/alignment.md.
 
 ## Quick start
 

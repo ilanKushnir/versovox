@@ -27,7 +27,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   const userCount = () => (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
 
-  app.get('/api/setup/status', async () => ({
+  app.get('/api/setup/status', { config: { public: true } }, async () => ({
     needsSetup: userCount() === 0,
     // The client shows where to find the token; the token itself is never
     // exposed over HTTP.
@@ -36,7 +36,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   // First-run admin creation. Requires the one-time bootstrap token (env or
   // generated at boot, see auth/setupToken.ts); no default credentials exist.
-  app.post('/api/setup', async (req, reply) => {
+  app.post('/api/setup', { config: { public: true } }, async (req, reply) => {
     if (userCount() > 0) return reply.code(409).send({ error: 'already-configured' });
     if (!ipThrottle.allow(`setup:${req.ip}`)) {
       return reply.code(429).send({ error: 'rate-limited' });
@@ -83,13 +83,15 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     return { user: { id, username: body.data.username, role: 'admin' } };
   });
 
-  app.post('/api/auth/login', async (req, reply) => {
+  app.post('/api/auth/login', { config: { public: true } }, async (req, reply) => {
     const body = loginSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid' });
-    // Throttle by account AND by client IP. req.ip only reflects forwarded
-    // headers when TL_TRUST_PROXY explicitly trusts the proxy, so a direct
-    // attacker cannot rotate X-Forwarded-For past the account limit.
-    const acctKey = `acct:${body.data.username.toLowerCase()}`;
+    // Throttle by (account, client IP) AND by client IP alone. req.ip only
+    // reflects forwarded headers when TL_TRUST_PROXY explicitly trusts the
+    // proxy, so a direct attacker cannot rotate X-Forwarded-For past the
+    // limits — and a remote attacker cannot lock the real owner out of a
+    // known username by burning its attempts from elsewhere.
+    const acctKey = `acct:${body.data.username.toLowerCase()}@${req.ip}`;
     const ipKey = `ip:${req.ip}`;
     if (!accountThrottle.allow(acctKey) || !ipThrottle.allow(ipKey)) {
       return reply.code(429).send({ error: 'rate-limited' });

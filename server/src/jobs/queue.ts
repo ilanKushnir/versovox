@@ -228,13 +228,26 @@ export function makeLeaseGuard(db: DB, job: Pick<JobRow, 'id' | 'lease_token'>):
   };
 }
 
-/** Requeue running jobs whose lease expired (worker died or lost contact). */
+/** A job that keeps losing its lease (e.g. it crashes the process) stops here. */
+export const MAX_ATTEMPTS = 3;
+
+/**
+ * Requeue running jobs whose lease expired (worker died or lost contact).
+ * Jobs that already burned MAX_ATTEMPTS are failed instead of re-run so a
+ * pathological input cannot crash-loop the worker forever.
+ */
 export function recoverStaleJobs(db: DB): number {
+  const now = nowIso();
+  db.prepare(
+    `UPDATE jobs SET state = 'failed', finished_at = ?, lease_token = NULL, lease_expires_at = NULL,
+       error = 'Gave up after ' || attempts || ' attempts (worker lost the job each time)'
+     WHERE state = 'running' AND lease_expires_at < ? AND attempts >= ?`,
+  ).run(now, now, MAX_ATTEMPTS);
   const res = db
     .prepare(
       `UPDATE jobs SET state = 'queued', started_at = NULL, lease_token = NULL, lease_expires_at = NULL
        WHERE state = 'running' AND lease_expires_at < ?`,
     )
-    .run(nowIso());
+    .run(now);
   return Number(res.changes);
 }

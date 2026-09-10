@@ -54,6 +54,8 @@ export interface TranscriptionRequest {
   /** Resumable checkpoint: index of the next track to process. */
   checkpoint?: { nextTrack: number; words: TranscriptWord[] };
   onCheckpoint?: (cp: { nextTrack: number; words: TranscriptWord[] }) => void;
+  /** Abort external processes (e.g. the job lease was lost). */
+  signal?: AbortSignal;
 }
 
 export interface TranscriptionResult {
@@ -97,13 +99,70 @@ export class FixtureProvider implements TranscriptionProvider {
   }
 }
 
+/** Longest a single whisper run may take before it is killed (per track). */
+const WHISPER_TIMEOUT_MS = 6 * 3600_000;
+/** Longest an ffmpeg decode to 16 kHz WAV may take (per track). */
+const TRANSCODE_TIMEOUT_MS = 30 * 60_000;
+
+interface WhisperToken {
+  text?: unknown;
+  offsets?: { from?: unknown; to?: unknown };
+}
+interface WhisperSegment {
+  offsets?: { from?: unknown; to?: unknown };
+  tokens?: WhisperToken[];
+}
+
+/**
+ * Merge whisper.cpp's sub-word BPE tokens into whole words. A token that
+ * begins with whitespace starts a new word; the rest of the pieces (e.g.
+ * " light" "house") are glued to it. Special tokens such as `[_BEG_]` and
+ * `[_TT_123]` are skipped. Timings span the first to the last piece.
+ * Exported for tests.
+ */
+export function mergeWhisperTokens(segments: WhisperSegment[], offsetMs: number): TranscriptWord[] {
+  const out: TranscriptWord[] = [];
+  let current: { raw: string; s: number; e: number } | null = null;
+  const flush = () => {
+    if (!current) return;
+    const w = normalizeForMatch(current.raw);
+    if (w) out.push({ w, s: current.s, e: current.e });
+    current = null;
+  };
+  for (const seg of segments) {
+    for (const tok of seg.tokens ?? []) {
+      const raw = String(tok.text ?? '');
+      if (!raw || /^\[_[A-Z_0-9]+\]$/.test(raw.trim())) continue;
+      const s = Number(tok.offsets?.from ?? seg.offsets?.from ?? 0) + offsetMs;
+      const e = Number(tok.offsets?.to ?? seg.offsets?.to ?? s) + offsetMs;
+      const startsWord = /^\s/.test(raw) || current === null;
+      if (startsWord) {
+        flush();
+        current = { raw: raw.trim(), s, e: Math.max(s, e) };
+      } else {
+        current!.raw += raw.trim();
+        current!.e = Math.max(current!.e, e);
+      }
+    }
+    // Segment boundaries always end a word.
+    flush();
+  }
+  flush();
+  return out;
+}
+
 /**
  * EXPERIMENTAL: invokes a whisper.cpp-style CLI per track and stitches
  * absolute timestamps. Expects the binary to accept:
- *   <bin> -m <model> -l <language> -ojf -of <outprefix> <audio.wav-or-mp3>
+ *   <bin> -m <model> -l <language> -ojf -of <outprefix> <audio.wav>
  * and to write `<outprefix>.json` in whisper.cpp "full JSON" layout
  * (transcription[].offsets + tokens[].text/offsets). Tested against
  * whisper.cpp `main`/`whisper-cli`; other CLIs may need a wrapper script.
+ *
+ * Each track is first decoded with ffmpeg to the 16 kHz mono PCM WAV that
+ * whisper.cpp expects — so m4b/m4a (AAC), the dominant audiobook formats,
+ * work without the user transcoding anything. If ffmpeg is unavailable or
+ * fails, the original file is passed through unchanged.
  */
 export class WhisperCliProvider implements TranscriptionProvider {
   readonly name = 'whisper-cli';
@@ -112,6 +171,9 @@ export class WhisperCliProvider implements TranscriptionProvider {
     if (!req.whisperBin) throw new Error('TL_WHISPER_BIN is not configured');
     if (!fs.existsSync(req.whisperBin)) {
       throw new Error(`Whisper binary not found: ${req.whisperBin}`);
+    }
+    if (req.whisperModel && !fs.existsSync(req.whisperModel)) {
+      throw new Error(`Whisper model not found: ${req.whisperModel}`);
     }
     const words: TranscriptWord[] = req.checkpoint?.words ? [...req.checkpoint.words] : [];
     const startTrack = req.checkpoint?.nextTrack ?? 0;
@@ -123,23 +185,26 @@ export class WhisperCliProvider implements TranscriptionProvider {
       for (let t = startTrack; t < req.trackPaths.length; t++) {
         const trackPath = req.trackPaths[t]!;
         const outPrefix = path.join(tmpDir, `track_${t}`);
-        const args = ['-ojf', '-of', outPrefix, trackPath];
+        const input = await decodeForWhisper(trackPath, `${outPrefix}.wav`, req.signal);
+        const args = ['-ojf', '-of', outPrefix, input];
         if (req.whisperModel) args.unshift('-m', req.whisperModel);
         if (req.language) args.unshift('-l', req.language);
-        await execFileP(req.whisperBin, args, { maxBuffer: 64 * 1024 * 1024 });
-        const jsonPath = `${outPrefix}.json`;
-        const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-        fs.rmSync(jsonPath, { force: true });
-        const offset = req.trackStartMs[t] ?? 0;
-        for (const seg of data.transcription ?? []) {
-          for (const tok of seg.tokens ?? []) {
-            const text = normalizeForMatch(String(tok.text ?? ''));
-            if (!text) continue;
-            const s = Number(tok.offsets?.from ?? seg.offsets?.from ?? 0) + offset;
-            const e = Number(tok.offsets?.to ?? seg.offsets?.to ?? 0) + offset;
-            words.push({ w: text, s, e });
-          }
+        try {
+          await execFileP(req.whisperBin, args, {
+            maxBuffer: 64 * 1024 * 1024,
+            timeout: WHISPER_TIMEOUT_MS,
+            killSignal: 'SIGKILL',
+            signal: req.signal,
+          });
+        } finally {
+          if (input !== trackPath) fs.rmSync(input, { force: true });
         }
+        const jsonPath = `${outPrefix}.json`;
+        const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as {
+          transcription?: WhisperSegment[];
+        };
+        fs.rmSync(jsonPath, { force: true });
+        words.push(...mergeWhisperTokens(data.transcription ?? [], req.trackStartMs[t] ?? 0));
         req.onCheckpoint?.({ nextTrack: t + 1, words });
       }
     } finally {
@@ -150,6 +215,44 @@ export class WhisperCliProvider implements TranscriptionProvider {
       model: `whisper-cli:${path.basename(req.whisperModel || 'default')}`,
       words,
     };
+  }
+}
+
+/**
+ * Decode any container/codec ffmpeg understands to 16 kHz mono 16-bit WAV.
+ * Returns the WAV path, or the original path when ffmpeg is missing/fails
+ * (already-WAV inputs are passed through as-is).
+ */
+async function decodeForWhisper(
+  trackPath: string,
+  wavPath: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (/\.wav$/i.test(trackPath)) return trackPath;
+  try {
+    await execFileP(
+      'ffmpeg',
+      [
+        '-y',
+        '-v',
+        'error',
+        '-i',
+        trackPath,
+        '-vn',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-f',
+        'wav',
+        wavPath,
+      ],
+      { maxBuffer: 1024 * 1024, timeout: TRANSCODE_TIMEOUT_MS, killSignal: 'SIGKILL', signal },
+    );
+    return wavPath;
+  } catch {
+    fs.rmSync(wavPath, { force: true });
+    return trackPath;
   }
 }
 

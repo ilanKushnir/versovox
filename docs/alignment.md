@@ -49,15 +49,24 @@ books: cumulative across tracks in playback order).
 
 ### whisper-cli contract (experimental)
 
-TandemLeaf invokes:
+Each track is first decoded with the bundled ffmpeg to the 16 kHz mono
+16-bit WAV that whisper.cpp expects (so m4b/m4a/mp3/flac all work without
+manual transcoding; the WAV lives in a private temp dir and is deleted
+afterwards), then TandemLeaf invokes:
 
 ```
-<TL_WHISPER_BIN> -m <TL_WHISPER_MODEL> -l <language> -ojf -of <prefix> <trackfile>
+<TL_WHISPER_BIN> -m <TL_WHISPER_MODEL> -l <language> -ojf -of <prefix> <track.wav>
 ```
 
 and expects whisper.cpp "full JSON" output (`transcription[].tokens[]` with
-`offsets`). Tested against whisper.cpp `whisper-cli`; other CLIs may need a
-small wrapper script. Transcription runs per track with a persisted
+`offsets`). whisper.cpp emits sub-word BPE tokens; TandemLeaf merges them
+into whole words (a token starting with whitespace begins a word, special
+`[_BEG_]`/`[_TT_n]` tokens are dropped) before alignment. Tested against
+whisper.cpp `whisper-cli`; other CLIs may need a small wrapper script. A
+single run is killed after six hours. Paths set from the web UI must live
+inside `TL_MODELS_DIR` (see docs/security.md); mount your binary and
+`ggml-*.bin` models there, e.g. `-v ./models:/models`. Pick the model per
+language (`ggml-large-v3` handles Hebrew far better than `base`). Transcription runs per track with a persisted
 checkpoint, so an interrupted job resumes at the next track instead of
 restarting. Results are cached in `/cache` keyed by source content hash +
 language, so rescans never re-transcribe unchanged audio. This path is

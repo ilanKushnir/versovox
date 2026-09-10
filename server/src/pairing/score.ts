@@ -63,8 +63,10 @@ export function scorePair(input: PairInputs): { score: number; evidence: PairEvi
   const identifierMatch = eIds.length > 0 && aIds.length > 0 && eIds.some((v) => aIds.includes(v));
 
   let languageMatch: boolean | null = null;
-  if (input.ebook.language && input.audio.language) {
-    languageMatch = input.ebook.language.slice(0, 2) === input.audio.language.slice(0, 2);
+  const eLang = languageCode(input.ebook.language);
+  const aLang = languageCode(input.audio.language);
+  if (eLang && aLang) {
+    languageMatch = eLang === aLang;
     if (!languageMatch) notes.push('Languages differ — possible translation mismatch.');
   }
 
@@ -117,4 +119,50 @@ export function scorePair(input: PairInputs): { score: number; evidence: PairEvi
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+/** ID3/MP4 tags often carry ISO 639-2 codes (`eng`, `heb`); EPUBs carry BCP-47. */
+const ISO_639_2_TO_1: Record<string, string> = {
+  eng: 'en',
+  heb: 'he',
+  ger: 'de',
+  deu: 'de',
+  fre: 'fr',
+  fra: 'fr',
+  spa: 'es',
+  ita: 'it',
+  por: 'pt',
+  dut: 'nl',
+  nld: 'nl',
+  rus: 'ru',
+  pol: 'pl',
+  swe: 'sv',
+  nor: 'no',
+  dan: 'da',
+  fin: 'fi',
+  gre: 'el',
+  ell: 'el',
+  tur: 'tr',
+  ara: 'ar',
+  jpn: 'ja',
+  chi: 'zh',
+  zho: 'zh',
+  kor: 'ko',
+  hun: 'hu',
+  cze: 'cs',
+  ces: 'cs',
+  ukr: 'uk',
+  ron: 'ro',
+  rum: 'ro',
+  hin: 'hi',
+};
+
+/** Normalize a language tag to a 2-letter code; `und`/unknown → null. */
+export function languageCode(tag: string | null | undefined): string | null {
+  if (!tag) return null;
+  const lower = tag.trim().toLowerCase();
+  if (!lower || lower === 'und' || lower === 'unknown') return null;
+  const base = lower.split(/[-_]/)[0]!;
+  if (base.length === 3) return ISO_639_2_TO_1[base] ?? null;
+  return base.length === 2 ? base : null;
 }

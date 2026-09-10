@@ -1,5 +1,6 @@
 import { api } from '../api/client';
-import { idbClear, idbDelete, idbGet, idbPut, STORES } from '../progress/idb';
+import { idbAll, idbClear, idbDelete, idbGet, idbPut, STORES } from '../progress/idb';
+import { type BookSummary } from '@tandemleaf/shared';
 
 /**
  * Explicit per-title offline packages. Downloads go into a dedicated Cache
@@ -57,6 +58,32 @@ export interface DownloadState {
 
 export async function getDownloadState(bookId: string): Promise<DownloadState | null> {
   return (await idbGet<DownloadState>(STORES.downloads, bookId)) ?? null;
+}
+
+/** Every download this browser knows about (any status). */
+export async function listDownloads(): Promise<DownloadState[]> {
+  try {
+    return (await idbAll<DownloadState>(STORES.downloads)).map((d) => d.value);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The book summary embedded in a downloaded title's cached detail JSON —
+ * enough to render a library card with no network at all.
+ */
+export async function cachedBookSummary(bookId: string): Promise<BookSummary | null> {
+  try {
+    if (typeof caches === 'undefined') return null;
+    const cache = await caches.open(OFFLINE_CACHE);
+    const hit = await cache.match(`/api/books/${bookId}`);
+    if (!hit) return null;
+    const data = (await hit.json()) as { book?: BookSummary };
+    return data.book ?? null;
+  } catch {
+    return null;
+  }
 }
 
 const controllers = new Map<string, AbortController>();

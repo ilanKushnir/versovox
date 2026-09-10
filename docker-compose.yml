@@ -34,6 +34,7 @@ services:
       TL_AUDIOBOOK_DIRS: /library/audiobooks
       TL_TRANSCRIBE_PROVIDER: ${TL_TRANSCRIBE_PROVIDER:-none}
       TL_DEFAULT_LANGUAGE: ${TL_DEFAULT_LANGUAGE:-en}
+      TL_SCAN_INTERVAL_MINUTES: ${TL_SCAN_INTERVAL_MINUTES:-60}
       # The bundled worker handles scans/alignment. Set to 0 when enabling
       # the dedicated worker service below.
       TL_INLINE_WORKER: ${TL_INLINE_WORKER:-1}

@@ -580,6 +580,24 @@ export async function runIndexAudio(
 export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {
   const { db } = ctx;
   const { values: settings } = resolveSettings(db, ctx.config);
+  // Index jobs from the same scan may still be running (they share the
+  // worker pool). Pairing only considers 'ready' books, so instead of
+  // silently missing late-indexed titles, come back once indexing is done.
+  const pendingIndex = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM jobs WHERE id != ? AND state IN ('queued','running')
+         AND type IN ('index-ebook','index-audio')`,
+      )
+      .get(job.id) as { c: number }
+  ).c;
+  if (pendingIndex > 0) {
+    jobProgress(db, job.id, job.lease_token, 0.1, `Waiting for ${pendingIndex} index job(s)`);
+    await new Promise((r) => setTimeout(r, 5000));
+    guard.assertHeld();
+    enqueueJob(db, 'pair-scan', {}, { dedupeKey: 'pair-scan-retry', priority: -1 });
+    return;
+  }
   const ebooks = db
     .prepare("SELECT * FROM books WHERE kind = 'ebook' AND scan_state = 'ready'")
     .all() as Record<string, unknown>[];

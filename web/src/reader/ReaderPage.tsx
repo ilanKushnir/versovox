@@ -14,8 +14,10 @@ import { Sheet, useToast } from '../components/ui';
 import {
   IconBack,
   IconBookmark,
+  IconCheck,
   IconHeadphones,
   IconSearch,
+  IconSun,
   IconToc,
   IconType,
 } from '../components/icons';
@@ -27,12 +29,32 @@ import {
   type TextMap,
 } from './textmap';
 import { liveCheckpointOffset } from './liveOffset';
-import { FONT_STACKS, loadPrefs, MARGINS, savePrefs, type ReaderPrefs } from './prefs';
+import {
+  computePageLayout,
+  effectiveTheme,
+  FONTS,
+  loadPrefs,
+  MARGINS,
+  pageCountFor,
+  savePrefs,
+  SIZE_MAX,
+  SIZE_MIN,
+  type PageLayout,
+  type ReaderPrefs,
+} from './prefs';
 import { formatDuration, formatPct } from '../lib/format';
 
-const COLUMN_GAP = 48;
-
 type SheetKind = 'none' | 'toc' | 'settings' | 'search' | 'note';
+
+const DARK_MQ = '(prefers-color-scheme: dark)';
+
+/** Reader page backgrounds, mirrored from tokens.css for the status bar. */
+const THEME_BG: Record<ReturnType<typeof effectiveTheme>, string> = {
+  paper: '#faf6ef',
+  sepia: '#f3e8d2',
+  night: '#101412',
+  contrast: '#000000',
+};
 
 export function ReaderPage() {
   const { id = '' } = useParams();
@@ -61,20 +83,36 @@ export function ReaderPage() {
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
 
+  const [systemDark, setSystemDark] = useState(
+    () => typeof matchMedia === 'function' && matchMedia(DARK_MQ).matches,
+  );
+
   const viewportRef = useRef<HTMLDivElement>(null);
+  const pagesRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const textMapRef = useRef<TextMap | null>(null);
+  const layoutRef = useRef<PageLayout | null>(null);
   const currentOffsetRef = useRef(0);
   const pendingTargetRef = useRef<{
     charOffset: number;
     sentenceId?: string;
+    /** Element id inside the chapter (TOC sub-entries, footnotes). */
+    fragment?: string;
     handoff?: boolean;
+    granularity?: string;
   } | null>(null);
   const handoffCleanupRef = useRef<(() => void) | null>(null);
   const swipeRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  /** The next deliberate page turn re-claims progress for this session. */
+  const needsClaimRef = useRef(true);
 
-  const rtl = manifest?.direction === 'rtl';
+  const language = manifest?.language ?? null;
+  // Direction from the OPF when declared; otherwise infer from the language
+  // so a Hebrew/Arabic book without page-progression-direction still reads
+  // right-to-left.
+  const rtl =
+    manifest?.direction === 'rtl' || (!manifest?.directionDeclared && isRtlLanguage(language));
   const dirFactor = rtl ? 1 : -1;
 
   /* ------------------------------------------------------------- loading */
@@ -106,6 +144,7 @@ export function ReaderPage() {
             charOffset: Number(charParam) || 0,
             sentenceId: sentenceParam ?? undefined,
             handoff,
+            granularity: searchParams.get('granularity') ?? undefined,
           };
           setSpineIdx(s);
           void recordCheckpoint(id, handoff ? 'switch' : 'open', {
@@ -126,13 +165,17 @@ export function ReaderPage() {
             pendingTargetRef.current = { charOffset: 0 };
             setSpineIdx(0);
           }
+          const openSpine = Math.min(
+            (resume?.locator as EbookLocator | undefined)?.spineIdx ?? 0,
+            m.chapters.length - 1,
+          );
+          const openChar = pendingTargetRef.current?.charOffset ?? 0;
           void recordCheckpoint(id, 'open', {
             medium: 'ebook',
-            spineIdx: pendingTargetRef.current
-              ? ((resume?.locator as EbookLocator)?.spineIdx ?? 0)
-              : 0,
-            charOffset: pendingTargetRef.current?.charOffset ?? 0,
-            pct: 0,
+            spineIdx: openSpine,
+            charOffset: openChar,
+            sentenceId: (resume?.locator as EbookLocator | undefined)?.sentenceId,
+            pct: pctFor(m, openSpine, openChar),
           });
         }
       } catch {
@@ -176,20 +219,43 @@ export function ReaderPage() {
 
   /* -------------------------------------------------- layout + position */
 
-  const applyPagination = useCallback(() => {
+  /**
+   * Size the centred page box and the multi-column content for the current
+   * viewport and prefs. Must run before any geometry is read: changing the
+   * column count reflows the chapter.
+   */
+  const measureLayout = useCallback((): PageLayout | null => {
     const viewport = viewportRef.current;
     const content = contentRef.current;
-    if (!viewport || !content) return;
+    const pages = pagesRef.current;
+    if (!viewport || !content || !pages) return null;
+    const layout = computePageLayout(
+      viewport.clientWidth,
+      MARGINS[prefs.margin].padding,
+      prefs.columns,
+    );
+    layoutRef.current = layout;
+    pages.style.width = `${layout.width}px`;
+    pages.style.left = `${layout.inset}px`;
+    content.style.setProperty('--rd-cols', String(layout.columns));
+    content.style.setProperty('--rd-colgap', `${layout.columnGap}px`);
+    return layout;
+  }, [prefs.margin, prefs.columns]);
+
+  /** Re-measure and return the page count (also pushed to state). */
+  const applyPagination = useCallback((): number => {
+    const content = contentRef.current;
+    if (!content) return 1;
     if (prefs.mode === 'paginated') {
-      const w = viewport.clientWidth;
-      content.style.setProperty('--rd-colwidth', `${w}px`);
-      content.style.setProperty('--rd-colgap', `${COLUMN_GAP}px`);
-      const count = Math.max(1, Math.round((content.scrollWidth + COLUMN_GAP) / (w + COLUMN_GAP)));
+      const layout = measureLayout();
+      if (!layout) return 1;
+      const count = pageCountFor(content.scrollWidth, layout);
       setPageCount(count);
-    } else {
-      setPageCount(1);
+      return count;
     }
-  }, [prefs.mode]);
+    setPageCount(1);
+    return 1;
+  }, [prefs.mode, measureLayout]);
 
   /** Current rendered translateX of the paginated content (mid-transition safe). */
   const currentTx = (content: HTMLElement): number => {
@@ -206,39 +272,39 @@ export function ReaderPage() {
    */
   const pageForOffset = useCallback(
     (charOffset: number): number => {
-      const viewport = viewportRef.current;
+      const pages = pagesRef.current;
       const content = contentRef.current;
       const map = textMapRef.current;
-      if (!viewport || !content || !map) return 0;
-      const w = viewport.clientWidth;
+      const layout = layoutRef.current;
+      if (!pages || !content || !map || !layout) return 0;
       const range = rangeForSpan(map, charOffset, charOffset + 1);
       if (!range) return 0;
       const tx = currentTx(content);
       const r = range.getBoundingClientRect();
-      const base = viewport.getBoundingClientRect();
+      const base = pages.getBoundingClientRect();
       const delta = rtl ? base.right - (r.right - tx) : r.left - tx - base.left;
-      return Math.max(0, Math.floor((delta + 2) / (w + COLUMN_GAP)));
+      return Math.max(0, Math.floor((delta + 2) / layout.stride));
     },
     [rtl],
   );
 
   const goToPage = useCallback(
     (n: number, intent: 'heartbeat' | 'seek' = 'heartbeat') => {
-      const viewport = viewportRef.current;
+      const pages = pagesRef.current;
       const content = contentRef.current;
-      if (!viewport || !content || !manifest) return;
-      const w = viewport.clientWidth;
+      const layout = layoutRef.current;
+      if (!pages || !content || !manifest || !layout) return;
       const clamped = Math.max(0, Math.min(n, pageCount - 1));
-      const targetTx = dirFactor * clamped * (w + COLUMN_GAP);
+      const targetTx = dirFactor * clamped * layout.stride;
       // Measure the target page's first visible offset in a way that is
-      // independent of the in-flight transition: shift the viewport box by
+      // independent of the in-flight transition: shift the page box by
       // the difference between the current rendered transform and the target.
       const tx = currentTx(content);
       content.style.transform = `translateX(${targetTx}px)`;
       setPage(clamped);
       const map = textMapRef.current;
       if (map) {
-        const rect = viewport.getBoundingClientRect();
+        const rect = pages.getBoundingClientRect();
         const shift = tx - targetTx;
         const off = firstVisibleOffset(map, {
           left: rect.left + shift,
@@ -248,12 +314,55 @@ export function ReaderPage() {
         });
         if (off !== null) {
           currentOffsetRef.current = off;
-          void recordCheckpoint(id, intent, locatorAt(manifest, sentences, spineIdx, off));
+          // A page turn is a deliberate act: the first one after this surface
+          // (re)gained focus is recorded as an explicit intent so this
+          // session holds the progress claim again (heartbeats from a
+          // session that lost the claim to another device are ignored).
+          const effective = needsClaimRef.current && intent === 'heartbeat' ? 'seek' : intent;
+          needsClaimRef.current = false;
+          void recordCheckpoint(id, effective, locatorAt(manifest, sentences, spineIdx, off));
         }
       }
     },
     [manifest, sentences, spineIdx, pageCount, dirFactor, id],
   );
+
+  // Coming back to a backgrounded tab: re-claim on the next turn, and offer
+  // to jump if another device moved further since.
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.visibilityState !== 'visible' || !manifest) return;
+      needsClaimRef.current = true;
+      try {
+        const resume = await resumeLocator(id);
+        const l = resume?.locator;
+        if (!l || l.medium !== 'ebook') return;
+        const here = pctFor(manifest, spineIdx, currentOffsetRef.current);
+        if (
+          Math.abs(l.pct - here) > 0.005 &&
+          (l.spineIdx !== spineIdx || l.charOffset !== currentOffsetRef.current)
+        ) {
+          toast.show(`Another device is at ${formatPct(l.pct)}`, {
+            label: 'Jump there',
+            onClick: () => {
+              pendingTargetRef.current = {
+                charOffset: l.charOffset ?? 0,
+                sentenceId: l.sentenceId,
+              };
+              if (l.spineIdx === spineIdx)
+                gotoChapterRef.current(spineIdx, l.charOffset ?? 0, 'seek');
+              else setSpineIdx(Math.min(l.spineIdx, manifest.chapters.length - 1));
+            },
+          });
+        }
+      } catch {
+        /* offline: nothing to reconcile */
+      }
+    };
+    const handler = () => void onVisible();
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [manifest, id, spineIdx, toast]);
 
   // After chapter HTML renders: fix asset URLs, build text map, paginate,
   // jump to pending target, paint highlights.
@@ -264,7 +373,7 @@ export function ReaderPage() {
       img.setAttribute('src', `/api/books/${id}/${img.getAttribute('src')}`);
     }
     textMapRef.current = buildTextMap(content);
-    applyPagination();
+    const count = applyPagination();
 
     const target = pendingTargetRef.current;
     pendingTargetRef.current = null;
@@ -274,16 +383,16 @@ export function ReaderPage() {
       const s = sentences.find((x) => x.id === target.sentenceId);
       if (s) charOffset = s.start;
     }
+    if (target?.fragment && map) {
+      const off = offsetForFragment(content, map, target.fragment);
+      if (off !== null) charOffset = off;
+    }
     currentOffsetRef.current = charOffset;
 
-    if (prefs.mode === 'paginated') {
+    if (prefs.mode === 'paginated' && layoutRef.current) {
       // Find the page containing charOffset (transition-safe measurement).
-      const viewport = viewportRef.current!;
-      const w = viewport.clientWidth;
-      const count = Math.max(1, Math.round((content.scrollWidth + COLUMN_GAP) / (w + COLUMN_GAP)));
-      setPageCount(count);
       const clamped = Math.min(pageForOffset(charOffset), count - 1);
-      content.style.transform = `translateX(${dirFactor * clamped * (w + COLUMN_GAP)}px)`;
+      content.style.transform = `translateX(${dirFactor * clamped * layoutRef.current.stride}px)`;
       setPage(clamped);
     } else if (map) {
       const range = rangeForSpan(map, charOffset, charOffset + 1);
@@ -301,10 +410,25 @@ export function ReaderPage() {
       if (s) {
         handoffCleanupRef.current?.();
         handoffCleanupRef.current = paintHandoff(map, s.start, s.end);
-        toast.show('Continuing from your listening position');
+        toast.show(
+          target.granularity && target.granularity !== 'sentence'
+            ? 'Continuing near your listening position'
+            : 'Continuing from your listening position',
+        );
       }
     }
-  }, [html, prefs.mode, prefs.size, prefs.lineHeight, prefs.font, prefs.weight, prefs.margin]);
+  }, [
+    html,
+    prefs.mode,
+    prefs.size,
+    prefs.lineHeight,
+    prefs.font,
+    prefs.weight,
+    prefs.margin,
+    prefs.columns,
+    prefs.align,
+    prefs.hyphens,
+  ]);
 
   // Re-paint highlights when annotations change.
   useEffect(() => {
@@ -315,19 +439,15 @@ export function ReaderPage() {
   // recording progress: automatic reflow is not the reader moving.
   const restoreOffset = useCallback(
     (charOffset: number) => {
-      const viewport = viewportRef.current;
       const content = contentRef.current;
       const map = textMapRef.current;
-      if (!viewport || !content || !map) return;
+      if (!content || !map) return;
       if (prefs.mode === 'paginated') {
-        const w = viewport.clientWidth;
-        const count = Math.max(
-          1,
-          Math.round((content.scrollWidth + COLUMN_GAP) / (w + COLUMN_GAP)),
-        );
-        setPageCount(count);
+        const count = applyPagination();
+        const layout = layoutRef.current;
+        if (!layout) return;
         const clamped = Math.min(pageForOffset(charOffset), count - 1);
-        content.style.transform = `translateX(${dirFactor * clamped * (w + COLUMN_GAP)}px)`;
+        content.style.transform = `translateX(${dirFactor * clamped * layout.stride}px)`;
         setPage(clamped);
       } else {
         const range = rangeForSpan(map, charOffset, charOffset + 1);
@@ -339,19 +459,38 @@ export function ReaderPage() {
         }
       }
     },
-    [prefs.mode, dirFactor, pageForOffset],
+    [prefs.mode, dirFactor, pageForOffset, applyPagination],
   );
 
   // Resize/orientation re-pagination: keep the reader on the sentence they
   // were on. Never page-zero, never a progress write.
   useEffect(() => {
-    const onResize = () => {
-      applyPagination();
-      restoreOffset(currentOffsetRef.current);
-    };
+    const onResize = () => restoreOffset(currentOffsetRef.current);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [applyPagination, restoreOffset]);
+  }, [restoreOffset]);
+
+  // Follow the system appearance for the 'auto' theme.
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const mq = matchMedia(DARK_MQ);
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const theme = effectiveTheme(prefs.theme, systemDark);
+
+  // Standalone iPhone: the status bar takes the page's theme-color, so the
+  // reader paints it in its own theme and restores the app colors on exit.
+  useEffect(() => {
+    const metas = Array.from(
+      document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'),
+    );
+    const saved = metas.map((m) => m.content);
+    for (const m of metas) m.content = THEME_BG[theme];
+    return () => metas.forEach((m, i) => (m.content = saved[i] ?? ''));
+  }, [theme]);
 
   // Lifecycle persistence: expose the LIVE reading position so backgrounding
   // the tab records it even inside the scroll debounce window. In scroll
@@ -400,16 +539,21 @@ export function ReaderPage() {
   /* ----------------------------------------------------------- actions */
 
   const gotoChapter = useCallback(
-    (s: number, charOffset = 0, intent: 'seek' | 'open' = 'seek') => {
+    (s: number, charOffset = 0, intent: 'seek' | 'open' = 'seek', fragment?: string) => {
       if (!manifest) return;
       const clamped = Math.max(0, Math.min(s, manifest.chapters.length - 1));
       handoffCleanupRef.current?.();
-      pendingTargetRef.current = { charOffset };
+      pendingTargetRef.current = { charOffset, fragment };
       if (clamped === spineIdx) {
-        // Re-trigger layout by resetting html state? Jump directly.
+        // Same chapter: jump directly without re-rendering the HTML.
         const map = textMapRef.current;
-        if (map) {
+        const content = contentRef.current;
+        if (map && content) {
           pendingTargetRef.current = null;
+          if (fragment) {
+            const off = offsetForFragment(content, map, fragment);
+            if (off !== null) charOffset = off;
+          }
           currentOffsetRef.current = charOffset;
           if (prefs.mode === 'paginated') {
             goToPage(pageForOffset(charOffset), 'seek');
@@ -430,6 +574,8 @@ export function ReaderPage() {
     },
     [manifest, spineIdx, prefs.mode, goToPage, pageForOffset, sentences, id],
   );
+  const gotoChapterRef = useRef(gotoChapter);
+  gotoChapterRef.current = gotoChapter;
 
   const nextPage = useCallback(() => {
     if (prefs.mode === 'scroll') {
@@ -439,7 +585,27 @@ export function ReaderPage() {
     }
     if (page < pageCount - 1) goToPage(page + 1);
     else if (manifest && spineIdx < manifest.chapters.length - 1) gotoChapter(spineIdx + 1, 0);
-  }, [prefs.mode, page, pageCount, manifest, spineIdx, goToPage, gotoChapter]);
+    else if (manifest) {
+      // Turning past the last page of the last chapter: the book is finished.
+      const last = Math.max(0, (manifest.chapters[spineIdx]?.charCount ?? 1) - 1);
+      void recordCheckpoint(id, 'finish', {
+        ...locatorAt(manifest, sentences, spineIdx, last),
+        pct: 1,
+      });
+      toast.show('The End — marked as finished');
+    }
+  }, [
+    prefs.mode,
+    page,
+    pageCount,
+    manifest,
+    spineIdx,
+    goToPage,
+    gotoChapter,
+    id,
+    sentences,
+    toast,
+  ]);
 
   const prevPage = useCallback(() => {
     if (prefs.mode === 'scroll') {
@@ -501,12 +667,16 @@ export function ReaderPage() {
         y: Math.max(70, rect.top - 48),
       });
     };
-    document.addEventListener('pointerup', onUp);
-    document.addEventListener('selectionchange', () => {
+    const onSelectionChange = () => {
       const sel = document.getSelection();
       if (!sel || sel.isCollapsed) setSelection(null);
-    });
-    return () => document.removeEventListener('pointerup', onUp);
+    };
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => {
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('selectionchange', onSelectionChange);
+    };
   }, []);
 
   const addAnnotation = useCallback(
@@ -593,7 +763,7 @@ export function ReaderPage() {
 
   if (loadError) {
     return (
-      <div className="reader-page" data-reader-theme={prefs.theme}>
+      <div className="reader-page" data-reader-theme={theme}>
         <div className="empty-state" style={{ margin: 'auto' }}>
           <h2>Cannot open book</h2>
           <p>{loadError}</p>
@@ -612,14 +782,15 @@ export function ReaderPage() {
     '';
   const bookPct = manifest ? pctFor(manifest, spineIdx, currentOffsetRef.current) : 0;
   const margins = MARGINS[prefs.margin];
+  const pagesLeft = Math.max(0, pageCount - page - 1);
 
   return (
     <div
       className={`reader-page ${chrome ? '' : 'chrome-hidden'}`}
-      data-reader-theme={prefs.theme}
+      data-reader-theme={theme}
       style={
         {
-          '--rd-font': FONT_STACKS[prefs.font],
+          '--rd-font': FONTS[prefs.font].stack,
           '--rd-size': `${prefs.size}px`,
           '--rd-weight': prefs.weight,
           '--rd-leading': prefs.lineHeight,
@@ -676,40 +847,43 @@ export function ReaderPage() {
               onClick={nextPage}
               tabIndex={-1}
             />
-            <div
-              ref={contentRef}
-              className="reader-content reader-content--paginated"
-              style={{
-                transition: 'transform 200ms var(--tl-ease)',
-                padding: `calc(72px + var(--tl-safe-top)) ${margins.padding}px calc(64px + var(--tl-safe-bottom))`,
-              }}
-              onPointerDown={(e) => {
-                swipeRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
-                handoffCleanupRef.current?.();
-              }}
-              onPointerUp={(e) => {
-                const sw = swipeRef.current;
-                swipeRef.current = null;
-                if (!sw) return;
-                const dx = e.clientX - sw.x;
-                const dy = e.clientY - sw.y;
-                if (Math.abs(dx) > 48 && Math.abs(dy) < 60 && Date.now() - sw.t < 600) {
-                  const backward = rtl ? dx < 0 : dx > 0;
-                  if (backward) prevPage();
-                  else nextPage();
-                } else if (
-                  Math.abs(dx) < 8 &&
-                  Math.abs(dy) < 8 &&
-                  !(e.target as Element).closest('a')
-                ) {
-                  const sel = document.getSelection();
-                  if (sel && !sel.isCollapsed) return;
-                  setChrome((c) => !c);
-                }
-              }}
-              onClick={(e) => interceptLink(e, manifest, gotoChapter)}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
+            <div className="reader-pages" ref={pagesRef}>
+              <div
+                ref={contentRef}
+                className="reader-content reader-content--paginated"
+                style={{
+                  transition: 'transform 200ms var(--tl-ease)',
+                  padding: `calc(72px + var(--tl-safe-top)) ${margins.padding}px calc(64px + var(--tl-safe-bottom))`,
+                }}
+                onPointerDown={(e) => {
+                  swipeRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
+                  handoffCleanupRef.current?.();
+                }}
+                onPointerUp={(e) => {
+                  const sw = swipeRef.current;
+                  swipeRef.current = null;
+                  if (!sw) return;
+                  const dx = e.clientX - sw.x;
+                  const dy = e.clientY - sw.y;
+                  if (Math.abs(dx) > 48 && Math.abs(dy) < 60 && Date.now() - sw.t < 600) {
+                    const backward = rtl ? dx < 0 : dx > 0;
+                    if (backward) prevPage();
+                    else nextPage();
+                  } else if (
+                    Math.abs(dx) < 8 &&
+                    Math.abs(dy) < 8 &&
+                    !(e.target as Element).closest('a')
+                  ) {
+                    const sel = document.getSelection();
+                    if (sel && !sel.isCollapsed) return;
+                    setChrome((c) => !c);
+                  }
+                }}
+                onClick={(e) => interceptLink(e, manifest, spineIdx, gotoChapter)}
+                lang={language ?? undefined}
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            </div>
           </>
         ) : (
           <div className="reader-scroller" ref={scrollerRef}>
@@ -718,7 +892,7 @@ export function ReaderPage() {
               className="reader-content"
               onClick={(e) => {
                 if ((e.target as Element).closest('a')) {
-                  interceptLink(e, manifest, gotoChapter);
+                  interceptLink(e, manifest, spineIdx, gotoChapter);
                   return;
                 }
                 const sel = document.getSelection();
@@ -726,8 +900,25 @@ export function ReaderPage() {
                 setChrome((c) => !c);
               }}
               onPointerDown={() => handoffCleanupRef.current?.()}
+              lang={language ?? undefined}
               dangerouslySetInnerHTML={{ __html: html }}
             />
+            {manifest && html && (
+              <div className="reader-chapter-end" dir={rtl ? 'rtl' : 'ltr'}>
+                {spineIdx < manifest.chapters.length - 1 ? (
+                  <button
+                    className="btn btn--secondary"
+                    onClick={() => gotoChapter(spineIdx + 1, 0)}
+                  >
+                    Next: {manifest.chapters[spineIdx + 1]?.title ?? `Chapter ${spineIdx + 2}`}
+                  </button>
+                ) : (
+                  <button className="btn btn--secondary" onClick={nextPage}>
+                    Finish book
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
         {!html && !loadError && (
@@ -736,6 +927,10 @@ export function ReaderPage() {
           </div>
         )}
       </div>
+
+      {prefs.brightness < 0.995 && (
+        <div className="reader-dim" style={{ opacity: 1 - prefs.brightness }} aria-hidden="true" />
+      )}
 
       {selection && (
         <div
@@ -781,14 +976,17 @@ export function ReaderPage() {
         <div className="reader-footer-row">
           <span>
             {prefs.mode === 'paginated'
-              ? `Page ${page + 1} of ${pageCount} in chapter`
+              ? pagesLeft === 0
+                ? pageCount === 1
+                  ? 'Whole chapter on this page'
+                  : 'Last page in chapter'
+                : `${pagesLeft} ${pagesLeft === 1 ? 'page' : 'pages'} left in chapter`
               : chapterTitle}
           </span>
           <span className="grow" />
           {detail?.book.pair && detail.book.pair.status !== 'candidate' && (
             <button
-              className="icon-btn"
-              style={{ width: 'auto', paddingInline: 12, gap: 6, fontSize: 13, fontWeight: 600 }}
+              className="tandem-pill"
               onClick={() => void switchToAudio()}
               disabled={!detail.book.pair.switchable}
               title={
@@ -798,7 +996,10 @@ export function ReaderPage() {
               }
             >
               <IconHeadphones size={17} />
-              Listen
+              <span>
+                {detail.book.pair.switchable ? 'Listen from here' : 'Audio · aligning…'}
+                <small />
+              </span>
             </button>
           )}
           <span>{formatPct(bookPct)}</span>
@@ -816,7 +1017,7 @@ export function ReaderPage() {
               aria-current={t.spineIdx === spineIdx ? 'true' : undefined}
               onClick={() => {
                 setSheet('none');
-                gotoChapter(t.spineIdx, 0);
+                gotoChapter(t.spineIdx, 0, 'seek', t.fragment ?? undefined);
               }}
             >
               <span className="grow">{t.title}</span>
@@ -909,19 +1110,52 @@ function locatorAt(
 function interceptLink(
   e: React.MouseEvent,
   manifest: ReaderManifest | null,
-  gotoChapter: (s: number, off: number) => void,
+  currentSpine: number,
+  gotoChapter: (s: number, off: number, intent?: 'seek' | 'open', fragment?: string) => void,
 ): void {
   const a = (e.target as Element).closest('a');
   if (!a) return;
   const internal = a.getAttribute('data-tl-href');
   if (internal) {
     e.preventDefault();
-    const [file] = internal.split('#');
-    const target = manifest?.chapters.find((c) => c.href === file);
-    if (target) gotoChapter(target.idx, 0);
-  } else if (a.getAttribute('href') === '#') {
+    const [file, frag] = internal.split('#');
+    // "#fn3" (same document) or "chapter.xhtml#fn3" (cross-chapter).
+    const target = file ? manifest?.chapters.find((c) => c.href === file) : undefined;
+    const spine = target ? target.idx : file ? -1 : currentSpine;
+    if (spine >= 0) gotoChapter(spine, 0, 'seek', frag || undefined);
+  } else if ((a.getAttribute('href') ?? '').startsWith('#')) {
     e.preventDefault();
+    const frag = (a.getAttribute('href') ?? '').slice(1);
+    if (frag) gotoChapter(currentSpine, 0, 'seek', frag);
   }
+}
+
+/** Character offset of the element with `id` (or `name`) inside the chapter. */
+function offsetForFragment(content: HTMLElement, map: TextMap, fragment: string): number | null {
+  let el: Element | null = null;
+  try {
+    el = content.querySelector(`[id="${CSS.escape(fragment)}"], a[name="${CSS.escape(fragment)}"]`);
+  } catch {
+    el = null;
+  }
+  if (!el) return null;
+  // First text node at or after the element.
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+  let node: Node | null = walker.nextNode();
+  while (node) {
+    if (el.contains(node) || el.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) {
+      const off = domToOffset(map, node, 0);
+      if (off !== null) return off;
+    }
+    node = walker.nextNode();
+  }
+  return null;
+}
+
+const RTL_LANGS = new Set(['he', 'iw', 'ar', 'fa', 'ur', 'yi', 'ps', 'sd', 'ug', 'dv']);
+function isRtlLanguage(lang: string | null): boolean {
+  if (!lang) return false;
+  return RTL_LANGS.has(lang.toLowerCase().split(/[-_]/)[0]!);
 }
 
 type HighlightApi = {
@@ -977,156 +1211,184 @@ function ReaderSettingsSheet({
 }) {
   const set = <K extends keyof ReaderPrefs>(k: K, v: ReaderPrefs[K]) =>
     onChange({ ...prefs, [k]: v });
+  const themes: { value: ReaderPrefs['theme']; label: string }[] = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'paper', label: 'Paper' },
+    { value: 'sepia', label: 'Sepia' },
+    { value: 'night', label: 'Night' },
+    { value: 'contrast', label: 'Contrast' },
+  ];
   return (
     <Sheet title="Reading settings" onClose={onClose}>
-      <div className="field">
-        <label>Theme</label>
-        <div className="chip-row" role="group" aria-label="Reader theme">
-          {(['paper', 'sepia', 'night', 'contrast'] as const).map((t) => (
+      <div className="rs-group" role="group" aria-label="Theme">
+        <div className="rs-themes">
+          {themes.map((t) => (
             <button
-              key={t}
-              className="chip"
-              aria-pressed={prefs.theme === t}
-              onClick={() => set('theme', t)}
+              key={t.value}
+              className={`rs-swatch rs-swatch--${t.value}`}
+              aria-pressed={prefs.theme === t.value}
+              aria-label={`${t.label} theme`}
+              onClick={() => set('theme', t.value)}
             >
-              {t === 'paper'
-                ? 'Paper'
-                : t === 'sepia'
-                  ? 'Sepia'
-                  : t === 'night'
-                    ? 'Night'
-                    : 'High contrast'}
+              <span className="rs-swatch__disc" aria-hidden="true">
+                Aa
+              </span>
+              <span className="rs-swatch__label">{t.label}</span>
             </button>
           ))}
         </div>
       </div>
-      <div className="field">
-        <label>Layout</label>
-        <div className="chip-row" role="group" aria-label="Layout mode">
+
+      <div className="rs-group">
+        <div className="rs-size" role="group" aria-label="Text size">
           <button
-            className="chip"
+            className="rs-size__btn"
+            style={{ fontSize: 17 }}
+            aria-label="Smaller text"
+            disabled={prefs.size <= SIZE_MIN}
+            onClick={() => set('size', Math.max(SIZE_MIN, prefs.size - 1))}
+          >
+            A
+          </button>
+          <span className="rs-size__value" aria-live="polite">
+            {prefs.size}
+            <small>px</small>
+          </span>
+          <button
+            className="rs-size__btn"
+            style={{ fontSize: 26 }}
+            aria-label="Larger text"
+            disabled={prefs.size >= SIZE_MAX}
+            onClick={() => set('size', Math.min(SIZE_MAX, prefs.size + 1))}
+          >
+            A
+          </button>
+        </div>
+        <label className="rs-slider" htmlFor="rs-dim">
+          <IconSun size={16} style={{ opacity: 0.55 }} />
+          <input
+            id="rs-dim"
+            className="slider"
+            type="range"
+            min={0.35}
+            max={1}
+            step={0.05}
+            value={prefs.brightness}
+            aria-label="Page brightness"
+            onChange={(e) => set('brightness', Number(e.target.value))}
+          />
+          <IconSun size={22} />
+        </label>
+      </div>
+
+      <div className="rs-group" role="group" aria-label="Font">
+        <div className="rs-label">Font</div>
+        <div className="rs-fonts">
+          {(Object.keys(FONTS) as (keyof typeof FONTS)[]).map((k) => (
+            <button
+              key={k}
+              className="rs-font"
+              aria-pressed={prefs.font === k}
+              style={{ fontFamily: FONTS[k].stack }}
+              onClick={() => set('font', k)}
+            >
+              <span className="rs-font__sample" aria-hidden="true">
+                Aa
+              </span>
+              <span className="rs-font__name">
+                {FONTS[k].label}
+                <small>{FONTS[k].note}</small>
+              </span>
+              {prefs.font === k && <IconCheck size={18} />}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rs-group">
+        <div className="rs-label">Layout</div>
+        <div className="segmented" role="group" aria-label="Layout mode">
+          <button
             aria-pressed={prefs.mode === 'paginated'}
             onClick={() => set('mode', 'paginated')}
           >
             Pages
           </button>
-          <button
-            className="chip"
-            aria-pressed={prefs.mode === 'scroll'}
-            onClick={() => set('mode', 'scroll')}
-          >
-            Continuous scroll
+          <button aria-pressed={prefs.mode === 'scroll'} onClick={() => set('mode', 'scroll')}>
+            Scroll
           </button>
         </div>
+        {prefs.mode === 'paginated' && (
+          <div className="segmented" role="group" aria-label="Columns" style={{ marginTop: 8 }}>
+            {(['auto', 'one', 'two'] as const).map((c) => (
+              <button key={c} aria-pressed={prefs.columns === c} onClick={() => set('columns', c)}>
+                {c === 'auto' ? 'Auto' : c === 'one' ? 'One page' : 'Two pages'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <div className="field">
-        <label>Font</label>
-        <div className="chip-row" role="group" aria-label="Reading font">
-          <button
-            className="chip"
-            aria-pressed={prefs.font === 'literata'}
-            onClick={() => set('font', 'literata')}
-          >
-            Literata
-          </button>
-          <button
-            className="chip"
-            aria-pressed={prefs.font === 'serif'}
-            onClick={() => set('font', 'serif')}
-          >
-            System serif
-          </button>
-          <button
-            className="chip"
-            aria-pressed={prefs.font === 'sans'}
-            onClick={() => set('font', 'sans')}
-          >
-            Sans
-          </button>
-        </div>
-      </div>
-      <div className="field">
-        <label htmlFor="rs-size">Text size — {prefs.size}px</label>
-        <input
-          id="rs-size"
-          className="slider"
-          style={{ color: 'var(--tl-interactive)' }}
-          type="range"
-          min={14}
-          max={30}
-          step={1}
-          value={prefs.size}
-          onChange={(e) => set('size', Number(e.target.value))}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="rs-weight">Weight — {prefs.weight}</label>
-        <input
-          id="rs-weight"
-          className="slider"
-          style={{ color: 'var(--tl-interactive)' }}
-          type="range"
-          min={300}
-          max={700}
-          step={20}
-          value={prefs.weight}
-          onChange={(e) => set('weight', Number(e.target.value))}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="rs-leading">Line height — {prefs.lineHeight.toFixed(2)}</label>
-        <input
-          id="rs-leading"
-          className="slider"
-          style={{ color: 'var(--tl-interactive)' }}
-          type="range"
-          min={1.3}
-          max={2.1}
-          step={0.04}
-          value={prefs.lineHeight}
-          onChange={(e) => set('lineHeight', Number(e.target.value))}
-        />
-      </div>
-      <div className="field">
-        <label>Margins</label>
-        <div className="chip-row" role="group" aria-label="Margins">
+
+      <div className="rs-group">
+        <div className="rs-label">Spacing</div>
+        <label className="rs-slider" htmlFor="rs-leading">
+          <span className="rs-slider__name">Lines</span>
+          <input
+            id="rs-leading"
+            className="slider"
+            type="range"
+            min={1.3}
+            max={2.1}
+            step={0.04}
+            value={prefs.lineHeight}
+            aria-label="Line height"
+            onChange={(e) => set('lineHeight', Number(e.target.value))}
+          />
+          <span className="rs-slider__val">{prefs.lineHeight.toFixed(2)}</span>
+        </label>
+        <label className="rs-slider" htmlFor="rs-weight">
+          <span className="rs-slider__name">Weight</span>
+          <input
+            id="rs-weight"
+            className="slider"
+            type="range"
+            min={300}
+            max={700}
+            step={20}
+            value={prefs.weight}
+            aria-label="Font weight"
+            onChange={(e) => set('weight', Number(e.target.value))}
+          />
+          <span className="rs-slider__val">{prefs.weight}</span>
+        </label>
+        <div className="segmented" role="group" aria-label="Margins">
           {(['compact', 'normal', 'wide'] as const).map((m) => (
-            <button
-              key={m}
-              className="chip"
-              aria-pressed={prefs.margin === m}
-              onClick={() => set('margin', m)}
-            >
+            <button key={m} aria-pressed={prefs.margin === m} onClick={() => set('margin', m)}>
               {m[0]!.toUpperCase() + m.slice(1)}
             </button>
           ))}
         </div>
       </div>
-      <div className="field">
-        <label>Alignment</label>
-        <div className="chip-row" role="group" aria-label="Text alignment">
-          <button
-            className="chip"
-            aria-pressed={prefs.align === 'start'}
-            onClick={() => set('align', 'start')}
-          >
+
+      <div className="rs-group">
+        <div className="rs-label">Text</div>
+        <div className="segmented" role="group" aria-label="Text alignment">
+          <button aria-pressed={prefs.align === 'start'} onClick={() => set('align', 'start')}>
             Ragged
           </button>
-          <button
-            className="chip"
-            aria-pressed={prefs.align === 'justify'}
-            onClick={() => set('align', 'justify')}
-          >
+          <button aria-pressed={prefs.align === 'justify'} onClick={() => set('align', 'justify')}>
             Justified
           </button>
-          <button
-            className="chip"
-            aria-pressed={prefs.hyphens}
-            onClick={() => set('hyphens', !prefs.hyphens)}
-          >
-            Hyphenation {prefs.hyphens ? 'on' : 'off'}
-          </button>
         </div>
+        <label className="rs-toggle">
+          <span>Hyphenation</span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={prefs.hyphens}
+            onChange={(e) => set('hyphens', e.target.checked)}
+          />
+        </label>
       </div>
     </Sheet>
   );
