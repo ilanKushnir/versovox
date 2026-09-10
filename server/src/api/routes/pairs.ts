@@ -132,11 +132,20 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
     const { values: settings } = resolveSettings(db, ctx.config);
     const row = db
       .prepare(
+        // Exactly the work a "Start all" would queue: linked, not transcribed,
+        // and not already in the queue — so the estimate describes what the
+        // button does, not work that is already under way.
         `SELECT COUNT(*) AS pairs, COALESCE(SUM(b.duration_ms), 0) AS audio_ms
            FROM pairs p
            JOIN books b ON b.id = p.audio_id
           WHERE p.status IN ('auto', 'confirmed')
-            AND NOT EXISTS (SELECT 1 FROM alignments a WHERE a.pair_id = p.id)`,
+            AND NOT EXISTS (SELECT 1 FROM alignments a WHERE a.pair_id = p.id)
+            AND NOT EXISTS (
+              SELECT 1 FROM jobs j
+               WHERE j.type = 'align'
+                 AND j.state IN ('queued', 'running')
+                 AND j.payload_json LIKE '%' || p.id || '%'
+            )`,
       )
       .get() as { pairs: number; audio_ms: number };
     const waiting = db
