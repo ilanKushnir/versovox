@@ -15,7 +15,7 @@ COPY server server
 COPY web web
 RUN npm run build --workspace @tandemleaf/shared \
  && npm run build --workspace @tandemleaf/server \
- && cd web && node_modules/.bin/tsc -b && node_modules/.bin/vite build
+ && npm run build --workspace @tandemleaf/web
 
 # Production node_modules only (server runtime deps).
 FROM node:26-alpine AS deps
