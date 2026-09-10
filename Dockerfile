@@ -47,7 +47,7 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 FROM node:26-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg gosu tini wget libgomp1 \
+ && apt-get install -y --no-install-recommends ffmpeg gosu tini wget ca-certificates libgomp1 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=whisper /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY docker/versovox-model /usr/local/bin/versovox-model
