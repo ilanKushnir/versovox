@@ -2,7 +2,7 @@
 
 ## Product promise
 
-Versovox is the beautiful self-hosted place to read ebooks and listen to audiobooks from existing libraries, with one unusual capability: when an ebook and audiobook are the same work and compatible editions, a reader can switch modes at the same sentence or paragraph.
+ReadPort is the beautiful self-hosted place to read ebooks and listen to audiobooks from existing libraries, with one unusual capability: when an ebook and audiobook are the same work and compatible editions, a reader can switch modes at the same sentence or paragraph.
 
 ## Non-negotiable boundaries
 

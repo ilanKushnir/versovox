@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { LANGUAGES, type LanguageSpec } from '@versovox/shared';
+import { LANGUAGES, type LanguageSpec } from '@readport/shared';
 
 export { LANGUAGES, type LanguageSpec };
 
@@ -15,7 +15,7 @@ export { LANGUAGES, type LanguageSpec };
 
 /** One downloadable artefact. The model is a graph plus its vocabulary. */
 export interface ModelFile {
-  /** Path inside VX_MODELS_DIR; may contain a subdirectory. */
+  /** Path inside RP_MODELS_DIR; may contain a subdirectory. */
   name: string;
   url: string;
   sizeBytes: number;

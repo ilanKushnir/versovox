@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { type ShelfSummary, type ShelvesOverview } from '@versovox/shared';
+import { type ShelfSummary, type ShelvesOverview } from '@readport/shared';
 import { api } from '../api/client';
 import { listDownloads } from '../offline/downloads';
 import { useSession } from './session';

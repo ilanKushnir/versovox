@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { alignmentGapSchema, alignmentSourceSchema, type AlignmentSegment } from '@versovox/shared';
+import { alignmentGapSchema, alignmentSourceSchema, type AlignmentSegment } from '@readport/shared';
 import { z } from 'zod';
 
 /**
@@ -35,10 +35,10 @@ import { z } from 'zod';
  * it, which is what stops it from confidently mis-matching a book.
  */
 
-export const ALIGNMENT_FILE_EXT = '.vxalign';
+export const ALIGNMENT_FILE_EXT = '.rpalign';
 
-/** The `format` tag every file carries, so a stray .vxalign is caught early. */
-export const ALIGNMENT_FORMAT = 'versovox-alignment';
+/** The `format` tag every file carries, so a stray .rpalign is caught early. */
+export const ALIGNMENT_FORMAT = 'readport-alignment';
 
 /**
  * Bumped only for a change a reader of the previous version cannot cope with.
@@ -177,7 +177,7 @@ export const portableAlignmentSchema = z.object({
   format: z.literal(ALIGNMENT_FORMAT),
   formatVersion: z.number().int().min(1),
   writtenAt: z.iso.datetime(),
-  /** Which build produced this, e.g. "versovox 0.8.1". For support, not logic. */
+  /** Which build produced this, e.g. "readport 0.8.1". For support, not logic. */
   writtenBy: z.string(),
   ebook: portableEbookSchema,
   audio: portableAudioSchema,
@@ -273,7 +273,7 @@ export interface PortableAudioInput {
 }
 
 export interface AlignmentDocumentInput {
-  /** Build identifier for the file's own record, e.g. "versovox 0.8.1". */
+  /** Build identifier for the file's own record, e.g. "readport 0.8.1". */
   writtenBy: string;
   /** Defaults to now; injectable so a re-export can be byte-identical in tests. */
   writtenAt?: string;
@@ -351,7 +351,7 @@ function slug(raw: string, fallback: string): string {
 }
 
 /**
- * `<author> - <title> [<key>].vxalign`.
+ * `<author> - <title> [<key>].rpalign`.
  *
  * The bracketed key is what `writeAlignmentFile` matches on when it cleans up
  * after a retitled book, so its shape is load-bearing, not decorative. The
@@ -469,7 +469,7 @@ export function writeAlignmentFile(dir: string, doc: PortableAlignment): string 
  *
  * A rejection is data, not an exception. These files come off a folder the
  * user controls: truncated by a sync client, edited in a text editor, written
- * by a Versovox two releases newer than this one. Importing a folder must
+ * by a ReadPort two releases newer than this one. Importing a folder must
  * report each bad file and carry on with the rest, and the person reading that
  * report is a self-hoster looking at a log line, not a developer with a stack
  * trace.
@@ -502,7 +502,7 @@ export function decodeAlignmentFile(bytes: Buffer | Uint8Array): ReadAlignmentRe
   }
 
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return reject('This file does not contain a Versovox alignment document.');
+    return reject('This file does not contain a ReadPort alignment document.');
   }
   const envelope = raw as Record<string, unknown>;
 
@@ -510,11 +510,11 @@ export function decodeAlignmentFile(bytes: Buffer | Uint8Array): ReadAlignmentRe
   // the future is told apart from a file that is merely broken. They are the
   // two questions whose answers change what the user should do about it.
   if (typeof envelope.format !== 'string') {
-    return reject('This file has no Versovox format tag, so it is not an alignment file.');
+    return reject('This file has no ReadPort format tag, so it is not an alignment file.');
   }
   if (envelope.format !== ALIGNMENT_FORMAT) {
     return reject(
-      `This file says it is "${envelope.format}", which is not a Versovox alignment file.`,
+      `This file says it is "${envelope.format}", which is not a ReadPort alignment file.`,
     );
   }
   const version = envelope.formatVersion;
@@ -525,7 +525,7 @@ export function decodeAlignmentFile(bytes: Buffer | Uint8Array): ReadAlignmentRe
   }
   if (version > ALIGNMENT_FORMAT_VERSION) {
     return reject(
-      `This alignment file was written by a newer version of Versovox (alignment format ${version}, this server understands ${ALIGNMENT_FORMAT_VERSION}) — upgrade this server to read it.`,
+      `This alignment file was written by a newer version of ReadPort (alignment format ${version}, this server understands ${ALIGNMENT_FORMAT_VERSION}) — upgrade this server to read it.`,
     );
   }
 
@@ -534,13 +534,13 @@ export function decodeAlignmentFile(bytes: Buffer | Uint8Array): ReadAlignmentRe
     const issue = parsed.error.issues[0];
     const where = issue && issue.path.length > 0 ? issue.path.join('.') : 'the document itself';
     // Zod says "received undefined" for an absent field, which reads to a
-    // self-hoster like a bug in Versovox rather than a hole in their file.
+    // self-hoster like a bug in ReadPort rather than a hole in their file.
     const detail = (issue?.message ?? 'the value is not what this format allows').replace(
       /received undefined/i,
       'found nothing',
     );
     return reject(
-      `This alignment file is not shaped the way Versovox expects: at "${where}", ${detail}. Export the alignment again to replace it.`,
+      `This alignment file is not shaped the way ReadPort expects: at "${where}", ${detail}. Export the alignment again to replace it.`,
     );
   }
   const doc = parsed.data;
@@ -582,7 +582,7 @@ export function readAlignmentFile(file: string): ReadAlignmentResult {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     return reject(
-      `This alignment file could not be read from disk (${code ?? 'unknown error'}). Check that it still exists and that Versovox has permission to read the folder it is in.`,
+      `This alignment file could not be read from disk (${code ?? 'unknown error'}). Check that it still exists and that ReadPort has permission to read the folder it is in.`,
     );
   }
   return decodeAlignmentFile(bytes);

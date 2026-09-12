@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import posix from 'node:path/posix';
 import { type FastifyInstance } from 'fastify';
-import { settingsSchema, type Locator, type SwitchResolution } from '@versovox/shared';
+import { settingsSchema, type Locator, type SwitchResolution } from '@readport/shared';
 import { requireRole } from '../../auth/roles.js';
 import { enqueueJob } from '../../jobs/queue.js';
 import { type AppContext, activeDerivedDir } from '../../context.js';

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { type FolderKind, type PathCheck } from '@versovox/shared';
+import { type FolderKind, type PathCheck } from '@readport/shared';
 import { api } from '../api/client';
 import { IconAlert, IconBack, IconCheck, IconClose, IconTrash } from './icons';
 
@@ -31,7 +31,7 @@ export interface BrowseResponse {
 
 /** API bound to the setup token (wizard) or the session (settings). */
 export function folderApi(setupToken?: string): FolderCheckApi {
-  const headers = setupToken ? { 'x-vx-setup-token': setupToken } : undefined;
+  const headers = setupToken ? { 'x-rp-setup-token': setupToken } : undefined;
   return {
     test: async (paths, kind) =>
       (

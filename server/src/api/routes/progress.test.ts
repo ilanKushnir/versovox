@@ -20,13 +20,13 @@ let ctx: AppContext;
 let tmp: string;
 
 beforeAll(async () => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-progress-route-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-progress-route-'));
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
     sessionSecret: 'progress-route-test-secret-0123456789',
     logLevel: 'error',
-    proxyAuthHeader: 'x-vx-test-user',
+    proxyAuthHeader: 'x-rp-test-user',
     proxyAuthSources: ['10.0.0.0/8'],
   });
   ctx = {
@@ -50,9 +50,9 @@ const post = (events: unknown) =>
     url: '/api/progress/events',
     remoteAddress: '10.0.0.5',
     headers: {
-      'x-vx-csrf': '1',
+      'x-rp-csrf': '1',
       'content-type': 'application/json',
-      'x-vx-test-user': 'dana',
+      'x-rp-test-user': 'dana',
     },
     payload: { events } as never,
   });
@@ -62,7 +62,7 @@ const stateOf = async (bookId: string) =>
     await app.inject({
       url: `/api/progress/${bookId}`,
       remoteAddress: '10.0.0.5',
-      headers: { 'x-vx-test-user': 'dana' },
+      headers: { 'x-rp-test-user': 'dana' },
     })
   ).json() as { state: { revision: number; locator: { positionMs?: number } } | null };
 

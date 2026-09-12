@@ -1,6 +1,6 @@
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { loginSchema, setupSchema, testPathsSchema, LANGUAGES } from '@versovox/shared';
+import { loginSchema, setupSchema, testPathsSchema, LANGUAGES } from '@readport/shared';
 import { type AppContext } from '../../context.js';
 import { hashPassword, verifyAgainstDummy, verifyPassword } from '../../auth/passwords.js';
 import { createSession, destroySession, LoginThrottle } from '../../auth/sessions.js';
@@ -68,7 +68,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
   }) => {
     if (req.user) return hasRole(req.user.role, 'admin');
     if (userCount() > 0) return false;
-    const raw = req.headers['x-vx-setup-token'];
+    const raw = req.headers['x-rp-setup-token'];
     const token = Array.isArray(raw) ? raw[0] : raw;
     return typeof token === 'string' && !!ctx.setupToken && ctx.setupToken.matches(token);
   };
@@ -185,7 +185,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     const body = loginSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid' });
     // Throttle by (account, client IP) AND by client IP alone. req.ip only
-    // reflects forwarded headers when VX_TRUST_PROXY explicitly trusts the
+    // reflects forwarded headers when RP_TRUST_PROXY explicitly trusts the
     // proxy, so a direct attacker cannot rotate X-Forwarded-For past the
     // limits — and a remote attacker cannot lock the real owner out of a
     // known username by burning its attempts from elsewhere.

@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ROLE_LABELS, type Role } from '@versovox/shared';
+import { ROLE_LABELS, type Role } from '@readport/shared';
 import { api, ApiError } from '../api/client';
 import { useSession, type User } from '../state/session';
-import { VersoMark } from '../components/icons';
+import { ReadPortMark } from '../components/icons';
 
 interface InvitePeek {
   role: Role;
@@ -68,8 +68,8 @@ export function JoinPage({ token }: { token: string }) {
       <div className="auth-page__glow" aria-hidden="true" />
       <form className="auth-card" onSubmit={submit}>
         <span className="brand">
-          <VersoMark size={34} style={{ color: 'var(--vx-primary)' }} />
-          <span className="brand__name">Versovox</span>
+          <ReadPortMark size={34} style={{ color: 'var(--rp-primary)' }} />
+          <span className="brand__name">ReadPort</span>
         </span>
         <p className="auth-card__tagline">Read and listen in tandem</p>
         {peek === null && <p className="lede">Checking your invitation…</p>}

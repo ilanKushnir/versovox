@@ -37,7 +37,7 @@ import {
   removeDownload,
   type OfflineManifestEntry,
 } from './downloads';
-import { type AudioLocator, type EbookLocator } from '@versovox/shared';
+import { type AudioLocator, type EbookLocator } from '@readport/shared';
 
 /** Minimal in-memory Cache implementation for tests. */
 class FakeCache {
@@ -435,7 +435,7 @@ describe('logout/download race', () => {
     const origPut = cache.put.bind(cache);
     cache.put = async (url: string, res: Response) => {
       await origPut(url, res);
-      if (url.includes('vxchunk=0')) firstChunkStored();
+      if (url.includes('rpchunk=0')) firstChunkStored();
     };
 
     const downloadP = startDownload('bk1', () => {});

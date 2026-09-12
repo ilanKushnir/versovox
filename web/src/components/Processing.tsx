@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { type Job } from '@versovox/shared';
+import { type Job } from '@readport/shared';
 import { api } from '../api/client';
 import { alignerModel, type ModelsResponse } from '../lib/types';
 import { IconAlert, IconCheck, IconClose, IconHeadphones, IconBookOpen } from './icons';
@@ -364,7 +364,7 @@ export function PipelineDiagram() {
         about a minute of computing per hour of audio — it samples the narration rather than
         listening to every second — which is why it runs one book at a time and reports live
         progress above. How many pins turn up is also the edition check: a narration that is not
-        this text produces almost none, and Versovox refuses to publish timings rather than
+        this text produces almost none, and ReadPort refuses to publish timings rather than
         inventing them.
       </p>
     </div>

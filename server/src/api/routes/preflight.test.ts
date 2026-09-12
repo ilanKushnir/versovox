@@ -22,7 +22,7 @@ let ctx: AppContext;
 let tmp: string;
 
 beforeAll(async () => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-preflight-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-preflight-'));
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
@@ -49,17 +49,17 @@ const post = (headers: Record<string, string>, payload: unknown = {}) =>
     method: 'POST',
     url: '/api/preflight',
     payload: payload as never,
-    headers: { 'x-vx-csrf': '1', 'content-type': 'application/json', ...headers },
+    headers: { 'x-rp-csrf': '1', 'content-type': 'application/json', ...headers },
   });
 
 describe('preflight', () => {
   it('refuses without the bootstrap token', async () => {
     expect((await post({})).statusCode).toBe(403);
-    expect((await post({ 'x-vx-setup-token': 'wrong' })).statusCode).toBe(403);
+    expect((await post({ 'x-rp-setup-token': 'wrong' })).statusCode).toBe(403);
   });
 
   it('reports every check and the aligner catalog entry', async () => {
-    const res = await post({ 'x-vx-setup-token': SETUP_TOKEN });
+    const res = await post({ 'x-rp-setup-token': SETUP_TOKEN });
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
       ok: boolean;
@@ -98,7 +98,7 @@ describe('preflight', () => {
     const good = path.join(tmp, 'books');
     fs.mkdirSync(good, { recursive: true });
     fs.writeFileSync(path.join(good, 'a.epub'), 'not really an epub');
-    const ok = await post({ 'x-vx-setup-token': SETUP_TOKEN }, { ebookDirs: [good] });
+    const ok = await post({ 'x-rp-setup-token': SETUP_TOKEN }, { ebookDirs: [good] });
     const okCheck = (ok.json() as { checks: PreflightCheck[] }).checks.find(
       (c) => c.id === 'libraries',
     )!;
@@ -106,7 +106,7 @@ describe('preflight', () => {
     expect(okCheck.detail).toContain('1 file visible');
 
     const bad = await post(
-      { 'x-vx-setup-token': SETUP_TOKEN },
+      { 'x-rp-setup-token': SETUP_TOKEN },
       { ebookDirs: [path.join(tmp, 'nope')] },
     );
     const badCheck = (bad.json() as { checks: PreflightCheck[] }).checks.find(
@@ -117,7 +117,7 @@ describe('preflight', () => {
   });
 
   it('rejects a malformed body', async () => {
-    const res = await post({ 'x-vx-setup-token': SETUP_TOKEN }, { ebookDirs: 'not-an-array' });
+    const res = await post({ 'x-rp-setup-token': SETUP_TOKEN }, { ebookDirs: 'not-an-array' });
     expect(res.statusCode).toBe(400);
   });
 });

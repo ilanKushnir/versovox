@@ -17,7 +17,7 @@ import {
   type EbookSentenceInput,
   type RawTiming,
 } from '../alignment/timings.js';
-import { type EbookLocator, type AudioLocator } from '@versovox/shared';
+import { type EbookLocator, type AudioLocator } from '@readport/shared';
 
 const SETUP_TOKEN = 'integration-setup-token';
 
@@ -67,7 +67,7 @@ function authed(opts: {
     payload: opts.payload as never,
     headers: {
       cookie,
-      'x-vx-csrf': '1',
+      'x-rp-csrf': '1',
       ...(opts.payload !== undefined ? { 'content-type': 'application/json' } : {}),
     },
   });
@@ -137,9 +137,9 @@ async function seedAlignment(): Promise<void> {
 
 beforeAll(async () => {
   expect(fs.existsSync(fixtures)).toBe(true);
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-int-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-int-'));
   // Exercise the real env-var path (including settings env-pinning).
-  process.env.VX_DEFAULT_LANGUAGE = 'en';
+  process.env.RP_DEFAULT_LANGUAGE = 'en';
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
@@ -164,10 +164,10 @@ afterAll(async () => {
   await app.close();
   ctx.db.close();
   fs.rmSync(tmp, { recursive: true, force: true });
-  delete process.env.VX_DEFAULT_LANGUAGE;
+  delete process.env.RP_DEFAULT_LANGUAGE;
 });
 
-describe('Versovox API', () => {
+describe('ReadPort API', () => {
   it('requires setup on first run, gates it on the bootstrap token, creates admin', async () => {
     const status = await app.inject({ url: '/api/setup/status' });
     expect(status.json()).toMatchObject({ needsSetup: true, setupTokenSource: 'env' });
@@ -176,14 +176,14 @@ describe('Versovox API', () => {
     const noTokenPaths = await app.inject({
       method: 'POST',
       url: '/api/setup/test-paths',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { paths: [fixtures] },
     });
     expect(noTokenPaths.statusCode).toBe(403);
     const checked = await app.inject({
       method: 'POST',
       url: '/api/setup/test-paths',
-      headers: { 'x-vx-csrf': '1', 'x-vx-setup-token': SETUP_TOKEN },
+      headers: { 'x-rp-csrf': '1', 'x-rp-setup-token': SETUP_TOKEN },
       payload: { paths: [path.join(fixtures, 'ebooks'), path.join(tmp, 'nope')], kind: 'ebook' },
     });
     expect(checked.statusCode).toBe(200);
@@ -194,7 +194,7 @@ describe('Versovox API', () => {
     expect(results[1]!.ok).toBe(false);
     const browse = await app.inject({
       url: `/api/setup/browse?path=${encodeURIComponent(fixtures)}`,
-      headers: { 'x-vx-setup-token': SETUP_TOKEN },
+      headers: { 'x-rp-setup-token': SETUP_TOKEN },
     });
     expect(browse.statusCode).toBe(200);
     expect((browse.json() as { entries: { name: string }[] }).entries.map((e) => e.name)).toEqual(
@@ -205,7 +205,7 @@ describe('Versovox API', () => {
     const noToken = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'astra', password: 'correct-horse-battery-staple' },
     });
     expect(noToken.statusCode).toBe(400);
@@ -214,7 +214,7 @@ describe('Versovox API', () => {
     const wrongToken = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: {
         username: 'astra',
         password: 'correct-horse-battery-staple',
@@ -227,7 +227,7 @@ describe('Versovox API', () => {
     const weak = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'astra', password: 'short', setupToken: SETUP_TOKEN },
     });
     expect(weak.statusCode).toBe(400);
@@ -241,7 +241,7 @@ describe('Versovox API', () => {
       app.inject({
         method: 'POST',
         url: '/api/setup',
-        headers: { 'x-vx-csrf': '1' },
+        headers: { 'x-rp-csrf': '1' },
         payload: {
           username: 'astra',
           password: 'correct-horse-battery-staple',
@@ -252,7 +252,7 @@ describe('Versovox API', () => {
       app.inject({
         method: 'POST',
         url: '/api/setup',
-        headers: { 'x-vx-csrf': '1' },
+        headers: { 'x-rp-csrf': '1' },
         payload: {
           username: 'mallory',
           password: 'mallory-password-123',
@@ -272,7 +272,7 @@ describe('Versovox API', () => {
     const again = await app.inject({
       method: 'POST',
       url: '/api/setup',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'x', password: 'y'.repeat(12), setupToken: SETUP_TOKEN },
     });
     expect(again.statusCode).toBe(409);
@@ -290,7 +290,7 @@ describe('Versovox API', () => {
     const badOrigin = await app.inject({
       method: 'POST',
       url: '/api/library/rescan',
-      headers: { cookie, 'x-vx-csrf': '1', origin: 'https://evil.example', host: 'localhost:8383' },
+      headers: { cookie, 'x-rp-csrf': '1', origin: 'https://evil.example', host: 'localhost:8383' },
     });
     expect(badOrigin.statusCode).toBe(403);
   });
@@ -315,13 +315,13 @@ describe('Versovox API', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/library/rescan',
-      headers: { cookie, 'x-vx-csrf': '1', 'content-type': 'application/x-www-form-urlencoded' },
+      headers: { cookie, 'x-rp-csrf': '1', 'content-type': 'application/x-www-form-urlencoded' },
     });
     expect(res.statusCode).toBe(200);
     const nonEmpty = await app.inject({
       method: 'POST',
       url: '/api/library/rescan',
-      headers: { cookie, 'x-vx-csrf': '1', 'content-type': 'application/x-www-form-urlencoded' },
+      headers: { cookie, 'x-rp-csrf': '1', 'content-type': 'application/x-www-form-urlencoded' },
       payload: 'a=junk',
     });
     expect(nonEmpty.statusCode).toBe(415);
@@ -353,14 +353,14 @@ describe('Versovox API', () => {
       await app.inject({
         method: 'POST',
         url: '/api/auth/login',
-        headers: { 'x-vx-csrf': '1' },
+        headers: { 'x-rp-csrf': '1' },
         payload: { username: 'astra', password: 'wrong-password-attempt' },
       });
     }
     const limited = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'astra', password: 'wrong-password-attempt' },
     });
     expect(limited.statusCode).toBe(429);
@@ -373,7 +373,7 @@ describe('Versovox API', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/auth/login',
-        headers: { 'x-vx-csrf': '1', 'x-forwarded-for': `203.0.113.${i}` },
+        headers: { 'x-rp-csrf': '1', 'x-forwarded-for': `203.0.113.${i}` },
         payload: { username: 'astra', password: 'wrong-password-attempt' },
       });
       expect(res.statusCode).toBe(429);
@@ -384,7 +384,7 @@ describe('Versovox API', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'no-such-user-xyz', password: 'whatever-password' },
     });
     expect(res.statusCode).toBe(401);
@@ -1039,7 +1039,7 @@ describe('Versovox API', () => {
     const login = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'nadia', password: 'nadia-password-123' },
     });
     const nadiaCookie = login.headers['set-cookie']!.toString().split(';')[0]!;
@@ -1054,7 +1054,7 @@ describe('Versovox API', () => {
         payload: opts.payload as never,
         headers: {
           cookie: nadiaCookie,
-          'x-vx-csrf': '1',
+          'x-rp-csrf': '1',
           ...(opts.payload !== undefined ? { 'content-type': 'application/json' } : {}),
         },
       });
@@ -1122,7 +1122,7 @@ describe('Versovox API', () => {
 
   it('settings respect env pinning and persist', async () => {
     const before = (await authed({ url: '/api/settings' })).json() as { envPinned: string[] };
-    // VX_DEFAULT_LANGUAGE is set for this test config.
+    // RP_DEFAULT_LANGUAGE is set for this test config.
     expect(before.envPinned).toContain('defaultLanguage');
     const updated = (
       await authed({
@@ -1371,7 +1371,7 @@ describe('Versovox API', () => {
     const anon = await app.inject({
       method: 'POST',
       url: '/api/users',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'nobody', password: 'nobody-password-123' },
     });
     expect(anon.statusCode).toBe(401);
@@ -1393,7 +1393,7 @@ describe('Versovox API', () => {
     const qLogin = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'quinn', password: 'quinn-password-123' },
     });
     expect(qLogin.statusCode).toBe(200);
@@ -1409,7 +1409,7 @@ describe('Versovox API', () => {
         payload: opts.payload as never,
         headers: {
           cookie: qCookie,
-          'x-vx-csrf': '1',
+          'x-rp-csrf': '1',
           ...(opts.payload !== undefined ? { 'content-type': 'application/json' } : {}),
         },
       });
@@ -1441,7 +1441,7 @@ describe('Versovox API', () => {
     const accept = await app.inject({
       method: 'POST',
       url: `/api/invites/${token}/accept`,
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'rae', password: 'rae-password-12345' },
     });
     expect(accept.statusCode).toBe(201);
@@ -1449,7 +1449,7 @@ describe('Versovox API', () => {
     const again = await app.inject({
       method: 'POST',
       url: `/api/invites/${token}/accept`,
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'rae2', password: 'rae-password-12345' },
     });
     expect(again.statusCode).toBe(404);
@@ -1458,7 +1458,7 @@ describe('Versovox API', () => {
     const raeAlign = await app.inject({
       method: 'POST',
       url: `/api/pairs/${pairId}/align`,
-      headers: { cookie: raeCookie, 'x-vx-csrf': '1' },
+      headers: { cookie: raeCookie, 'x-rp-csrf': '1' },
     });
     expect(raeAlign.statusCode).toBe(403);
 
@@ -1471,7 +1471,7 @@ describe('Versovox API', () => {
     const pw = await app.inject({
       method: 'POST',
       url: '/api/auth/password',
-      headers: { cookie: raeCookie, 'x-vx-csrf': '1', 'content-type': 'application/json' },
+      headers: { cookie: raeCookie, 'x-rp-csrf': '1', 'content-type': 'application/json' },
       payload: { currentPassword: 'rae-password-12345', newPassword: 'rae-new-password-999' },
     });
     expect(pw.statusCode).toBe(200);
@@ -1490,7 +1490,7 @@ describe('Versovox API', () => {
     const qLogin2 = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
       payload: { username: 'quinn', password: 'quinn-password-123' },
     });
     expect(qLogin2.statusCode).toBe(403);

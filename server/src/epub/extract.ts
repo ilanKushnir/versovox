@@ -22,7 +22,7 @@ export const MAX_TOTAL_ASSET_BYTES = 150 * 1024 * 1024;
 export const MAX_COVER_BYTES = 20 * 1024 * 1024;
 
 /**
- * Builds the derived, Versovox-owned reading index for one EPUB:
+ * Builds the derived, ReadPort-owned reading index for one EPUB:
  *   <outDir>/book.json        spine/toc/meta manifest
  *   <outDir>/ch_<idx>.html    sanitized chapter bodies
  *   <outDir>/sentences.json   per-chapter sentence index (stable ids)
@@ -91,7 +91,7 @@ export async function extractEpub(
   const unzipDir = fs.mkdtempSync(
     path.join(
       fs.existsSync(path.dirname(outDir)) ? path.dirname(outDir) : os.tmpdir(),
-      '.vx-unzip-',
+      '.rp-unzip-',
     ),
   );
   try {

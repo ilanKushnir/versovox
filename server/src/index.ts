@@ -19,9 +19,9 @@ const ctx: AppContext = {
   db,
   config,
   log: {
-    info: (m) => console.log(`[versovox] ${m}`),
-    warn: (m) => console.warn(`[versovox] ${m}`),
-    error: (m) => console.error(`[versovox] ${m}`),
+    info: (m) => console.log(`[readport] ${m}`),
+    warn: (m) => console.warn(`[readport] ${m}`),
+    error: (m) => console.error(`[readport] ${m}`),
   },
 };
 
@@ -91,10 +91,10 @@ compactTimer.unref?.();
 app
   .listen({ port: config.port, host: config.host })
   .then(() => {
-    ctx.log.info(`Versovox listening on http://${config.host}:${config.port}`);
+    ctx.log.info(`ReadPort listening on http://${config.host}:${config.port}`);
     if (!config.trustHttps) {
       ctx.log.warn(
-        'Running without VX_TRUST_HTTPS: cookies are not marked Secure. Serve behind HTTPS in production (required for PWA install).',
+        'Running without RP_TRUST_HTTPS: cookies are not marked Secure. Serve behind HTTPS in production (required for PWA install).',
       );
     }
   })

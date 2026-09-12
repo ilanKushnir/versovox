@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { type AlignmentSegment } from '@versovox/shared';
+import { type AlignmentSegment } from '@readport/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ALIGNMENT_FILE_EXT,
@@ -81,7 +81,7 @@ function bookSegments(): AlignmentSegment[] {
 
 function mkDoc(over: { title?: string; author?: string } = {}): PortableAlignment {
   return buildAlignmentDocument({
-    writtenBy: 'versovox 0.8.1 (test)',
+    writtenBy: 'readport 0.8.1 (test)',
     writtenAt: '2026-09-12T10:00:00.000Z',
     ebook: {
       title: over.title ?? 'The Wind in the Willows',
@@ -113,7 +113,7 @@ function mkDoc(over: { title?: string; author?: string } = {}): PortableAlignmen
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-portable-'));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-portable-'));
 });
 
 afterEach(() => {
@@ -224,7 +224,7 @@ describe('rejections', () => {
   it('rejects a file that unpacks to invalid JSON', () => {
     const file = plant(
       `broken [aaaaaaaaaaaa]${ALIGNMENT_FILE_EXT}`,
-      gzipSync(Buffer.from('{"format": "versovox-align', 'utf8')),
+      gzipSync(Buffer.from('{"format": "readport-align', 'utf8')),
     );
     const result = readAlignmentFile(file);
     expect(result.ok).toBe(false);
@@ -264,7 +264,7 @@ describe('rejections', () => {
     expect(result.reason).toContain('writtenBy');
   });
 
-  it('tells the user to upgrade when the file comes from a newer Versovox', () => {
+  it('tells the user to upgrade when the file comes from a newer ReadPort', () => {
     // The one rejection with a real remedy, so it must name it rather than
     // reporting the same "damaged file" as everything else.
     const file = plant(`future [aaaaaaaaaaaa]${ALIGNMENT_FILE_EXT}`, {
@@ -279,7 +279,7 @@ describe('rejections', () => {
   });
 
   it('refuses a fingerprint scheme it cannot compare instead of comparing it blindly', () => {
-    // A t2: fingerprint means a later Versovox changed how text identity is
+    // A t2: fingerprint means a later ReadPort changed how text identity is
     // computed. Treating it as an opaque string would match the wrong book.
     const doc = mkDoc();
     doc.ebook.textFingerprint = `t2:${'a'.repeat(32)}`;
@@ -370,7 +370,7 @@ describe('writeAlignmentFile', () => {
     const other = writeAlignmentFile(
       dir,
       buildAlignmentDocument({
-        writtenBy: 'versovox 0.8.1 (test)',
+        writtenBy: 'readport 0.8.1 (test)',
         writtenAt: '2026-09-12T10:00:00.000Z',
         ebook: {
           title: 'Another Book',
@@ -430,7 +430,7 @@ describe('buildAlignmentDocument', () => {
     const ids = bookSentenceIds();
     const fromIds = mkDoc();
     const fromFingerprint = buildAlignmentDocument({
-      writtenBy: 'versovox 0.8.1 (test)',
+      writtenBy: 'readport 0.8.1 (test)',
       writtenAt: '2026-09-12T10:00:00.000Z',
       ebook: {
         title: 'The Wind in the Willows',
@@ -639,7 +639,7 @@ describe('size', () => {
       };
     });
     const doc = buildAlignmentDocument({
-      writtenBy: 'versovox 0.8.1 (test)',
+      writtenBy: 'readport 0.8.1 (test)',
       ebook: {
         title: 'A Long Novel',
         author: 'A Prolific Author',

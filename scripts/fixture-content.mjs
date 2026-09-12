@@ -1,5 +1,5 @@
 /**
- * Original sample content written for Versovox. All stories, names, and
+ * Original sample content written for ReadPort. All stories, names, and
  * places are invented for this project and released under the repository's
  * AGPL-3.0-or-later license. No third-party text or imagery is included.
  */
@@ -237,6 +237,6 @@ export function coverSvg({ title, author, bg, fg, accent, rtl = false }) {
     <path d="M0 60 C 30 10, 90 10, 120 60 C 90 46, 30 46, 0 60 Z" fill="none" stroke="${accent}" stroke-width="6"/>
     <line x1="60" y1="18" x2="60" y2="60" stroke="${accent}" stroke-width="6"/>
   </g>
-  <text x="80" y="1140" font-size="24" font-family="Georgia, serif" fill="${fg}" opacity="0.7">A Versovox sample edition</text>
+  <text x="80" y="1140" font-size="24" font-family="Georgia, serif" fill="${fg}" opacity="0.7">A ReadPort sample edition</text>
 </svg>`;
 }

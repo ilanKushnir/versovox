@@ -1,23 +1,44 @@
 # Logo
 
-The Versovox mark was generated with OpenAI's image API
-(`gpt-image-2.5-sunburst`) via `scripts/generate-logo-openai.mjs`, which
-writes one candidate per concept. Three were produced:
+The ReadPort mark is a bookmark ribbon with a play triangle knocked out of it:
+the two halves of the app in one shape. The cream half is the page, the amber
+half is the narration, and the triangle is a hole rather than a shape on top,
+so the mark works in one colour on any ground.
 
-| File                | Concept                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------ |
-| `book-wave.png`     | **Chosen.** An open book: the left page carries lines of text, the right page rises into a sound wave. |
-| `spine-wave.png`    | A closed book whose spine becomes a waveform.                                                          |
-| `bookmark-wave.png` | A rounded tile holding a book and a ribbon that turns into a waveform.                                 |
+## The source of truth
 
-`book-wave.png` was then traced by hand into a single-colour vector so the
-mark stays crisp at 20px and inherits `currentColor` in both themes. The
-vector lives in three places and they must stay in step:
+[`mark.mjs`](mark.mjs) holds the geometry — two path strings built from named
+numbers, not a trace of a bitmap. Everything else is generated from it:
 
-- `web/src/components/icons.tsx` — `VersoMark`, used throughout the UI
-- `web/public/icons/favicon.svg` — browser tab
-- `scripts/generate-icons.mjs` — the artwork for the PWA/App icon PNGs
-  (`node scripts/generate-icons.mjs` regenerates `web/public/icons/*.png`)
+```bash
+node scripts/generate-icons.mjs
+```
 
-To try new concepts: `OPENAI_API_KEY=… node scripts/generate-logo-openai.mjs`
-(`VX_LOGO_CONCEPT` renders just one, `VX_IMAGE_MODEL` pins a model).
+That writes, and these files should not be hand-edited:
+
+| Output                           | What it is                                   |
+| -------------------------------- | -------------------------------------------- |
+| `readport-mark.svg`              | The mono mark, for READMEs and release posts |
+| `readport-tile.svg`              | The mark on its rounded ink tile             |
+| `web/public/icons/favicon.svg`   | Browser tab                                  |
+| `web/public/icons/icon-*.png`    | PWA icons, plain and maskable                |
+| `web/public/icons/apple-touch-…` | iOS home screen                              |
+
+Rasterizing uses whichever Chrome or Chromium is already installed; set
+`CHROME=/path/to/chrome` if it lives somewhere unusual.
+
+The one copy that is not generated is `ReadPortMark` in
+[`web/src/components/icons.tsx`](../../web/src/components/icons.tsx), which
+carries the same two paths inline so the React component has no build step.
+`icons.test.tsx` fails if that copy drifts from `mark.mjs`.
+
+## Colours
+
+| Token | Hex       | Where                                   |
+| ----- | --------- | --------------------------------------- |
+| Cream | `#F4EFE3` | Leading half of the ribbon              |
+| Amber | `#F5B31E` | Trailing half                           |
+| Ink   | `#16120F` | The tile, and the app's dark background |
+
+In the UI the mark is drawn in a single `currentColor`, so it takes the ember
+copper of the light theme and the lighter ember of the dark one.

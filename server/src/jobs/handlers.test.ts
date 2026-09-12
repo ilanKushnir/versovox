@@ -22,7 +22,7 @@ let tmp: string;
 let ctx: AppContext;
 
 beforeAll(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-handlers-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-handlers-'));
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),

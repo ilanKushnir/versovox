@@ -7,12 +7,12 @@ import {
   RouterProvider,
   useLocation,
 } from 'react-router-dom';
-import { AUTO_SHELVES } from '@versovox/shared';
+import { AUTO_SHELVES } from '@readport/shared';
 import { SessionProvider, useSession } from './state/session';
 import { ShelvesProvider, useShelves } from './state/shelves';
 import { Drawer, Sheet, ToastProvider } from './components/ui';
 import { Sidebar } from './components/Sidebar';
-import { IconLibrary, IconLink, IconSettings, IconShelf, VersoMark } from './components/icons';
+import { IconLibrary, IconLink, IconSettings, IconShelf, ReadPortMark } from './components/icons';
 import { startProgressLifecycle } from './progress/engine';
 import { LoginPage } from './pages/AuthPages';
 import { SetupWizard } from './pages/SetupWizard';
@@ -31,12 +31,12 @@ import './styles/immersive.css';
 /** Whether the rail is showing. Remembered per browser, like the theme. */
 function useSidebarCollapsed(): [boolean, (v: boolean) => void] {
   const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem('vx-sidebar') === 'collapsed',
+    () => localStorage.getItem('rp-sidebar') === 'collapsed',
   );
   const set = useCallback((v: boolean) => {
     setCollapsed(v);
     try {
-      localStorage.setItem('vx-sidebar', v ? 'collapsed' : 'shown');
+      localStorage.setItem('rp-sidebar', v ? 'collapsed' : 'shown');
     } catch {
       /* private browsing; the choice just does not persist */
     }
@@ -96,7 +96,7 @@ function Shell() {
   const { phase, needsLibraries } = useSession();
   const location = useLocation();
   const [setupSkipped, setSetupSkipped] = useState(
-    () => localStorage.getItem('vx-setup-libraries-skipped') === '1',
+    () => localStorage.getItem('rp-setup-libraries-skipped') === '1',
   );
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [overlay, setOverlay] = useState(false);
@@ -159,9 +159,9 @@ function Shell() {
             Skip to the books
           </a>
           <header className="app-header">
-            <Link to="/" className="brand" aria-label="Versovox home">
-              <VersoMark size={26} style={{ color: 'var(--vx-primary)' }} />
-              <span className="brand__name">Versovox</span>
+            <Link to="/" className="brand" aria-label="ReadPort home">
+              <ReadPortMark size={26} style={{ color: 'var(--rp-primary)' }} />
+              <span className="brand__name">ReadPort</span>
             </Link>
             <ShelfHeaderButton onOpen={() => setOverlay(true)} />
             <nav className="app-nav" aria-label="Primary">

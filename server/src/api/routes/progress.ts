@@ -1,6 +1,6 @@
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { progressEventSchema, type ProgressAck, type ProgressEvent } from '@versovox/shared';
+import { progressEventSchema, type ProgressAck, type ProgressEvent } from '@readport/shared';
 import { type AppContext } from '../../context.js';
 import { applyProgressEvents, getProgressState } from '../../progress/service.js';
 

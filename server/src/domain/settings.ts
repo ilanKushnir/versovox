@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { settingsSchema, type Settings } from '@versovox/shared';
+import { settingsSchema, type Settings } from '@readport/shared';
 import { type DB, nowIso } from '../db/index.js';
 import { type EnvConfig } from '../config.js';
 
@@ -54,7 +54,7 @@ const ENV_MAP: Partial<Record<keyof Settings, keyof EnvConfig>> = {
 };
 
 /**
- * Library roots: VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS when set, otherwise the
+ * Library roots: RP_EBOOK_DIRS / RP_AUDIOBOOK_DIRS when set, otherwise the
  * folders chosen in the setup wizard or Settings. Always read through here
  * so the scanner, the API and the boot sequence agree.
  */

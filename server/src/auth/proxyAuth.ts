@@ -8,18 +8,18 @@ import { nowIso } from '../db/index.js';
 /**
  * Reverse-proxy single sign-on (Authentik / Authelia / oauth2-proxy style).
  *
- * When VX_PROXY_AUTH_HEADER names a request header (e.g.
- * `x-authentik-username`), a request that arrives WITHOUT a Versovox session
+ * When RP_PROXY_AUTH_HEADER names a request header (e.g.
+ * `x-authentik-username`), a request that arrives WITHOUT a ReadPort session
  * cookie is authenticated from that header — but only if the TCP peer that
- * delivered it is one of VX_PROXY_AUTH_SOURCES (the reverse proxy's
- * addresses/CIDRs). A client that reaches Versovox directly (LAN port,
+ * delivered it is one of RP_PROXY_AUTH_SOURCES (the reverse proxy's
+ * addresses/CIDRs). A client that reaches ReadPort directly (LAN port,
  * break-glass URL) is never a trusted source, so it cannot forge the
  * header; it sees the normal login page instead.
  *
  * Users are provisioned on first sight with an unusable password hash
- * (they sign in through the proxy). Roles: VX_PROXY_AUTH_ADMINS grants
+ * (they sign in through the proxy). Roles: RP_PROXY_AUTH_ADMINS grants
  * admin; otherwise the very first user of an empty instance becomes admin
- * (the proxy already decides who may reach Versovox at all).
+ * (the proxy already decides who may reach ReadPort at all).
  */
 
 const USERNAME_RE = /^[a-zA-Z0-9._@-]{1,64}$/;
@@ -40,7 +40,7 @@ export function buildSourceList(sources: string[]): BlockList | null {
     if (!s) continue;
     const [addr, prefix] = s.split('/');
     const family = isIP(addr ?? '');
-    if (!family) throw new Error(`VX_PROXY_AUTH_SOURCES: not an IP or CIDR: ${s}`);
+    if (!family) throw new Error(`RP_PROXY_AUTH_SOURCES: not an IP or CIDR: ${s}`);
     const type = family === 4 ? 'ipv4' : 'ipv6';
     if (prefix !== undefined) list.addSubnet(addr!, Number(prefix), type);
     else list.addAddress(addr!, type);

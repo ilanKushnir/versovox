@@ -54,7 +54,7 @@ reading rate says the interpolation would be a lie.
 
 - **`standard`** (the default) samples the narration on a schedule and
   interpolates between the matches. Measured on the target server (a 6-CPU
-  LXC with `VX_ALIGN_THREADS=4`): a 67-minute book in 72 seconds, a 36.7-hour
+  LXC with `RP_ALIGN_THREADS=4`): a 67-minute book in 72 seconds, a 36.7-hour
   book in 28.6 minutes — i.e. a six-hour audiobook in about six minutes. It
   decodes around 7% of the audio.
 - **`exact`** puts every sample through the model. Roughly fifteen times the
@@ -332,12 +332,12 @@ erring toward the earlier one is already what the lookup does.
 An alignment is expensive and, kept only in SQLite, it is also disposable: a
 from-scratch redeploy throws away every CPU-hour the user has ever paid for.
 So a finished alignment is also written out as a file, into an **alignment
-folder** the operator mounts from their own library — the one folder Versovox
+folder** the operator mounts from their own library — the one folder ReadPort
 ever writes to. A fresh install reads that folder back after its first scan
 and is immediately as capable as the install that was wiped.
 
 The write target is the first configured folder (`alignmentDirs` /
-`VX_ALIGNMENT_DIRS`) that will actually accept a file. If none will, the
+`RP_ALIGNMENT_DIRS`) that will actually accept a file. If none will, the
 alignment is not lost — it falls back to `alignments/` inside the data
 directory and logs what to fix. That fallback survives a container restart but
 not a rebuild that discards the volume, which is exactly why the setup wizard
@@ -345,8 +345,8 @@ asks for a folder in the library instead.
 
 ### The file
 
-One gzipped JSON document per aligned pair, extension `.vxalign`, named
-`<author> - <title> [<first 12 of the pair key>].vxalign`. The slugs are
+One gzipped JSON document per aligned pair, extension `.rpalign`, named
+`<author> - <title> [<first 12 of the pair key>].rpalign`. The slugs are
 ASCII-folded and capped at 60 characters each, because these files get copied
 between a NAS, a Windows box and a phone's SMB mount and non-ASCII names do
 not survive that trip reliably. The slugs are a courtesy to whoever is looking
@@ -356,10 +356,10 @@ title it has ever had.
 
 ```json
 {
-  "format": "versovox-alignment",
+  "format": "readport-alignment",
   "formatVersion": 1,
   "writtenAt": "2026-09-01T12:00:00.000Z",
-  "writtenBy": "versovox",
+  "writtenBy": "readport",
   "ebook": { "title": "…", "author": "…", "language": "en",
              "sentenceCount": 880, "spineCount": 12, "sizeBytes": 412000,
              "textFingerprint": "t1:…" },
@@ -444,10 +444,10 @@ and looks for a file with that key. Then:
   a no-op on every run but the first.
 - **A file for a book this library does not have is not a problem.** It is
   counted as unmatched and passed over in silence. People will keep their
-  `.vxalign` files alongside books they have not mounted.
+  `.rpalign` files alongside books they have not mounted.
 - **A bad file is reported, not thrown.** These files come off a folder the
   user controls: truncated by a sync client, edited in a text editor, written
-  by a Versovox two releases newer than this one. Each one is rejected with a
+  by a ReadPort two releases newer than this one. Each one is rejected with a
   sentence a self-hoster can act on, and the import carries on with the rest.
   A file is rejected when it will not gunzip, will not parse, carries the
   wrong `format` tag, declares a `formatVersion` this server does not
@@ -487,19 +487,19 @@ copy that could not be written is worth a line in the log and nothing more.
 | Languages   | all ten, from the one download                                                                                |
 | **Licence** | **CC-BY-NC-4.0 — non-commercial**                                                                             |
 
-It is the only model Versovox uses and the only entry in the catalog. Because
+It is the only model ReadPort uses and the only entry in the catalog. Because
 it works on a romanized character stream rather than on words, the same file
 times a Russian audiobook as happily as an English one, and unvocalized Hebrew
 costs it nothing extra.
 
 That licence is the only non-permissive thing in the project, and the only
-term that is not AGPL-compatible in spirit. Versovox itself is AGPL-3.0 and
+term that is not AGPL-compatible in spirit. ReadPort itself is AGPL-3.0 and
 ships no model; this one is fetched from Hugging Face on an explicit admin
 click, and the licence is shown on the card **before** the download starts.
-For personal and household use it is fine. If you are running Versovox in a
+For personal and household use it is fine. If you are running ReadPort in a
 commercial setting, do not install it — and note that without it nothing on
 this server can compute an alignment; the only timings it will ever have are
-the ones it imports from a folder of `.vxalign` files.
+the ones it imports from a folder of `.rpalign` files.
 
 A book queued for alignment before the model has landed fails with a
 structured `model-missing` error rather than a red stack trace: the Pairing

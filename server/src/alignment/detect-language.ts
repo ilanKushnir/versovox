@@ -1,4 +1,4 @@
-import { LANGUAGES } from '@versovox/shared';
+import { LANGUAGES } from '@readport/shared';
 
 /**
  * Work out what language a book is in, from the book.

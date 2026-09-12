@@ -1,4 +1,4 @@
-/* Versovox service worker: app-shell offline startup + explicit per-title
+/* ReadPort service worker: app-shell offline startup + explicit per-title
    offline packages.
 
    Strategy (honest about what is and is not offline):
@@ -17,16 +17,16 @@ importScripts('/sw-range.js');
 importScripts('/sw-auth.js');
 
 /* Both placeholders are replaced by the build (scripts inside web/vite.config.ts). */
-const BUILD = /*__VX_BUILD__*/ 'dev';
-const PRECACHE = /*__VX_PRECACHE__*/ [
+const BUILD = /*__RP_BUILD__*/ 'dev';
+const PRECACHE = /*__RP_PRECACHE__*/ [
   '/',
   '/manifest.webmanifest',
   '/icons/favicon.svg',
   '/fonts/literata.css',
 ];
 
-const SHELL_CACHE = `vx-shell-${BUILD}`;
-const OFFLINE_CACHE = 'vx-offline-v1'; // written by the app's download manager
+const SHELL_CACHE = `rp-shell-${BUILD}`;
+const OFFLINE_CACHE = 'rp-offline-v1'; // written by the app's download manager
 
 /* Names the account whose downloads the offline cache holds. Kept inside
    that cache so the stamp can never outlive the content it describes. */
@@ -49,7 +49,7 @@ const authGate = self.vxAuth.createAuthGate({
     const res = await fetch('/api/auth/me', {
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: { 'x-vx-csrf': '1' },
+      headers: { 'x-rp-csrf': '1' },
     });
     // WHO is signed in decides this, not merely THAT someone is.
     if (res.ok) {
@@ -68,7 +68,7 @@ const authGate = self.vxAuth.createAuthGate({
       /* best effort */
     }
     const clients = await self.clients.matchAll({ includeUncontrolled: true });
-    for (const c of clients) c.postMessage({ type: 'vx-unauthorized' });
+    for (const c of clients) c.postMessage({ type: 'rp-unauthorized' });
   },
 });
 
@@ -114,7 +114,7 @@ async function reconcileCacheOwner(meRes) {
   await caches.delete(OFFLINE_CACHE);
   await stampOwner(viewer);
   const clients = await self.clients.matchAll({ includeUncontrolled: true });
-  for (const c of clients) c.postMessage({ type: 'vx-offline-purged', reason: 'account-changed' });
+  for (const c of clients) c.postMessage({ type: 'rp-offline-purged', reason: 'account-changed' });
   // The cache is this account's now, but the caller is holding a response
   // read before the purge: refuse this one request.
   return false;
@@ -387,10 +387,10 @@ async function serveTrack(req, url) {
 function offlineFallback() {
   return new Response(
     '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">' +
-      '<title>Versovox — offline</title>' +
+      '<title>ReadPort — offline</title>' +
       '<body style="font-family:system-ui;background:#F6F1E8;color:#1C1917;display:grid;place-items:center;min-height:100dvh;margin:0">' +
       '<div style="text-align:center;padding:24px"><h1 style="font-size:20px">You are offline</h1>' +
-      '<p>Versovox could not load. Reconnect once, and the app will work offline afterwards.</p></div>',
+      '<p>ReadPort could not load. Reconnect once, and the app will work offline afterwards.</p></div>',
     { headers: { 'content-type': 'text/html; charset=utf-8' } },
   );
 }

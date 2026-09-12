@@ -1,4 +1,4 @@
-import { type HandoffStatus, type PairStatus } from '@versovox/shared';
+import { type HandoffStatus, type PairStatus } from '@readport/shared';
 import { formatPct } from './format';
 
 /**

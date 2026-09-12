@@ -42,7 +42,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
 export const SIZE_MIN = 14;
 export const SIZE_MAX = 32;
 
-const KEY = 'vx-reader-prefs';
+const KEY = 'rp-reader-prefs';
 
 export function loadPrefs(): ReaderPrefs {
   try {

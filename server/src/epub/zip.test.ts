@@ -15,7 +15,7 @@ import { extractZipToDir, ZipLimitError, type ZipLimits } from './zip.js';
 let tmp: string;
 
 beforeAll(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-zip-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-zip-'));
 });
 
 afterAll(() => {

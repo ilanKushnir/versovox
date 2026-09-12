@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="ReadPort">
-  <rect width="24" height="24" rx="5" fill="#16120f"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="ReadPort">
+  <rect width="512" height="512" rx="112" fill="#16120f"/>
   <defs>
     <clipPath id="rp-ribbon"><path d="M5.6 4.1 a2.3 2.3 0 0 1 2.3 -2.3 h8.2 a2.3 2.3 0 0 1 2.3 2.3 V22.2 L12 17.9 L5.6 22.2 Z"/></clipPath>
     <mask id="rp-play">
@@ -7,7 +7,7 @@
       <path d="M9.7 6.8 L15.7 10.775 L9.7 14.75 Z" fill="#000"/>
     </mask>
   </defs>
-  <g transform="translate(0 0) scale(1)">
+  <g transform="translate(80 80) scale(14.666666666666666)">
     <g mask="url(#rp-play)" clip-path="url(#rp-ribbon)">
       <rect x="5.6" y="0" width="6.4" height="24" fill="#f4efe3"/>
       <rect x="12" y="0" width="6.399999999999999" height="24" fill="#f5b31e"/>

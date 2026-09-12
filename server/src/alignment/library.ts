@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { type AlignmentSegment } from '@versovox/shared';
+import { type AlignmentSegment } from '@readport/shared';
 import { activeDerivedDir, type AppContext } from '../context.js';
 import { loadSentences } from '../epub/extract.js';
 import { nowIso } from '../db/index.js';
@@ -91,7 +91,7 @@ export function writeTargetDir(ctx: AppContext): { dir: string; problem: string 
   for (const dir of roots) {
     try {
       fs.mkdirSync(dir, { recursive: true });
-      const probe = path.join(dir, `.versovox-write-test-${process.pid}`);
+      const probe = path.join(dir, `.readport-write-test-${process.pid}`);
       fs.writeFileSync(probe, '');
       fs.unlinkSync(probe);
       return { dir, problem: null };
@@ -157,7 +157,7 @@ export function saveAlignmentFile(ctx: AppContext, pairId: string): string | nul
         gaps: handle.summary.gaps,
       },
       segments: segments.map(rowToSegment),
-      writtenBy: 'versovox',
+      writtenBy: 'readport',
       writtenAt: nowIso(),
     });
     const { dir, problem } = writeTargetDir(ctx);

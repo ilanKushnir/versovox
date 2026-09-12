@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openMemoryDatabase, type DB } from '../db/index.js';
 import { applyProgressEvents, compactProgressHistory, getProgressState } from './service.js';
-import { type ProgressEvent } from '@versovox/shared';
+import { type ProgressEvent } from '@readport/shared';
 
 let db: DB;
 let n = 0;

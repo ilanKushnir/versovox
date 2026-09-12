@@ -32,8 +32,8 @@ jobs:
         run: npm run build
       - name: Assert service worker precache was injected
         run: |
-          grep -q "vx-shell-" web/dist/sw.js
-          ! grep -q "__VX_PRECACHE__" web/dist/sw.js
+          grep -q "rp-shell-" web/dist/sw.js
+          ! grep -q "__RP_PRECACHE__" web/dist/sw.js
           grep -q '"/assets/' web/dist/sw.js
 
   docker:
@@ -41,14 +41,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate compose config
-        run: VX_SESSION_SECRET=ci-validation-secret docker compose config -q
+        run: RP_SESSION_SECRET=ci-validation-secret docker compose config -q
       - name: Build image
-        run: docker build -t versovox:ci .
+        run: docker build -t readport:ci .
       - name: Smoke test container (health, setup-token gate)
         run: |
           docker run -d --name tl -p 8383:8383 \
-            -e VX_SESSION_SECRET=ci-smoke-secret-0123456789 \
-            -e VX_SETUP_TOKEN=ci-smoke-setup-token versovox:ci
+            -e RP_SESSION_SECRET=ci-smoke-secret-0123456789 \
+            -e RP_SETUP_TOKEN=ci-smoke-setup-token readport:ci
           ok=""
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8383/api/health; then ok=1; break; fi
@@ -59,21 +59,21 @@ jobs:
 
           # Setup without / with a wrong token must be refused.
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
-            -H 'content-type: application/json' -H 'x-vx-csrf: 1' \
+            -H 'content-type: application/json' -H 'x-rp-csrf: 1' \
             -d '{"username":"admin","password":"smoke-password-123"}')
           [ "$code" = "400" ] || (echo "tokenless setup returned $code"; exit 1)
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
-            -H 'content-type: application/json' -H 'x-vx-csrf: 1' \
+            -H 'content-type: application/json' -H 'x-rp-csrf: 1' \
             -d '{"username":"admin","password":"smoke-password-123","setupToken":"wrong-token"}')
           [ "$code" = "403" ] || (echo "wrong-token setup returned $code"; exit 1)
 
           # Correct token creates the admin; a second attempt is closed.
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
-            -H 'content-type: application/json' -H 'x-vx-csrf: 1' \
+            -H 'content-type: application/json' -H 'x-rp-csrf: 1' \
             -d '{"username":"admin","password":"smoke-password-123","setupToken":"ci-smoke-setup-token"}')
           [ "$code" = "200" ] || (echo "valid setup returned $code"; docker logs tl; exit 1)
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8383/api/setup \
-            -H 'content-type: application/json' -H 'x-vx-csrf: 1' \
+            -H 'content-type: application/json' -H 'x-rp-csrf: 1' \
             -d '{"username":"other","password":"smoke-password-123","setupToken":"ci-smoke-setup-token"}')
           [ "$code" = "409" ] || (echo "second setup returned $code"; exit 1)
           docker rm -f tl

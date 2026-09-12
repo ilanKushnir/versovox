@@ -1,4 +1,4 @@
-# Versovox production image
+# ReadPort production image
 # Multi-stage: build workspaces with dev deps, then a slim non-root runtime
 # with ffmpeg/ffprobe. SQLite is node:sqlite; the one native module is
 # onnxruntime-node, whose darwin and win32 binaries are pruned below.
@@ -18,9 +18,9 @@ COPY tsconfig.base.json ./
 COPY shared shared
 COPY server server
 COPY web web
-RUN npm run build --workspace @versovox/shared \
- && npm run build --workspace @versovox/server \
- && npm run build --workspace @versovox/web
+RUN npm run build --workspace @readport/shared \
+ && npm run build --workspace @readport/server \
+ && npm run build --workspace @readport/web
 
 # Production node_modules only (server runtime deps).
 FROM node:26-slim AS deps
@@ -41,14 +41,14 @@ FROM node:26-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg gosu tini wget ca-certificates libgomp1 \
  && rm -rf /var/lib/apt/lists/*
-COPY docker/versovox-model /usr/local/bin/versovox-model
+COPY docker/readport-model /usr/local/bin/readport-model
 WORKDIR /app
 ENV NODE_ENV=production \
-    VX_DATA_DIR=/data \
-    VX_CACHE_DIR=/cache \
-    VX_MODELS_DIR=/models \
-    VX_HOST=0.0.0.0 \
-    VX_PORT=8383
+    RP_DATA_DIR=/data \
+    RP_CACHE_DIR=/cache \
+    RP_MODELS_DIR=/models \
+    RP_HOST=0.0.0.0 \
+    RP_PORT=8383
 
 COPY --from=deps /app/node_modules node_modules
 COPY --from=build /app/shared/dist shared/dist
@@ -59,18 +59,18 @@ COPY --from=build /app/web/dist web/dist
 COPY package.json LICENSE ./
 COPY docker/entrypoint.sh /entrypoint.sh
 # The node base image ships a `node` user at 1000:1000; remove it so
-# `versovox` can take that UID/GID.
-RUN chmod +x /entrypoint.sh /usr/local/bin/versovox-model \
+# `readport` can take that UID/GID.
+RUN chmod +x /entrypoint.sh /usr/local/bin/readport-model \
  && userdel -r node \
  && if getent group node >/dev/null; then groupdel node; fi \
- && groupadd -g 1000 versovox \
- && useradd -m -u 1000 -g versovox -s /usr/sbin/nologin versovox \
+ && groupadd -g 1000 readport \
+ && useradd -m -u 1000 -g readport -s /usr/sbin/nologin readport \
  && mkdir -p /data /cache /models \
- && chown -R versovox:versovox /data /cache /models
+ && chown -R readport:readport /data /cache /models
 
 EXPOSE 8383
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:${VX_PORT}/api/health || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:${RP_PORT}/api/health || exit 1
 
 # Entrypoint runs as root only to align UID/GID with PUID/PGID and chown the
 # writable volumes, then drops privileges with gosu. No Docker socket, no

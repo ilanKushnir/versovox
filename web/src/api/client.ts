@@ -106,7 +106,7 @@ export async function api<T>(
       signal: opts.signal,
       keepalive: opts.keepalive,
       headers: {
-        'x-vx-csrf': '1',
+        'x-rp-csrf': '1',
         ...(hasBody ? { 'content-type': 'application/json' } : {}),
         ...(opts.headers ?? {}),
       },

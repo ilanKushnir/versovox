@@ -1,5 +1,5 @@
 import { type FastifyInstance } from 'fastify';
-import { alignManySchema, locatorSchema } from '@versovox/shared';
+import { alignManySchema, locatorSchema } from '@readport/shared';
 import { z } from 'zod';
 import { requireRole } from '../../auth/roles.js';
 import { resolveSettings } from '../../domain/settings.js';

@@ -1,9 +1,9 @@
 name: Build & publish Docker image
 
-# Publishes ghcr.io/ilankushnir/versovox on every push to main (":main" +
-# ":sha-…") and on release tags ("v0.2.0" → ":0.2.0" + ":latest"). The image
-# bundles ffmpeg and a whisper.cpp `whisper-cli` build, so a self-hoster
-# only has to mount a model into /models for sentence-level alignment.
+# Publishes ghcr.io/ilankushnir/readport on every push to main (":main" +
+# ":sha-…") and on release tags ("v0.9.0" → ":0.9.0" + ":latest"). The image
+# carries ffmpeg and the alignment runtime; the acoustic model is not bundled
+# and is downloaded once, by the operator, into the models volume.
 
 on:
   push:

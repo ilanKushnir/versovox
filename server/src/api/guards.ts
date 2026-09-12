@@ -4,7 +4,7 @@ import { type AppContext } from '../context.js';
 import { resolveSession, type SessionUser } from '../auth/sessions.js';
 import { buildSourceList, proxyAuthUser } from '../auth/proxyAuth.js';
 
-export const SESSION_COOKIE = 'vx_session';
+export const SESSION_COOKIE = 'rp_session';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -20,7 +20,7 @@ function proxySources(ctx: AppContext): BlockList | null {
     const list = buildSourceList(ctx.config.proxyAuthSources);
     if (ctx.config.proxyAuthHeader && !list) {
       ctx.log.warn(
-        'VX_PROXY_AUTH_HEADER is set but VX_PROXY_AUTH_SOURCES is empty — proxy sign-in stays disabled (fail closed).',
+        'RP_PROXY_AUTH_HEADER is set but RP_PROXY_AUTH_SOURCES is empty — proxy sign-in stays disabled (fail closed).',
       );
     }
     sourceLists.set(ctx, list);
@@ -31,14 +31,14 @@ function proxySources(ctx: AppContext): BlockList | null {
 /**
  * CSRF defense in depth for cookie-authenticated mutations:
  *  1. Session cookie is SameSite=Lax (blocks cross-site POST subresources).
- *  2. Mutating requests must carry the custom `x-vx-csrf: 1` header, which a
+ *  2. Mutating requests must carry the custom `x-rp-csrf: 1` header, which a
  *     cross-origin form/img cannot set.
  *  3. When Origin / Sec-Fetch-Site headers are present they must indicate a
  *     same-origin request.
  */
 export function csrfCheck(req: FastifyRequest): boolean {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return true;
-  if (req.headers['x-vx-csrf'] !== '1') return false;
+  if (req.headers['x-rp-csrf'] !== '1') return false;
   const secFetchSite = req.headers['sec-fetch-site'];
   if (typeof secFetchSite === 'string' && !['same-origin', 'none'].includes(secFetchSite)) {
     return false;

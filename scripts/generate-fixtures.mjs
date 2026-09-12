@@ -106,8 +106,8 @@ ${navLis.map((l) => '  ' + l).join('\n')}
     <dc:title>${title}</dc:title>
     <dc:creator>${author}</dc:creator>
     <dc:language>${language}</dc:language>
-    <dc:publisher>Versovox Samples</dc:publisher>
-    <dc:description>An original sample story bundled with Versovox for demonstration and testing.</dc:description>
+    <dc:publisher>ReadPort Samples</dc:publisher>
+    <dc:description>An original sample story bundled with ReadPort for demonstration and testing.</dc:description>
     <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
   </metadata>
   <manifest>
@@ -314,7 +314,7 @@ async function main() {
       const ch = b.chapters[i];
       const sentences = [];
       if (i === 0) {
-        sentences.push('This is a Versovox sample narration of an original story.');
+        sentences.push('This is a ReadPort sample narration of an original story.');
       }
       sentences.push(`Chapter ${i + 1}. ${ch.title}.`);
       for (const p of ch.paragraphs) sentences.push(...p);

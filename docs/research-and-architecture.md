@@ -9,22 +9,22 @@ language and no per-language packs — and finished alignments are written out
 as portable files rather than living only in the database. Where this document
 and [alignment.md](alignment.md) disagree, alignment.md is the code.
 
-## Existing stack: what Versovox should and should not own
+## Existing stack: what ReadPort should and should not own
 
-| App                                                            | Existing responsibility                                                                                                             | Useful integration surface                                                                            | Versovox boundary                                                                                                                            |
+| App                                                            | Existing responsibility                                                                                                             | Useful integration surface                                                                            | ReadPort boundary                                                                                                                            |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Calibre-Web Automated / Calibre                                | Ebook ingestion, conversion, metadata, shelves, OPDS, browser reading, send-to-device, library database                             | Read-only filesystem mount; OPDS as optional catalog source; Calibre metadata as an optional adapter  | Do not edit `metadata.db`, ingest, convert, rename, or reorganize files                                                                      |
-| Kavita                                                         | Scanning and presenting EPUB/PDF/comics/manga, rich metadata, built-in readers, annotations, users, REST API, OPDS/OPDS-PS          | Optional REST/OPDS adapter; read-only library mount                                                   | Do not compete as a collection manager; Versovox prioritizes prose reading, audio, offline PWA, and cross-medium sync                        |
-| Audiobookshelf                                                 | Audiobook/podcast library management, metadata, chapter tools, playback sessions, per-user progress, native apps, offline listening | Optional official REST adapter for catalog/media; plain read-only audiobook mount remains first-class | Do not write ABS progress by default; Versovox owns its own loss-resistant progress, with an opt-in bridge later                             |
+| Kavita                                                         | Scanning and presenting EPUB/PDF/comics/manga, rich metadata, built-in readers, annotations, users, REST API, OPDS/OPDS-PS          | Optional REST/OPDS adapter; read-only library mount                                                   | Do not compete as a collection manager; ReadPort prioritizes prose reading, audio, offline PWA, and cross-medium sync                        |
+| Audiobookshelf                                                 | Audiobook/podcast library management, metadata, chapter tools, playback sessions, per-user progress, native apps, offline listening | Optional official REST adapter for catalog/media; plain read-only audiobook mount remains first-class | Do not write ABS progress by default; ReadPort owns its own loss-resistant progress, with an opt-in bridge later                             |
 | Shelfmark                                                      | Search/request/download hub using sources such as Prowlarr and download clients                                                     | Deep link or webhook later                                                                            | Do not download or index acquisition sources                                                                                                 |
 | ebook2audiobook                                                | TTS conversion from ebooks to chaptered audio; optional voice/language models                                                       | Generated audiobook files can appear in an audiobook mount                                            | Do not duplicate TTS in the first product; alignment is for owned narrated audio, not voice generation                                       |
 | Storyteller (direct competitor, not currently in Ilan's stack) | Imports/manages ebook+audiobook pairs, aligns them, produces EPUB 3 Media Overlays, mobile apps                                     | Treat EPUB 3 Media Overlays as an interoperability target and study its public algorithm              | Differentiate as a non-destructive overlay for existing libraries, stricter pairing review, resilient PWA progress, and reader/player polish |
 
-The mounted-library contract must be explicit: source mounts default to `:ro`; the writable `/data`, `/cache`, and `/models` paths contain only Versovox-owned state and derived artifacts. A direct filesystem adapter is mandatory. CWA/Calibre, Kavita, and Audiobookshelf adapters are optional conveniences, not required dependencies.
+The mounted-library contract must be explicit: source mounts default to `:ro`; the writable `/data`, `/cache`, and `/models` paths contain only ReadPort-owned state and derived artifacts. A direct filesystem adapter is mandatory. CWA/Calibre, Kavita, and Audiobookshelf adapters are optional conveniences, not required dependencies.
 
 ## Product wedge
 
-Versovox is not “another self-hosted library.” It is the **reading layer** missing from many self-hosted stacks:
+ReadPort is not “another self-hosted library.” It is the **reading layer** missing from many self-hosted stacks:
 
 - one elegant library surface for prose ebooks and audiobooks already managed elsewhere;
 - an Apple-Books-quality ebook reader and a first-class audiobook player;
@@ -96,7 +96,7 @@ This improves on a simple per-sentence fuzzy search because it preserves global 
 
 ### D. Interoperability
 
-Store a neutral internal alignment graph first. A future exporter can create sentence spans and SMIL overlays conforming to EPUB 3 Media Overlays. Do not mutate the mounted source EPUB; write an optional derived export under Versovox data.
+Store a neutral internal alignment graph first. A future exporter can create sentence spans and SMIL overlays conforming to EPUB 3 Media Overlays. Do not mutate the mounted source EPUB; write an optional derived export under ReadPort data.
 
 ## Two-way handoff model
 
@@ -152,7 +152,7 @@ Prefer a small monorepo with a TypeScript web/API surface and an isolated Python
 
 Compose should expose:
 
-- `versovox`: web + API, non-root, healthcheck;
+- `readport`: web + API, non-root, healthcheck;
 - `worker`: bounded scan/transcription/alignment jobs, non-root, optional profile for GPU;
 - named/local volumes for `/data`, `/cache`, `/models`;
 - sample read-only mounts for `/library/ebooks` and `/library/audiobooks`;

@@ -2,7 +2,7 @@
  * Status-bar / browser-chrome colour. iOS home-screen web apps paint the
  * status bar from the `theme-color` meta; WebKit watches the meta element,
  * but standalone launches have been seen to keep the launch value when only
- * the `content` attribute of a media-scoped meta changes. So Versovox keeps
+ * the `content` attribute of a media-scoped meta changes. So ReadPort keeps
  * a SINGLE un-scoped meta and replaces the element on every change — the
  * form WebKit is documented to observe — and mirrors the colour onto the
  * root background so nothing behind the bar can flash the old colour.
@@ -33,7 +33,7 @@ export function appThemeColor(pref: string | null): string {
 export function applyAppThemeColor(): void {
   let pref: string | null = null;
   try {
-    pref = localStorage.getItem('vx-app-theme');
+    pref = localStorage.getItem('rp-app-theme');
   } catch {
     /* private mode */
   }

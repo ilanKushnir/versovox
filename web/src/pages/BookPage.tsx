@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { type AudioLocator, type EbookLocator } from '@versovox/shared';
+import { type AudioLocator, type EbookLocator } from '@readport/shared';
 import { api, isOffline } from '../api/client';
 import { type Annotation, type BookDetail, type ResolveResponse } from '../lib/types';
 import { Cover, EmptyState, Sheet, useToast } from '../components/ui';
@@ -502,7 +502,7 @@ export function BookPage() {
               <span className="grow" style={{ whiteSpace: 'normal' }}>
                 {a.selectedText ?? a.note ?? (a.kind === 'bookmark' ? 'Bookmark' : a.kind)}
                 {a.note && a.selectedText && (
-                  <span style={{ display: 'block', fontSize: 13, color: 'var(--vx-text-soft)' }}>
+                  <span style={{ display: 'block', fontSize: 13, color: 'var(--rp-text-soft)' }}>
                     {a.note}
                   </span>
                 )}
@@ -516,7 +516,7 @@ export function BookPage() {
       {detail.description && (
         <section style={{ maxWidth: '65ch' }}>
           <h2 className="section-title">About</h2>
-          <p style={{ color: 'var(--vx-text-soft)' }}>{detail.description}</p>
+          <p style={{ color: 'var(--rp-text-soft)' }}>{detail.description}</p>
         </section>
       )}
       {detail.chapters.length === 0 && annotations.length === 0 && !detail.description && (

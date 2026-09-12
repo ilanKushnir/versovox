@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { type FolderKind, type PathCheck } from '@versovox/shared';
+import { type FolderKind, type PathCheck } from '@readport/shared';
 import { AUDIO_EXTS, EBOOK_EXTS } from '../scanner/scan.js';
 
 /**
@@ -42,13 +42,13 @@ export function checkLibraryPath(p: string, kind?: FolderKind): PathCheck {
   }
   base.readable = true;
 
-  // An alignment folder is the one place Versovox writes, and a read-only bind
+  // An alignment folder is the one place ReadPort writes, and a read-only bind
   // mount is the likeliest mistake in the whole setup — every other library
   // line in the stock compose file ends in `:ro` and people copy the pattern.
   // Permission bits are not enough to tell: the only honest test is to write.
   if (kind === 'alignment') {
     let writable = false;
-    const probe = path.join(abs, `.versovox-write-test-${process.pid}`);
+    const probe = path.join(abs, `.readport-write-test-${process.pid}`);
     try {
       fs.writeFileSync(probe, '');
       fs.unlinkSync(probe);
@@ -63,7 +63,7 @@ export function checkLibraryPath(p: string, kind?: FolderKind): PathCheck {
       writable,
       matches: files,
       sampled: false,
-      problem: writable ? null : 'Readable, but Versovox cannot save alignments here',
+      problem: writable ? null : 'Readable, but ReadPort cannot save alignments here',
     };
   }
 
@@ -108,7 +108,7 @@ export function checkLibraryPath(p: string, kind?: FolderKind): PathCheck {
 /** Saved alignments already sitting in a folder, for "found N of these". */
 function countAlignmentFiles(dir: string): number {
   try {
-    return fs.readdirSync(dir).filter((n) => !n.startsWith('.') && n.endsWith('.vxalign')).length;
+    return fs.readdirSync(dir).filter((n) => !n.startsWith('.') && n.endsWith('.rpalign')).length;
   } catch {
     return 0;
   }
@@ -128,7 +128,7 @@ export interface BrowseEntry {
 /**
  * Directories this container has mounted from the host, read from the kernel
  * rather than guessed. In a container these are the only places that can hold
- * anything Versovox can see, so the picker points straight at them and the UI
+ * anything ReadPort can see, so the picker points straight at them and the UI
  * marks them. Returns [] where mountinfo is unavailable (plain host runs).
  */
 export function containerMounts(

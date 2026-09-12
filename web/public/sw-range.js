@@ -48,12 +48,12 @@
 
   /** Cache key for chunk `i` of `url` (query param — fragments are stripped by Cache API). */
   function chunkKey(url, i) {
-    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'vxchunk=' + i;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'rpchunk=' + i;
   }
 
   /** Cache key for the stored metadata entry of a chunked resource. */
   function metaKey(url) {
-    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'vxmeta=1';
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'rpmeta=1';
   }
 
   /**

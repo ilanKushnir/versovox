@@ -1,19 +1,19 @@
-# Self-hosting Versovox
+# Self-hosting ReadPort
 
-Versovox is a single Docker container (plus an optional worker) in front of
+ReadPort is a single Docker container (plus an optional worker) in front of
 your existing libraries. Your book folders are mounted **read-only** and are
 never modified. There is one deliberate exception: an alignment folder,
 mounted read-write, where finished alignments are saved as files so the hours
-of CPU that produced them outlive the container. Everything else Versovox
+of CPU that produced them outlive the container. Everything else ReadPort
 creates lives in its own volumes.
 
 ## Quick start (Docker Compose)
 
 ```bash
-git clone https://github.com/YOUR_ORG/versovox && cd versovox
+git clone https://github.com/YOUR_ORG/readport && cd readport
 cp .env.example .env
 # Required: set a session secret
-sed -i "s/^VX_SESSION_SECRET=.*/VX_SESSION_SECRET=$(openssl rand -hex 32)/" .env
+sed -i "s/^RP_SESSION_SECRET=.*/RP_SESSION_SECRET=$(openssl rand -hex 32)/" .env
 # Point the library mounts in docker-compose.yml at your real folders
 docker compose up -d --build
 ```
@@ -34,12 +34,12 @@ exact two-way switching immediately.
 | `/models`             | The alignment model                                | Holds the 317 MB aligner (`mms-fa/`) once downloaded. One model, every language.                                            |
 | `/library/ebooks`     | Your ebook library                                 | `:ro` — read-only, required posture.                                                                                        |
 | `/library/audiobooks` | Your audiobook library                             | `:ro`                                                                                                                       |
-| `/library/alignments` | Finished alignments, one `.vxalign` file per pair  | **Read-write**, on purpose — never `:ro`. The only folder Versovox writes into, and the one worth keeping across a rebuild. |
+| `/library/alignments` | Finished alignments, one `.rpalign` file per pair  | **Read-write**, on purpose — never `:ro`. The only folder ReadPort writes into, and the one worth keeping across a rebuild. |
 
 Your libraries can be the folders already used by Calibre / Calibre-Web
 Automated (`.../Calibre Library`), Kavita, Audiobookshelf
 (`Author/Title/*.m4b|mp3`), Shelfmark output, or any plain folder tree.
-Versovox detects `.epub` files and `.m4b/.mp3/.m4a/.flac/.ogg/.opus` audio
+ReadPort detects `.epub` files and `.m4b/.mp3/.m4a/.flac/.ogg/.opus` audio
 (one directory per multi-file book).
 
 The alignment folder is one you make yourself, anywhere you like — beside the
@@ -47,7 +47,7 @@ books, or on the same share. It is the one library mount without `:ro`, and it
 has to be writable by the container user: the entrypoint takes ownership of `/data`,
 `/cache` and `/models` and deliberately never touches anything under
 `/library`, so `chown` it to your `PUID`/`PGID` on the host. Leave
-`VX_ALIGNMENT_DIRS` unset and alignments are kept in `<data>/alignments`
+`RP_ALIGNMENT_DIRS` unset and alignments are kept in `<data>/alignments`
 instead, which survives a restart but goes down with the volume when you
 rebuild from scratch.
 
@@ -61,14 +61,14 @@ model and it covers every language, because it works on a romanized character
 stream rather than on words — a Russian audiobook costs it no more than an
 English one. Its licence is **CC-BY-NC-4.0 — non-commercial**, shown on the
 card before the download starts; it is the only non-permissive component in
-the project, so do not install it if you are running Versovox commercially.
+the project, so do not install it if you are running ReadPort commercially.
 
 The same download from the command line, for a server with no browser pointed
 at it:
 
 ```bash
-docker compose exec versovox versovox-model install
-docker compose exec versovox versovox-model status
+docker compose exec readport readport-model install
+docker compose exec readport readport-model status
 ```
 
 Or copy `model_int8.onnx`, `vocab.json` and `config.json` into
@@ -78,7 +78,7 @@ An alignment that was waiting for the model starts on its own once they land.
 Nothing else has to be switched on. A book's language is settled by the pair's
 own override, then the EPUB's `dc:language`, then the audio tags, then the
 ebook's own text; only when none of those says anything does
-`VX_DEFAULT_LANGUAGE` decide. No model and no clip of the narration is
+`RP_DEFAULT_LANGUAGE` decide. No model and no clip of the narration is
 involved in that question.
 
 `POST /api/preflight` (and the setup wizard, which calls it) answers "can
@@ -90,7 +90,7 @@ with a concrete detail and a fix.
 Then start a pair from the Pairing page. At the default `standard` precision,
 which listens to about 7% of the narration and interpolates between the
 matches, a six-hour audiobook takes roughly six minutes on the six-CPU
-container these figures were measured on (`VX_ALIGN_THREADS=4`). The Pairing
+container these figures were measured on (`RP_ALIGN_THREADS=4`). The Pairing
 page states what this server will take for that particular book, from the
 speed it measured on the books before it. Full detail, including what the
 aligner refuses and why, is in [alignment.md](alignment.md).
@@ -100,7 +100,7 @@ aligner refuses and why, is in [alignment.md](alignment.md).
 Aligning is the only expensive thing this server ever does, and a container is
 a disposable thing. So a finished alignment is not only a row in the database:
 it is also written into the alignment folder as one self-contained file,
-`<author> - <title> [<key>].vxalign` — gzipped JSON, readable with
+`<author> - <title> [<key>].rpalign` — gzipped JSON, readable with
 `gunzip -c` if you ever want to see what you are keeping.
 
 Those files find their way back to books by fingerprint, never by path,
@@ -140,18 +140,18 @@ is used, and `no-new-privileges` is enabled in the compose file.
 ## Reverse proxy and HTTPS (required for the PWA)
 
 Installable PWAs and service workers require HTTPS (or `localhost`). Put any
-TLS-terminating proxy in front and set `VX_TRUST_HTTPS=1` so session cookies
+TLS-terminating proxy in front and set `RP_TRUST_HTTPS=1` so session cookies
 are marked `Secure`.
 
 Caddy example:
 
 ```
 books.example.com {
-    reverse_proxy versovox:8383
+    reverse_proxy readport:8383
 }
 ```
 
-nginx: proxy `/` to `versovox:8383` with `proxy_set_header Host $host;`
+nginx: proxy `/` to `readport:8383` with `proxy_set_header Host $host;`
 and websocket defaults are not needed (no websockets). Body size defaults are
 fine — clients never upload media.
 
@@ -160,18 +160,18 @@ standalone, offline-capable app.
 
 ### Behind Authentik / Authelia / oauth2-proxy (single sign-on)
 
-If your proxy already authenticates users, let Versovox trust it instead of
+If your proxy already authenticates users, let ReadPort trust it instead of
 showing a second login (details and the threat model in docs/security.md):
 
 ```yaml
 # Traefik: the authentik forward-auth middleware must forward the username
 # header (authResponseHeaders: [X-authentik-username, …]).
 environment:
-  VX_TRUST_PROXY: 192.168.1.50 # the proxy's address(es)
-  VX_TRUST_HTTPS: '1'
-  VX_PROXY_AUTH_HEADER: x-authentik-username
-  VX_PROXY_AUTH_SOURCES: 192.168.1.50/32 # header trusted only from this TCP peer
-  VX_PROXY_AUTH_ADMINS: ilan # optional; first user is admin anyway
+  RP_TRUST_PROXY: 192.168.1.50 # the proxy's address(es)
+  RP_TRUST_HTTPS: '1'
+  RP_PROXY_AUTH_HEADER: x-authentik-username
+  RP_PROXY_AUTH_SOURCES: 192.168.1.50/32 # header trusted only from this TCP peer
+  RP_PROXY_AUTH_ADMINS: ilan # optional; first user is admin anyway
 ```
 
 The direct LAN port keeps the normal password login (a header sent straight to
@@ -180,7 +180,7 @@ account there first if you want a break-glass path.
 
 ## Resource and concurrency controls
 
-- `VX_JOB_CONCURRENCY` (default 2) bounds simultaneous alignments; scans,
+- `RP_JOB_CONCURRENCY` (default 2) bounds simultaneous alignments; scans,
   indexing, pairing and model downloads run in their own lanes beside them.
   A job interrupted by a container restart is re-queued, not failed.
 - The compose file sets container memory limits; adjust to taste.
@@ -190,37 +190,37 @@ account there first if you want a break-glass path.
   narration instead of sampling it, for sentence-perfect timings at roughly
   fifteen times the cost; it is a per-server choice under Settings →
   Alignment, not a per-book one.
-- `VX_ALIGN_THREADS` (default 4) caps the threads the model may use. Past the
+- `RP_ALIGN_THREADS` (default 4) caps the threads the model may use. Past the
   container's CPU allowance it gets slower rather than faster, so set it to
   that allowance and not to the host's core count — and remember that it
-  multiplies with `VX_JOB_CONCURRENCY`, since each alignment asks for that many
+  multiplies with `RP_JOB_CONCURRENCY`, since each alignment asks for that many
   threads of its own.
 - Nothing heavy runs until a pair is actually aligned: an idle instance
   scanning and serving books is cheap.
 - For big libraries, run the dedicated worker:
-  `docker compose --profile worker up -d` with `VX_INLINE_WORKER=0` on the
+  `docker compose --profile worker up -d` with `RP_INLINE_WORKER=0` on the
   web service. Both share `/data` (same host volume) safely.
 
 ## Backup and restore
 
-Everything Versovox owns is in the `/data` volume (the `/cache` and
+Everything ReadPort owns is in the `/data` volume (the `/cache` and
 `/models` volumes are reproducible).
 
 ```bash
 # Backup (container can stay up; SQLite is WAL with a single writer host)
-docker compose stop versovox   # optional but recommended for a clean copy
-docker run --rm -v versovox_vx-data:/data -v "$PWD":/backup alpine \
-  tar czf /backup/versovox-data-$(date +%F).tar.gz -C /data .
-docker compose start versovox
+docker compose stop readport   # optional but recommended for a clean copy
+docker run --rm -v readport_vx-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/readport-data-$(date +%F).tar.gz -C /data .
+docker compose start readport
 
 # Restore
 docker compose down
-docker run --rm -v versovox_vx-data:/data -v "$PWD":/backup alpine \
-  sh -c "rm -rf /data/* && tar xzf /backup/versovox-data-YYYY-MM-DD.tar.gz -C /data"
+docker run --rm -v readport_vx-data:/data -v "$PWD":/backup alpine \
+  sh -c "rm -rf /data/* && tar xzf /backup/readport-data-YYYY-MM-DD.tar.gz -C /data"
 docker compose up -d
 ```
 
-Your book folders are read-only sources and are not part of Versovox backups.
+Your book folders are read-only sources and are not part of ReadPort backups.
 The alignment folder is not either, and does not need to be: it is already the
 portable copy, and either it or a restored `/data` brings the timings back on
 its own. Back it up with the rest of your library only if you would rather not
@@ -229,7 +229,7 @@ recompute anything after losing both.
 ## Upgrades and migrations
 
 ```bash
-git pull            # or: docker pull ghcr.io/OWNER/versovox:latest
+git pull            # or: docker pull ghcr.io/OWNER/readport:latest
 docker compose up -d --build
 ```
 
@@ -241,16 +241,16 @@ recorded in `schema_migrations`). Downgrades are not supported — restore the
 
 | Symptom                                                   | Likely cause / fix                                                                                                                                                                                                                                                                                                                             |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Library is empty after setup                              | Check the `:ro` mounts exist inside the container (`docker compose exec versovox ls /library/ebooks`) and rescan from Settings.                                                                                                                                                                                                                |
-| Books stuck in "Indexing…"                                | See Settings → Background activity for the job error; `docker compose logs versovox`.                                                                                                                                                                                                                                                          |
+| Library is empty after setup                              | Check the `:ro` mounts exist inside the container (`docker compose exec readport ls /library/ebooks`) and rescan from Settings.                                                                                                                                                                                                                |
+| Books stuck in "Indexing…"                                | See Settings → Background activity for the job error; `docker compose logs readport`.                                                                                                                                                                                                                                                          |
 | Nothing ever starts aligning                              | The model is not downloaded (Settings → Alignment), or unattended alignment is off (Settings → Alignment → _Align new matches automatically_), or the metadata match was not confident enough to run without being asked — confirm it on the Pairing page and it aligns immediately.                                                           |
-| Alignment fails with "model is not installed"             | Download the alignment model in Settings → Alignment, or run `versovox-model install`; the Pairing page turns the error into a one-click download and re-queues the alignment when the files land.                                                                                                                                             |
+| Alignment fails with "model is not installed"             | Download the alignment model in Settings → Alignment, or run `readport-model install`; the Pairing page turns the error into a one-click download and re-queues the alignment when the files land.                                                                                                                                             |
 | Pairing says the narration is not the same work           | The aligner found almost no matching passages. That usually means an abridged, dramatized or differently translated edition — a correct pair produces hundreds of anchors per thousand characters. Confirm the pair manually only if you are sure.                                                                                             |
 | Nothing appears in the alignment folder                   | The mount is `:ro`, or the host folder is not writable by `PUID`/`PGID`. Settings → Libraries → Alignment folder says which, and the alignments are safe in `<data>/alignments` meanwhile — fix the mount and press _Save all alignments to this folder_.                                                                                      |
 | A rebuilt install did not take its alignments back        | The saved files no longer describe these files: a re-encoded audiobook (different track durations) or a different EPUB of the same title (different sentence ids) is a different pair, and its timings would be wrong. Aligning again is the only honest fix.                                                                                  |
-| A book shows "Indexing failed"                            | The EPUB may be malformed or DRM-protected. Versovox does not remove DRM.                                                                                                                                                                                                                                                                      |
+| A book shows "Indexing failed"                            | The EPUB may be malformed or DRM-protected. ReadPort does not remove DRM.                                                                                                                                                                                                                                                                      |
 | "Add to Home Screen" gives a browser shortcut, not an app | You are not on HTTPS. See the reverse-proxy section.                                                                                                                                                                                                                                                                                           |
 | m4b won't play in Firefox/Chromium                        | AAC decoding is missing from some open-source browser builds. Chrome, Edge and Safari play m4b/m4a; mp3/flac/ogg play everywhere.                                                                                                                                                                                                              |
 | Progress didn't sync from my phone                        | It is queued locally (IndexedDB) and reconciles on the next reachable sync; nothing is lost.                                                                                                                                                                                                                                                   |
 | Login says "Too many attempts"                            | Login throttle: 10 tries per account from one IP, 30 from that IP across all accounts, both over 5 minutes. Wait a few minutes.                                                                                                                                                                                                                |
-| Reset the admin password                                  | Stop the stack, delete the `users`/`sessions` rows: `docker compose run --rm versovox node -e "const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync('/data/versovox.db');d.exec('DELETE FROM sessions; DELETE FROM users;')"` — the next visit shows first-run setup again. Reading progress and pair decisions are preserved. |
+| Reset the admin password                                  | Stop the stack, delete the `users`/`sessions` rows: `docker compose run --rm readport node -e "const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync('/data/readport.db');d.exec('DELETE FROM sessions; DELETE FROM users;')"` — the next visit shows first-run setup again. Reading progress and pair decisions are preserved. |

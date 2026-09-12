@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { type AudioLocator, type EbookLocator } from '@versovox/shared';
+import { type AudioLocator, type EbookLocator } from '@readport/shared';
 import { api, isOffline, notifyUnauthorized } from '../api/client';
 import { cachedSwitch } from '../offline/downloads';
 import {
@@ -221,7 +221,7 @@ export function ReaderPage() {
         const [res, sen] = await Promise.all([
           fetch(`/api/books/${id}/chapter/${spineIdx}`, {
             credentials: 'same-origin',
-            headers: { 'x-vx-csrf': '1' },
+            headers: { 'x-rp-csrf': '1' },
           }),
           api<{ sentences: SentenceIndexEntry[] }>(`/api/books/${id}/sentences/${spineIdx}`).catch(
             () => ({ sentences: [] as SentenceIndexEntry[] }),
@@ -1101,8 +1101,8 @@ export function ReaderPage() {
                 ref={contentRef}
                 className="reader-content reader-content--paginated"
                 style={{
-                  transition: 'transform 200ms var(--vx-ease)',
-                  padding: `calc(72px + var(--vx-safe-top)) ${margins.padding}px calc(64px + var(--vx-safe-bottom))`,
+                  transition: 'transform 200ms var(--rp-ease)',
+                  padding: `calc(72px + var(--rp-safe-top)) ${margins.padding}px calc(64px + var(--rp-safe-bottom))`,
                 }}
                 onPointerDown={(e) => {
                   swipeRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
@@ -1387,7 +1387,7 @@ export function ReaderPage() {
           </div>
           {contentsTab === 'marks' &&
             (annotations.length === 0 ? (
-              <p style={{ color: 'var(--vx-text-soft)' }}>
+              <p style={{ color: 'var(--rp-text-soft)' }}>
                 No bookmarks yet. Tap the ribbon icon while reading to mark a page; select text to
                 highlight or add a note.
               </p>
@@ -1499,7 +1499,7 @@ export function ReaderPage() {
           }}
         >
           {selection && !editingNote && (
-            <blockquote style={{ color: 'var(--vx-text-soft)', fontSize: 14, margin: '0 0 12px' }}>
+            <blockquote style={{ color: 'var(--rp-text-soft)', fontSize: 14, margin: '0 0 12px' }}>
               “{selection.text.slice(0, 160)}
               {selection.text.length > 160 ? '…' : ''}”
             </blockquote>
@@ -1565,7 +1565,7 @@ function interceptLink(
 ): void {
   const a = (e.target as Element).closest('a');
   if (!a) return;
-  const internal = a.getAttribute('data-vx-href');
+  const internal = a.getAttribute('data-rp-href');
   if (internal) {
     e.preventDefault();
     const [file, frag] = internal.split('#');
@@ -1617,12 +1617,12 @@ function paintHandoff(map: TextMap, start: number, end: number): () => void {
   if (!css.highlights || typeof Highlight === 'undefined') return () => {};
   const r = rangeForSpan(map, start, end);
   if (!r) return () => {};
-  css.highlights.set('vx-handoff', new Highlight(r));
+  css.highlights.set('rp-handoff', new Highlight(r));
   let cleared = false;
   const clear = () => {
     if (cleared) return;
     cleared = true;
-    setTimeout(() => css.highlights!.delete('vx-handoff'), 400);
+    setTimeout(() => css.highlights!.delete('rp-handoff'), 400);
   };
   setTimeout(clear, 12000);
   return clear;
@@ -1890,12 +1890,12 @@ function SearchSheet({
       </form>
       {results !== null &&
         (results.length === 0 ? (
-          <p style={{ color: 'var(--vx-text-soft)' }}>No matches.</p>
+          <p style={{ color: 'var(--rp-text-soft)' }}>No matches.</p>
         ) : (
           results.map((r, i) => (
             <button key={i} className="list-row" onClick={() => onJump(r.spineIdx, r.charOffset)}>
               <span className="grow" style={{ whiteSpace: 'normal' }}>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--vx-text-soft)' }}>
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--rp-text-soft)' }}>
                   {r.chapterTitle ?? `Chapter ${r.spineIdx + 1}`}
                 </span>
                 {r.excerpt}

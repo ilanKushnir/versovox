@@ -6,7 +6,7 @@ import {
   type ProgressEvent,
   type ProgressIntent,
   type ProgressState,
-} from '@versovox/shared';
+} from '@readport/shared';
 import { api, ApiError, isOffline } from '../api/client';
 import { idbAll, idbClear, idbDelete, idbGet, idbPut, STORES } from './idb';
 
@@ -23,10 +23,10 @@ import { idbAll, idbClear, idbDelete, idbGet, idbPut, STORES } from './idb';
 
 function getDeviceId(): string {
   try {
-    let id = localStorage.getItem('vx-device-id');
+    let id = localStorage.getItem('rp-device-id');
     if (!id) {
       id = crypto.randomUUID();
-      localStorage.setItem('vx-device-id', id);
+      localStorage.setItem('rp-device-id', id);
     }
     return id;
   } catch {
@@ -49,7 +49,7 @@ let seq = 0;
  * browser can never inherit — or silently publish — someone else's reading
  * positions.
  */
-const OWNER_KEY = 'vx-progress-owner';
+const OWNER_KEY = 'rp-progress-owner';
 /** Fallback when storage is unavailable (private mode): at least keep the
  *  owner right for the lifetime of this page. */
 let ownerFallback: string | null = null;
@@ -202,7 +202,7 @@ export function setActiveLocatorProvider(fn: ActiveLocatorProvider): () => void 
  * idempotent (eventId), so a stash that turns out to have been stored or
  * delivered already costs nothing.
  */
-const STASH_KEY = 'vx-progress-stash';
+const STASH_KEY = 'rp-progress-stash';
 const STASH_MAX = 20;
 
 function readStash(): ProgressEvent[] {

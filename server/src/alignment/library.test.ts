@@ -146,7 +146,7 @@ function seedAlignment(c: AppContext, pairId: string): void {
 }
 
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-alignlib-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-alignlib-'));
   ctx = makeContext('first');
 });
 
@@ -163,7 +163,7 @@ describe('saving an alignment as a file', () => {
     const written = saveAlignmentFile(ctx, pairId);
 
     expect(written).not.toBeNull();
-    expect(path.basename(written!)).toMatch(/^A Writer - The Lantern \[[0-9a-f]{12}\]\.vxalign$/);
+    expect(path.basename(written!)).toMatch(/^A Writer - The Lantern \[[0-9a-f]{12}\]\.rpalign$/);
     const read = readAlignmentFile(written!);
     expect(read.ok).toBe(true);
     if (!read.ok) return;
@@ -229,7 +229,7 @@ describe('importing on a fresh install', () => {
       .prepare('SELECT provenance_json FROM alignments WHERE pair_id = ?')
       .get('other-p') as { provenance_json: string };
     const prov = JSON.parse(row.provenance_json);
-    expect(prov.importedFrom).toContain('.vxalign');
+    expect(prov.importedFrom).toContain('.rpalign');
     expect(prov.importedAt).toBeTruthy();
     second.db.close();
   });
@@ -353,7 +353,7 @@ describe('importing on a fresh install', () => {
     const first = seedPair(ctx);
     seedAlignment(ctx, first.pairId);
     const good = saveAlignmentFile(ctx, first.pairId)!;
-    fs.writeFileSync(path.join(path.dirname(good), 'junk [aaaaaaaaaaaa].vxalign'), 'not gzip');
+    fs.writeFileSync(path.join(path.dirname(good), 'junk [aaaaaaaaaaaa].rpalign'), 'not gzip');
 
     const second = makeContext('second');
     seedPair(second, { ebookId: 'other-e', audioId: 'other-a', pairId: 'other-p' });

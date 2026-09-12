@@ -1,6 +1,6 @@
 {
-  "name": "@versovox/shared",
-  "version": "0.8.1",
+  "name": "@readport/shared",
+  "version": "0.9.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",

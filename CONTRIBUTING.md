@@ -1,15 +1,15 @@
 # Contributing
 
-Versovox is AGPL-3.0-or-later. By contributing you agree your work is
+ReadPort is AGPL-3.0-or-later. By contributing you agree your work is
 licensed the same way.
 
 ## Repo layout
 
 ```
-shared/   @versovox/shared — canonical contracts (locators, progress
+shared/   @readport/shared — canonical contracts (locators, progress
           events + reconciliation, alignment types, the language list,
           API DTOs; zod schemas)
-server/   @versovox/server — Fastify API + background worker
+server/   @readport/server — Fastify API + background worker
   src/epub        EPUB parse / sanitize / derived-index extraction
   src/scanner     read-only library scans
   src/audio       ffprobe wrappers, offline-chunk integrity
@@ -23,19 +23,20 @@ server/   @versovox/server — Fastify API + background worker
     detect-language.ts  the book's language, read off the book's own text
     timings.ts      the only place an AlignmentSegment is constructed
     service.ts      stored alignment versions, switch resolution
-    portable.ts     the `.vxalign` file format
+    portable.ts     the `.rpalign` file format
     library.ts      the alignment folder: export, import, fingerprint match
   src/jobs        SQLite job queue + handlers + worker loop
   src/progress    append-only progress pipeline
   src/api         routes, guards (auth/CSRF), app assembly
-web/      @versovox/web — React PWA (reader, player, library, pairing,
+web/      @readport/web — React PWA (reader, player, library, pairing,
           notes and marks, settings, offline downloads, sw.js)
 fixtures/ committed sample library (original stories, synthetic narration)
 alignments/  empty and committed, so the stock compose file has somewhere
           to mount the alignment folder
+design/   the logo geometry, and the marks generated from it
 scripts/  fixture/icon generators, browser QA sweep
-docker/   entrypoint, and the versovox-model CLI that fetches the model
-docs/     you are here
+docker/   entrypoint, and the readport-model CLI that fetches the model
+docs/     the reference docs; this file is the one at the repo root
 ```
 
 ## Development
@@ -58,13 +59,13 @@ tsc's own watcher with `node --watch` behind it:
 
 ```bash
 # Terminal 1: recompile server + shared on change
-npm run build --workspace @versovox/server -- --watch
+npm run build --workspace @readport/server -- --watch
 
 # Terminal 2: API + inline worker against the sample library
-VX_EBOOK_DIRS=fixtures/library/ebooks \
-VX_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
-VX_ALIGNMENT_DIRS=./alignments \
-VX_SETUP_TOKEN=dev-setup-token \
+RP_EBOOK_DIRS=fixtures/library/ebooks \
+RP_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
+RP_ALIGNMENT_DIRS=./alignments \
+RP_SETUP_TOKEN=dev-setup-token \
 node --watch server/dist/index.js
 
 # Terminal 3: Vite dev server (proxies /api to :8383)
@@ -73,10 +74,10 @@ npm run dev:web          # http://localhost:5183
 
 Database, cache and models default to `./data`, `./cache` and `./models`, all
 gitignored; delete the first to start over from the first-run wizard.
-`VX_SETUP_TOKEN` is what unlocks that wizard, and if you do not set one the
-server generates one and prints it at startup. `VX_ALIGNMENT_DIRS` is the one
+`RP_SETUP_TOKEN` is what unlocks that wizard, and if you do not set one the
+server generates one and prints it at startup. `RP_ALIGNMENT_DIRS` is the one
 writable library root: point it at the committed `./alignments` folder and
-you will see `.vxalign` files appear there as pairs finish, and get them
+you will see `.rpalign` files appear there as pairs finish, and get them
 imported again on the next scan after you wipe the database.
 
 Production-style run: `npm run build` then `node server/dist/index.js`
@@ -117,7 +118,8 @@ per-sentence millisecond assertions possible without the model.
 
 - `npm run fixtures` — rebuilds the sample library (needs ffmpeg; speech via
   the `text2wav` espeak-ng WASM package).
-- `npm run icons` — re-rasterizes PWA icons (needs Playwright chromium).
+- `npm run icons` — re-rasterizes the favicon and PWA icons from
+  `design/logo/mark.mjs` (needs any installed Chrome or Chromium).
 
 Both outputs are committed so users and CI never need these tools.
 

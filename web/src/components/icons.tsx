@@ -1,4 +1,4 @@
-/** Versovox icon set: one consistent 24px / 1.75-stroke hand-drawn family. */
+/** ReadPort icon set: one consistent 24px / 1.75-stroke hand-drawn family. */
 
 import { type SVGProps } from 'react';
 
@@ -24,35 +24,28 @@ function I({ size = 22, children, ...rest }: P) {
 }
 
 /**
- * The Versovox mark: an open book whose right-hand page rises into a sound
- * wave — text and voice as one object. Single colour, works at 16 px.
+ * The ReadPort mark: a bookmark ribbon with a play triangle cut out of it.
+ *
+ * The triangle is a hole, not a shape on top — `evenodd` on a single path — so
+ * the mark works in one colour on any ground, and the hole shows whatever is
+ * behind it. Geometry rather than a traced logo, so it stays crisp at 16px.
  */
-export const VersoMark = ({ size = 24, ...rest }: P) => (
+export const ReadPortMark = ({ size = 24, ...rest }: P) => (
   <svg
     width={size}
     height={size}
     viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeLinecap="round"
-    strokeLinejoin="round"
+    fill="currentColor"
     aria-hidden="true"
     {...rest}
   >
-    {/* An open book: the left page holds lines of text, the right page rises
-        into a sound wave. One colour, one weight, legible down to 20px. */}
-    <g strokeWidth="1.35">
-      <path d="M12 7.6C10.4 6.2 8 5.5 5.2 5.5H3.9C3.2 5.5 2.7 6 2.7 6.7V16.8C2.7 17.4 3.2 18 3.9 18H5.2C8 18 10.4 18.7 12 20.1" />
-      <path d="M12 7.6C13.6 6.2 16 5.5 18.8 5.5H20.1C20.8 5.5 21.3 6 21.3 6.7V16.8C21.3 17.4 20.8 18 20.1 18H18.8C16 18 13.6 18.7 12 20.1" />
-      <path d="M12 7.6V20.1" />
-    </g>
-    <path d="M5.8 10.2H9.4M5.8 12.8H9.4M5.8 15.4H8.2" strokeWidth="1.3" />
-    <path d="M14.5 11.0V14.6M16.1 9.4V16.2M17.7 10.1V15.5M19.3 11.4V14.2" strokeWidth="1.3" />
+    <path
+      fillRule="evenodd"
+      // Kept byte-for-byte in step with design/logo/mark.mjs by icons.test.tsx.
+      d="M5.6 4.1 a2.3 2.3 0 0 1 2.3 -2.3 h8.2 a2.3 2.3 0 0 1 2.3 2.3 V22.2 L12 17.9 L5.6 22.2 Z M9.7 6.8 L15.7 10.775 L9.7 14.75 Z"
+    />
   </svg>
 );
-
-/** @deprecated use VersoMark */
-export const LeafMark = VersoMark;
 
 export const IconLibrary = (p: P) => (
   <I {...p}>

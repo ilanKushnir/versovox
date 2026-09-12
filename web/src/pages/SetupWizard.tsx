@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { LANGUAGES, type Job } from '@versovox/shared';
+import { LANGUAGES, type Job } from '@readport/shared';
 import { api, ApiError } from '../api/client';
 import { useSession, type User } from '../state/session';
 import {
@@ -9,7 +9,7 @@ import {
   IconDownload,
   IconHeadphones,
   IconLink,
-  VersoMark,
+  ReadPortMark,
 } from '../components/icons';
 import { folderApi, LibraryFolders } from '../components/LibraryFolders';
 import { formatBytes } from '../lib/format';
@@ -45,7 +45,7 @@ const ALL_STEPS: { id: StepId; label: string }[] = [
 ];
 
 /** Remembered when an admin chooses "Skip for now", so it stops asking. */
-const SKIP_KEY = 'vx-setup-libraries-skipped';
+const SKIP_KEY = 'rp-setup-libraries-skipped';
 
 /** server/src/alignment/model.ts */
 const ALIGNER_ID = 'alignment-model';
@@ -185,7 +185,7 @@ export function SetupWizard({
   // First run authorises the folder probes with the bootstrap token; an
   // admin session needs no token.
   const setupHeaders = useMemo(
-    () => (firstRun && token.trim() ? { 'x-vx-setup-token': token.trim() } : undefined),
+    () => (firstRun && token.trim() ? { 'x-rp-setup-token': token.trim() } : undefined),
     [firstRun, token],
   );
   const folders = useMemo(() => folderApi(firstRun ? token.trim() : undefined), [firstRun, token]);
@@ -348,8 +348,8 @@ export function SetupWizard({
       <div className="wizard">
         <header className="wizard__head">
           <span className="brand">
-            <VersoMark size={30} style={{ color: 'var(--vx-primary)' }} />
-            <span className="brand__name">Versovox</span>
+            <ReadPortMark size={30} style={{ color: 'var(--rp-primary)' }} />
+            <span className="brand__name">ReadPort</span>
           </span>
           <ol className="wizard__steps" aria-label="Setup steps">
             {STEPS.map((s, i) => (
@@ -375,7 +375,7 @@ export function SetupWizard({
           <form className="wizard__body" onSubmit={verifyToken}>
             <h1 tabIndex={-1}>Welcome to your reading room</h1>
             <p className="lede">
-              Versovox reads the ebook and audiobook folders you already have, never changes them,
+              ReadPort reads the ebook and audiobook folders you already have, never changes them,
               and lets you switch between reading and listening at the exact sentence. Everything
               runs on this server: no cloud account, no upload. Setup takes about three minutes.
             </p>
@@ -478,7 +478,7 @@ export function SetupWizard({
           <div className="wizard__body">
             <h1 tabIndex={-1}>Where are your books?</h1>
             <p className="lede">
-              Point Versovox at the folders that hold your EPUBs and audiobooks, as the server sees
+              Point ReadPort at the folders that hold your EPUBs and audiobooks, as the server sees
               them. Calibre, Audiobookshelf and plain folders all work. Test each one before moving
               on.
             </p>
@@ -492,7 +492,7 @@ export function SetupWizard({
               folders={folders}
               disabled={pinned.ebookDirs}
               pinnedNote={
-                pinned.ebookDirs ? 'Set by VX_EBOOK_DIRS on the server; change it there.' : null
+                pinned.ebookDirs ? 'Set by RP_EBOOK_DIRS on the server; change it there.' : null
               }
             />
             <h2 className="wizard__h2">
@@ -506,7 +506,7 @@ export function SetupWizard({
               disabled={pinned.audiobookDirs}
               pinnedNote={
                 pinned.audiobookDirs
-                  ? 'Set by VX_AUDIOBOOK_DIRS on the server; change it there.'
+                  ? 'Set by RP_AUDIOBOOK_DIRS on the server; change it there.'
                   : null
               }
             />
@@ -514,7 +514,7 @@ export function SetupWizard({
               <IconLink size={16} /> Alignment folder
             </h2>
             <p className="hint" style={{ marginBlockEnd: 10 }}>
-              Finished alignments are saved here, and this is the only folder Versovox writes to.
+              Finished alignments are saved here, and this is the only folder ReadPort writes to.
               Leave it empty to keep them inside the app&rsquo;s data volume, where rebuilding the
               container loses them.
             </p>
@@ -526,7 +526,7 @@ export function SetupWizard({
               disabled={pinned.alignmentDirs}
               pinnedNote={
                 pinned.alignmentDirs
-                  ? 'Set by VX_ALIGNMENT_DIRS on the server; change it there.'
+                  ? 'Set by RP_ALIGNMENT_DIRS on the server; change it there.'
                   : null
               }
             />
@@ -547,7 +547,7 @@ export function SetupWizard({
               </select>
               <span className="hint">
                 {pinned.defaultLanguage
-                  ? 'Set by VX_DEFAULT_LANGUAGE on the server; change it there.'
+                  ? 'Set by RP_DEFAULT_LANGUAGE on the server; change it there.'
                   : 'Only used when a book doesn’t say.'}
               </span>
             </div>
@@ -648,7 +648,7 @@ export function SetupWizard({
               </label>
             )}
             {aligner?.lastError && !aligner.download && !aligner.installed && (
-              <p className="hint" style={{ marginBlockStart: 8, color: 'var(--vx-danger)' }}>
+              <p className="hint" style={{ marginBlockStart: 8, color: 'var(--rp-danger)' }}>
                 The last download attempt failed: {aligner.lastError}
               </p>
             )}
@@ -837,7 +837,7 @@ function InitStep({
         </>
       )}
       {alignerFailed && (
-        <p className="hint" style={{ marginTop: 14, color: 'var(--vx-danger)' }}>
+        <p className="hint" style={{ marginTop: 14, color: 'var(--rp-danger)' }}>
           The download could not be started. Fetch the model under Settings → Alignment — everything
           else is set up.
         </p>
@@ -862,7 +862,7 @@ function InitStep({
               <p className="hint" style={{ marginTop: 8 }}>
                 {aligner.download.detail ??
                   (aligner.download.state === 'queued' ? 'Queued…' : 'Starting…')}{' '}
-                — it keeps downloading while you use Versovox.
+                — it keeps downloading while you use ReadPort.
               </p>
             </>
           ) : (

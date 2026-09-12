@@ -1,8 +1,20 @@
-# Versovox
+<p align="center">
+  <img src="design/logo/readport-tile.svg" alt="" width="88" height="88">
+</p>
 
-**Read and listen in perfect tandem.**
+<h1 align="center">ReadPort</h1>
 
-Versovox is a self-hosted, open-source (AGPL-3.0) reading layer for the
+<p align="center">
+  <strong>Read and listen in perfect tandem.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/ilanKushnir/readport/actions/workflows/ci.yml"><img src="https://github.com/ilanKushnir/readport/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License: AGPL-3.0-or-later"></a>
+  <a href="https://github.com/ilanKushnir/readport/pkgs/container/readport"><img src="https://img.shields.io/badge/ghcr.io-readport-black.svg" alt="Container image"></a>
+</p>
+
+ReadPort is a self-hosted, open-source (AGPL-3.0) reading layer for the
 libraries you already have. It mounts your existing ebook and audiobook
 folders **read-only** and gives you a calm, installable app with a serious
 EPUB reader, a resilient audiobook player, conservative edition pairing, and
@@ -11,11 +23,11 @@ listening**.
 
 It deliberately is _not_ another library manager. Calibre / Calibre-Web
 Automated, Kavita, Audiobookshelf, and Shelfmark keep doing what they do;
-Versovox coexists with all of them (or with plain folders) and owns only
+ReadPort coexists with all of them (or with plain folders) and owns only
 its own state: derived reading indexes, pair decisions, alignment data,
 progress, annotations, and offline packages. (Synchronized text+audio
 production itself isn't new — Storyteller pioneered self-hosted alignment
-with EPUB Media Overlays; Versovox's angle is being a **non-destructive
+with EPUB Media Overlays; ReadPort's angle is being a **non-destructive
 overlay** over unmodified existing libraries, with strict pairing review and
 loss-resistant progress.)
 
@@ -56,12 +68,12 @@ loss-resistant progress.)
   alignment admits it might be wrong: hearing a sentence twice is a
   nuisance, hearing one you have not reached is a spoiler.
 - **Alignment by forced alignment, not transcription**: the words are
-  already in the EPUB, so Versovox does not try to discover them. One CTC
+  already in the EPUB, so ReadPort does not try to discover them. One CTC
   acoustic model (317 MB, one download, every language) is run over the
   narration, greedy-decoded into romanized characters with 20 ms timestamps,
   and matched against the book's own characters. There is one engine and one
   model; nothing to choose between. On the target server for this project (a
-  6-CPU LXC, `VX_ALIGN_THREADS=4`) the default `standard` precision puts
+  6-CPU LXC, `RP_ALIGN_THREADS=4`) the default `standard` precision puts
   about 7% of the audio through the model and timed a 67-minute book in 72
   seconds and a 36.7-hour one in 28.6 minutes — roughly six minutes for a
   six-hour audiobook. `exact` decodes every sample, takes some fifteen times
@@ -70,8 +82,8 @@ loss-resistant progress.)
   [docs/alignment.md](docs/alignment.md).
 - **Alignments are files, and they outlive the container**: every finished
   alignment is written into an alignment folder you mount from your own
-  library, as one gzipped JSON document per pair (`.vxalign`, readable with
-  `gunzip`). It is the **only** folder Versovox writes to. Files are matched
+  library, as one gzipped JSON document per pair (`.rpalign`, readable with
+  `gunzip`). It is the **only** folder ReadPort writes to. Files are matched
   back to books by a fingerprint of the ebook's sentences and the
   audiobook's track lengths — never by path or filename — so a from-scratch
   reinstall imports whatever it recognises after its first scan, and imports
@@ -91,7 +103,7 @@ loss-resistant progress.)
   bundled. The one download is Meta's MMS forced aligner, **CC-BY-NC-4.0
   (non-commercial)** — the only non-permissive thing here, and never fetched
   behind your back: the setup wizard offers it, Settings → Alignment has it
-  with a progress bar, and `versovox-model install` gets it on a server with
+  with a progress bar, and `readport-model install` gets it on a server with
   no browser attached. What language a book is in is read from the book
   itself — its script, then its function words — so nothing is downloaded to
   answer that either.
@@ -109,14 +121,14 @@ Docker, your existing library folders, and enough CPU to be patient with.
 The image carries ffmpeg and the alignment runtime; the stock compose file
 caps the app at 1 GB of memory and the optional dedicated worker at 2 GB.
 Alignment is the only heavy thing here: give it as many threads as the
-container really has (`VX_ALIGN_THREADS`, default 4) and 317 MB of disk for
+container really has (`RP_ALIGN_THREADS`, default 4) and 317 MB of disk for
 the model. Reading and listening need none of that — a library with no model
 installed still scans, reads, plays and pairs.
 
 ## Quick start
 
 ```bash
-cp .env.example .env    # set VX_SESSION_SECRET (openssl rand -hex 32)
+cp .env.example .env    # set RP_SESSION_SECRET (openssl rand -hex 32)
 docker compose up -d --build
 # open http://localhost:8383 — the setup wizard asks for the one-time token
 # printed in the log, creates the admin, and tests your library folders
@@ -145,13 +157,13 @@ Node ≥ 22.5 and ffmpeg:
 
 ```bash
 npm ci && npm run build
-VX_EBOOK_DIRS=fixtures/library/ebooks \
-VX_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
-VX_ALIGNMENT_DIRS=./alignments \
+RP_EBOOK_DIRS=fixtures/library/ebooks \
+RP_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
+RP_ALIGNMENT_DIRS=./alignments \
 node server/dist/index.js
 ```
 
-Alignment additionally wants the model in `VX_MODELS_DIR` (`./models` by
+Alignment additionally wants the model in `RP_MODELS_DIR` (`./models` by
 default); download it from Settings → Alignment once the server is up.
 
 ## Documentation
@@ -165,7 +177,7 @@ default); download it from Settings → Alignment once the server is up.
 | [Reader & player](docs/reader-and-player.md)                                                          | Features and honest limitations                          |
 | [Progress durability](docs/progress.md)                                                               | The event model and reconciliation rules                 |
 | [HTTP API](docs/api.md)                                                                               | Endpoint reference                                       |
-| [Contributing](docs/contributing.md)                                                                  | Dev setup, tests, repo layout                            |
+| [Contributing](CONTRIBUTING.md)                                                                       | Dev setup, tests, repo layout                            |
 | [Product brief](docs/product-brief.md) · [Research & architecture](docs/research-and-architecture.md) | Why it is built this way                                 |
 
 ## Status

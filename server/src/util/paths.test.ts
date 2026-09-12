@@ -8,8 +8,8 @@ let root: string;
 let outside: string;
 
 beforeAll(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-paths-'));
-  outside = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-outside-'));
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-paths-'));
+  outside = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-outside-'));
   fs.writeFileSync(path.join(root, 'ok.txt'), 'ok');
   fs.mkdirSync(path.join(root, 'sub'));
   fs.writeFileSync(path.join(root, 'sub', 'inner.txt'), 'inner');
@@ -39,7 +39,7 @@ describe('resolveWithin', () => {
   });
 
   it('rejects prefix-sibling escapes (root vs root-suffix)', () => {
-    // /tmp/vx-paths-x must not authorize /tmp/vx-paths-x-evil
+    // /tmp/rp-paths-x must not authorize /tmp/rp-paths-x-evil
     const sibling = root + '-evil';
     fs.mkdirSync(sibling, { recursive: true });
     try {

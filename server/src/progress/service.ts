@@ -7,13 +7,13 @@ import {
   type ProgressAck,
   type ProgressEvent,
   type ProgressState,
-} from '@versovox/shared';
+} from '@readport/shared';
 import { type DB, nowIso } from '../db/index.js';
 
 /**
  * Authoritative progress pipeline: append-only event history + reconciled
  * current state with a revision counter. Decision logic lives in
- * @versovox/shared (decideApply) so client resume math matches exactly.
+ * @readport/shared (decideApply) so client resume math matches exactly.
  *
  * Client timestamps are diagnostic metadata: the state's claim time is the
  * server-clamped effective time, so a device clock in the future cannot

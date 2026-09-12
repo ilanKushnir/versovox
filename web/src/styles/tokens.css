@@ -1,4 +1,4 @@
-/* Versovox design tokens — "ink & ember".
+/* ReadPort design tokens — "ink & ember".
    Reading is paper and ink; listening is a warm lamp. Light: cream paper,
    ink text, ember-copper primary, plum for audio. Dark: warm near-black
    with a lighter ember for interactive text and a plum-lavender accent.
@@ -6,28 +6,28 @@
 
 :root {
   /* palette — light */
-  --vx-text: #1c1917;
-  --vx-text-soft: #5f574d;
-  --vx-bg: #f6f1e8;
-  --vx-surface: #ede6da;
-  --vx-surface-raised: #fffdf9;
-  --vx-primary: #b4532a;
-  --vx-primary-hover: #9c4622;
-  --vx-on-primary: #fff8f2;
-  --vx-accent: #5e4a8a; /* plum — audio */
-  --vx-border: #ddd3c4;
-  --vx-border-strong: #c4b8a5;
-  --vx-interactive: #944320;
-  --vx-danger: #a83a2c;
-  --vx-focus: #b4532a;
-  --vx-shadow-1: 0 1px 2px rgb(60 40 20 / 0.06), 0 2px 10px rgb(60 40 20 / 0.06);
-  --vx-shadow-2: 0 2px 6px rgb(60 40 20 / 0.08), 0 14px 36px rgb(60 40 20 / 0.14);
-  --vx-scrim: rgb(28 25 23 / 0.45);
+  --rp-text: #1c1917;
+  --rp-text-soft: #5f574d;
+  --rp-bg: #f6f1e8;
+  --rp-surface: #ede6da;
+  --rp-surface-raised: #fffdf9;
+  --rp-primary: #b4532a;
+  --rp-primary-hover: #9c4622;
+  --rp-on-primary: #fff8f2;
+  --rp-accent: #5e4a8a; /* plum — audio */
+  --rp-border: #ddd3c4;
+  --rp-border-strong: #c4b8a5;
+  --rp-interactive: #944320;
+  --rp-danger: #a83a2c;
+  --rp-focus: #b4532a;
+  --rp-shadow-1: 0 1px 2px rgb(60 40 20 / 0.06), 0 2px 10px rgb(60 40 20 / 0.06);
+  --rp-shadow-2: 0 2px 6px rgb(60 40 20 / 0.08), 0 14px 36px rgb(60 40 20 / 0.14);
+  --rp-scrim: rgb(28 25 23 / 0.45);
 
   /* type */
-  --vx-font-ui:
+  --rp-font-ui:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --vx-font-reading: 'Literata', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --rp-font-reading: 'Literata', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 
   /* spacing 4px scale */
   --sp-1: 4px;
@@ -43,59 +43,59 @@
   --radius-control: 9px;
   --radius-pill: 999px;
 
-  --vx-safe-top: env(safe-area-inset-top, 0px);
-  --vx-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --vx-safe-left: env(safe-area-inset-left, 0px);
-  --vx-safe-right: env(safe-area-inset-right, 0px);
+  --rp-safe-top: env(safe-area-inset-top, 0px);
+  --rp-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --rp-safe-left: env(safe-area-inset-left, 0px);
+  --rp-safe-right: env(safe-area-inset-right, 0px);
 
-  --vx-duration-quick: 150ms;
-  --vx-duration-base: 220ms;
-  --vx-duration-slow: 260ms;
-  --vx-ease: cubic-bezier(0.25, 0.7, 0.35, 1);
+  --rp-duration-quick: 150ms;
+  --rp-duration-base: 220ms;
+  --rp-duration-slow: 260ms;
+  --rp-ease: cubic-bezier(0.25, 0.7, 0.35, 1);
 
   color-scheme: light;
 }
 
 [data-app-theme='dark'] {
-  --vx-text: #efe7d9;
-  --vx-text-soft: #a99f91;
-  --vx-bg: #16120f;
-  --vx-surface: #1f1a15;
-  --vx-surface-raised: #29231d;
-  --vx-primary: #c86a3e;
-  --vx-primary-hover: #d67a50;
-  --vx-on-primary: #fff6ee;
-  --vx-accent: #b9a6d8;
-  --vx-border: #332c25;
-  --vx-border-strong: #4d4238;
-  --vx-interactive: #e69c74;
-  --vx-danger: #e08a7a;
-  --vx-focus: #e69c74;
-  --vx-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
-  --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 14px 36px rgb(0 0 0 / 0.5);
-  --vx-scrim: rgb(0 0 0 / 0.6);
+  --rp-text: #efe7d9;
+  --rp-text-soft: #a99f91;
+  --rp-bg: #16120f;
+  --rp-surface: #1f1a15;
+  --rp-surface-raised: #29231d;
+  --rp-primary: #c86a3e;
+  --rp-primary-hover: #d67a50;
+  --rp-on-primary: #fff6ee;
+  --rp-accent: #b9a6d8;
+  --rp-border: #332c25;
+  --rp-border-strong: #4d4238;
+  --rp-interactive: #e69c74;
+  --rp-danger: #e08a7a;
+  --rp-focus: #e69c74;
+  --rp-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
+  --rp-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 14px 36px rgb(0 0 0 / 0.5);
+  --rp-scrim: rgb(0 0 0 / 0.6);
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-app-theme='light']) {
-    --vx-text: #efe7d9;
-    --vx-text-soft: #a99f91;
-    --vx-bg: #16120f;
-    --vx-surface: #1f1a15;
-    --vx-surface-raised: #29231d;
-    --vx-primary: #c86a3e;
-    --vx-primary-hover: #d67a50;
-    --vx-on-primary: #fff6ee;
-    --vx-accent: #b9a6d8;
-    --vx-border: #332c25;
-    --vx-border-strong: #4d4238;
-    --vx-interactive: #e69c74;
-    --vx-danger: #e08a7a;
-    --vx-focus: #e69c74;
-    --vx-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
-    --vx-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 14px 36px rgb(0 0 0 / 0.5);
-    --vx-scrim: rgb(0 0 0 / 0.6);
+    --rp-text: #efe7d9;
+    --rp-text-soft: #a99f91;
+    --rp-bg: #16120f;
+    --rp-surface: #1f1a15;
+    --rp-surface-raised: #29231d;
+    --rp-primary: #c86a3e;
+    --rp-primary-hover: #d67a50;
+    --rp-on-primary: #fff6ee;
+    --rp-accent: #b9a6d8;
+    --rp-border: #332c25;
+    --rp-border-strong: #4d4238;
+    --rp-interactive: #e69c74;
+    --rp-danger: #e08a7a;
+    --rp-focus: #e69c74;
+    --rp-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
+    --rp-shadow-2: 0 2px 6px rgb(0 0 0 / 0.5), 0 14px 36px rgb(0 0 0 / 0.5);
+    --rp-scrim: rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
 }

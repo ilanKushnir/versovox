@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Annotation } from '@versovox/shared';
+import { type Annotation } from '@readport/shared';
 import { colorOf, isHighlightColor, marksInChapter, spanOf } from './marks';
 
 /**

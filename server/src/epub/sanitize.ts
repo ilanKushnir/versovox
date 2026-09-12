@@ -272,8 +272,8 @@ function sanitizeAttrs(
     if (tag === 'a' && name === 'href') {
       const target = resolveInternal(value, chapterDir, knownFiles);
       if (target) {
-        // Internal link: the reader intercepts data-vx-href and navigates.
-        out.push({ name: 'data-vx-href', value: target });
+        // Internal link: the reader intercepts data-rp-href and navigates.
+        out.push({ name: 'data-rp-href', value: target });
         out.push({ name: 'href', value: '#' });
       } else if (/^https?:\/\//i.test(value)) {
         out.push({ name: 'href', value });

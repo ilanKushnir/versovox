@@ -422,7 +422,7 @@ const ORT_PACKAGE: string = 'onnxruntime-node';
  */
 function ortRequireRoots(): string[] {
   const roots: string[] = [];
-  const configured = process.env['VX_ORT_DIR'];
+  const configured = process.env['RP_ORT_DIR'];
   if (configured) roots.push(configured.endsWith(path.sep) ? configured : configured + path.sep);
   roots.push('/opt/ort/lib/node_modules/');
   return roots;

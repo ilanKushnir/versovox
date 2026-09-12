@@ -17,7 +17,6 @@ data/
 cache/
 models/
 qa-output/
-.tastemaker/log.json
 *.tsbuildinfo
 .playwright-mcp/
 

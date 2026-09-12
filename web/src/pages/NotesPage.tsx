@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { type Annotation } from '@versovox/shared';
+import { type Annotation } from '@readport/shared';
 import { api } from '../api/client';
 import { useToast } from '../components/ui';
 import { IconBookmark, IconSearch, IconTrash } from '../components/icons';

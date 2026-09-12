@@ -1,6 +1,6 @@
 {
-  "name": "versovox",
-  "version": "0.8.1",
+  "name": "readport",
+  "version": "0.9.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "description": "Self-hosted tandem reading: a non-destructive reader/player overlay for existing ebook and audiobook libraries.",
@@ -14,14 +14,14 @@
     "web"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @versovox/server",
-    "dev:web": "npm run dev --workspace @versovox/web",
-    "build": "npm run build --workspace @versovox/shared && npm run build --workspace @versovox/server && npm run build --workspace @versovox/web",
+    "dev": "npm run dev --workspace @readport/server",
+    "dev:web": "npm run dev --workspace @readport/web",
+    "build": "npm run build --workspace @readport/shared && npm run build --workspace @readport/server && npm run build --workspace @readport/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "npm run build --workspace @versovox/shared && npm run test --workspaces --if-present",
+    "test": "npm run build --workspace @readport/shared && npm run test --workspaces --if-present",
     "fixtures": "node scripts/generate-fixtures.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "qa": "node scripts/qa-browser.mjs"

@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 /**
  * Environment configuration. Precedence (documented in docs/configuration.md):
- *   1. Environment variables (VX_*), including VX_*_FILE secret-file variants.
+ *   1. Environment variables (RP_*), including RP_*_FILE secret-file variants.
  *   2. In-app admin settings stored in the database (subset of keys).
  *   3. Built-in defaults.
  * Env always wins so operators can pin values in Compose.
@@ -35,7 +35,7 @@ const envSchema = z.object({
   /** Where alignments are saved as files. The only library folder written to. */
   alignmentDirs: z.array(z.string()).default([]),
   sessionSecret: z.string().min(16).optional(),
-  /** One-time first-run bootstrap token (VX_SETUP_TOKEN / VX_SETUP_TOKEN_FILE). */
+  /** One-time first-run bootstrap token (RP_SETUP_TOKEN / RP_SETUP_TOKEN_FILE). */
   setupToken: z.string().min(8).optional(),
   /**
    * Proxy trust. Default: no proxy headers are trusted (X-Forwarded-For is
@@ -88,7 +88,7 @@ function bool(v: string | undefined): boolean | undefined {
 }
 
 /**
- * VX_TRUST_PROXY: unset/0/false -> false (forwarded headers ignored);
+ * RP_TRUST_PROXY: unset/0/false -> false (forwarded headers ignored);
  * 1/true -> trust local/private proxies only; otherwise a comma-separated
  * list of proxy addresses/CIDRs. Never trusts arbitrary forwarded headers.
  */
@@ -107,28 +107,28 @@ function parseTrustProxy(v: string | undefined): boolean | string[] | undefined 
 
 export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): EnvConfig {
   const raw: Record<string, unknown> = {
-    port: readEnv('VX_PORT'),
-    host: readEnv('VX_HOST'),
-    dataDir: readEnv('VX_DATA_DIR'),
-    cacheDir: readEnv('VX_CACHE_DIR'),
-    modelsDir: readEnv('VX_MODELS_DIR'),
-    ebookDirs: splitDirs(readEnv('VX_EBOOK_DIRS')),
-    audiobookDirs: splitDirs(readEnv('VX_AUDIOBOOK_DIRS')),
-    alignmentDirs: splitDirs(readEnv('VX_ALIGNMENT_DIRS')),
-    sessionSecret: readEnv('VX_SESSION_SECRET'),
-    setupToken: readEnv('VX_SETUP_TOKEN'),
-    trustProxy: parseTrustProxy(readEnv('VX_TRUST_PROXY')),
-    trustHttps: bool(readEnv('VX_TRUST_HTTPS')),
-    sessionDays: readEnv('VX_SESSION_DAYS'),
-    inlineWorker: bool(readEnv('VX_INLINE_WORKER')),
-    jobConcurrency: readEnv('VX_JOB_CONCURRENCY'),
-    alignThreads: readEnv('VX_ALIGN_THREADS'),
-    defaultLanguage: readEnv('VX_DEFAULT_LANGUAGE'),
-    scanIntervalMinutes: readEnv('VX_SCAN_INTERVAL_MINUTES'),
-    proxyAuthHeader: readEnv('VX_PROXY_AUTH_HEADER'),
-    proxyAuthSources: splitDirs(readEnv('VX_PROXY_AUTH_SOURCES')),
-    proxyAuthAdmins: splitDirs(readEnv('VX_PROXY_AUTH_ADMINS')),
-    logLevel: readEnv('VX_LOG_LEVEL'),
+    port: readEnv('RP_PORT'),
+    host: readEnv('RP_HOST'),
+    dataDir: readEnv('RP_DATA_DIR'),
+    cacheDir: readEnv('RP_CACHE_DIR'),
+    modelsDir: readEnv('RP_MODELS_DIR'),
+    ebookDirs: splitDirs(readEnv('RP_EBOOK_DIRS')),
+    audiobookDirs: splitDirs(readEnv('RP_AUDIOBOOK_DIRS')),
+    alignmentDirs: splitDirs(readEnv('RP_ALIGNMENT_DIRS')),
+    sessionSecret: readEnv('RP_SESSION_SECRET'),
+    setupToken: readEnv('RP_SETUP_TOKEN'),
+    trustProxy: parseTrustProxy(readEnv('RP_TRUST_PROXY')),
+    trustHttps: bool(readEnv('RP_TRUST_HTTPS')),
+    sessionDays: readEnv('RP_SESSION_DAYS'),
+    inlineWorker: bool(readEnv('RP_INLINE_WORKER')),
+    jobConcurrency: readEnv('RP_JOB_CONCURRENCY'),
+    alignThreads: readEnv('RP_ALIGN_THREADS'),
+    defaultLanguage: readEnv('RP_DEFAULT_LANGUAGE'),
+    scanIntervalMinutes: readEnv('RP_SCAN_INTERVAL_MINUTES'),
+    proxyAuthHeader: readEnv('RP_PROXY_AUTH_HEADER'),
+    proxyAuthSources: splitDirs(readEnv('RP_PROXY_AUTH_SOURCES')),
+    proxyAuthAdmins: splitDirs(readEnv('RP_PROXY_AUTH_ADMINS')),
+    logLevel: readEnv('RP_LOG_LEVEL'),
   };
   const envPinned = Object.entries(raw)
     .filter(([, v]) => v !== undefined)
@@ -147,7 +147,7 @@ export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): En
   if (!sessionSecret) {
     // No default credentials, no hardcoded secret: generate one on first run
     // and persist it in the data dir (0600). Operators should still set
-    // VX_SESSION_SECRET(_FILE) explicitly in production.
+    // RP_SESSION_SECRET(_FILE) explicitly in production.
     const secretPath = path.join(parsed.dataDir, 'session-secret');
     if (fs.existsSync(secretPath)) {
       sessionSecret = fs.readFileSync(secretPath, 'utf8').trim();

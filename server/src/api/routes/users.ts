@@ -9,7 +9,7 @@ import {
   type InviteDto,
   type Role,
   type UserDto,
-} from '@versovox/shared';
+} from '@readport/shared';
 import { type AppContext } from '../../context.js';
 import { hashPassword, verifyPassword } from '../../auth/passwords.js';
 import { createSession, destroyUserSessions, LoginThrottle } from '../../auth/sessions.js';

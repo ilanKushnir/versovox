@@ -3,7 +3,7 @@
 ## Authentication
 
 - **First-run setup requires a one-time bootstrap token.** Creating the
-  admin account needs `VX_SETUP_TOKEN` (or `VX_SETUP_TOKEN_FILE`); when
+  admin account needs `RP_SETUP_TOKEN` (or `RP_SETUP_TOKEN_FILE`); when
   unset, the server generates a random token on first start, prints it in
   its log, and stores it at `<data>/setup-token` (0600). Whoever merely
   reaches a freshly started instance first therefore cannot take it over.
@@ -17,8 +17,8 @@
   event loop, and unknown usernames verify against a fixed dummy hash so
   response timing does not reveal whether an account exists.
 - Sessions are opaque 256-bit random tokens in an `HttpOnly`,
-  `SameSite=Lax` cookie (`Secure` when `VX_TRUST_HTTPS=1`). The database
-  stores only an HMAC of the token keyed by `VX_SESSION_SECRET`, so a stolen
+  `SameSite=Lax` cookie (`Secure` when `RP_TRUST_HTTPS=1`). The database
+  stores only an HMAC of the token keyed by `RP_SESSION_SECRET`, so a stolen
   database/backup cannot be replayed as live sessions, and rotating the
   secret invalidates all sessions.
 - Login is throttled **per (account, client IP)** (10 attempts / 5 minutes)
@@ -26,12 +26,12 @@
   restarts and expired windows are pruned daily. Keying the account limit
   on the caller's IP means a remote attacker cannot lock the real owner out
   of a known username. Forwarded headers (`X-Forwarded-For`) are ignored
-  unless the operator explicitly trusts a proxy via `VX_TRUST_PROXY`, so a
+  unless the operator explicitly trusts a proxy via `RP_TRUST_PROXY`, so a
   direct attacker cannot rotate spoofed IPs past the limit.
 - Sessions expire (default 30 days) and are deleted on logout.
 - **Route guarding is keyed on the matched route, not the raw URL.** The
   router matches the percent-decoded path, so a guard that inspected
-  `req.url` could be bypassed with `/%61pi/...`. Versovox checks the
+  `req.url` could be bypassed with `/%61pi/...`. ReadPort checks the
   resolved route pattern and the decoded path, marks every route that may
   answer without a session explicitly (`config.public`: health, login, the
   two invite endpoints, and the first-run wizard and preflight helpers, each
@@ -56,13 +56,13 @@
   demoted, disabled, nor deleted, and admins cannot lock themselves out.
 - **Setup wizard helpers** (`/api/setup/test-paths`, `/api/setup/browse`,
   `/api/preflight`) answer only for an admin session or, before an admin
-  exists, a request carrying the bootstrap token in the `x-vx-setup-token`
+  exists, a request carrying the bootstrap token in the `x-rp-setup-token`
   header. They report what a folder is (existence, readability, a capped
   shallow count of book files) and what the server has (audio tools, the
   alignment runtime, free space, whether its own volumes are writable). All
   of it is read-only but for one deliberate write: asked about a folder of
   kind `alignment`, the check creates a zero-byte
-  `.versovox-write-test-<pid>` and deletes it again. Permission bits cannot
+  `.readport-write-test-<pid>` and deletes it again. Permission bits cannot
   answer the question that matters there — a `:ro` bind mount shows exactly
   the bits it would show read-write and then refuses the write — and an
   operator should find that out during setup rather than after the first
@@ -73,22 +73,22 @@
 Self-hosters who already front their services with Authentik, Authelia, or
 oauth2-proxy can let that proxy sign users in:
 
-- `VX_PROXY_AUTH_HEADER=x-authentik-username` names the header the proxy
+- `RP_PROXY_AUTH_HEADER=x-authentik-username` names the header the proxy
   sets after authenticating the user.
-- `VX_PROXY_AUTH_SOURCES=192.168.1.50/32` lists the proxy's addresses. The
+- `RP_PROXY_AUTH_SOURCES=192.168.1.50/32` lists the proxy's addresses. The
   header is honoured **only when the TCP peer that delivered the request is
   in this list** — checked on the socket, not on forwarded headers — so a
-  client that reaches Versovox directly (a LAN port, a break-glass URL) can
+  client that reaches ReadPort directly (a LAN port, a break-glass URL) can
   never forge it and simply sees the password login page. If the header is
   configured without sources, sign-in stays disabled and a warning is
   logged (fail closed).
 - Users are provisioned on first sight with an unusable password hash;
-  `VX_PROXY_AUTH_ADMINS` names the admins, and on an empty instance the
+  `RP_PROXY_AUTH_ADMINS` names the admins, and on an empty instance the
   first proxied user becomes admin (the proxy already decides who may reach
-  Versovox at all); everyone else starts as a `reader` and an admin can
+  ReadPort at all); everyone else starts as a `reader` and an admin can
   promote them under Settings → People. Setup-token bootstrap is closed
   once any user exists.
-- Proxied requests are authenticated per request (no Versovox cookie is
+- Proxied requests are authenticated per request (no ReadPort cookie is
   issued); signing out is the proxy's job, and the UI says so.
 
 Without a proxy, nothing changes: the setup token + password flow is the
@@ -167,7 +167,7 @@ V1 and none is claimed.
 Defense in depth for cookie-authenticated calls:
 
 1. `SameSite=Lax` cookies;
-2. every mutating request must carry the custom header `x-vx-csrf: 1`
+2. every mutating request must carry the custom header `x-rp-csrf: 1`
    (unsettable cross-origin without CORS preflight, which same-origin-only
    `connect-src` and no CORS headers prevent);
 3. `Origin` / `Sec-Fetch-Site` headers, when present, must be same-origin.
@@ -183,7 +183,7 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 - All `on*` handlers, `style` attributes, and non-allowlisted attributes are
   dropped.
 - `javascript:` and any absolute-scheme URLs are stripped; internal links
-  become inert `data-vx-href` attributes the reader resolves itself;
+  become inert `data-rp-href` attributes the reader resolves itself;
   internal images are rewritten to authenticated asset routes; external
   images are removed.
 - EPUB archives are extracted by a **bounded streaming unzipper**: the
@@ -217,7 +217,7 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 
 ## Filesystem containment
 
-- Source libraries are mounted read-only and Versovox never writes into
+- Source libraries are mounted read-only and ReadPort never writes into
   them. The alignment folder is the one deliberate exception, and it has its
   own section below.
 - Every path derived from the database or user input resolves through
@@ -231,7 +231,7 @@ strict allowlist over a spec-compliant HTML parser (parse5):
   and must carry a genuine JPEG/PNG signature before any bytes are copied —
   a symlinked "cover" cannot exfiltrate files from outside (or inside) the
   library.
-- Everything else Versovox derives — the extracted EPUB indexes, cover
+- Everything else ReadPort derives — the extracted EPUB indexes, cover
   thumbnails, a cover extraction's temporary file — lives under its own data
   and cache volumes. The aligner itself writes nothing at all while it works:
   the narration is streamed through memory in chunks, never staged on disk.
@@ -253,13 +253,13 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 
 ## The alignment folder
 
-Finished alignments are written out as `.vxalign` files so that the hours of
+Finished alignments are written out as `.rpalign` files so that the hours of
 CPU they cost survive a rebuild of the container. That makes one folder inside
-a mount the operator supplies the only writable path Versovox has, and it is
+a mount the operator supplies the only writable path ReadPort has, and it is
 worth being exact about what that buys and what it costs.
 
 **Where it is is an admin decision, and it is not a contained path.** The
-folder comes from `VX_ALIGNMENT_DIRS`, or from the list an admin sets in the
+folder comes from `RP_ALIGNMENT_DIRS`, or from the list an admin sets in the
 setup wizard or under Settings → Libraries; with neither, alignments go to
 `<data>/alignments`, which survives a restart but not a rebuild that discards
 the volume — and that folder catches them anyway if every configured one
@@ -274,7 +274,7 @@ away from the web UI entirely. What bounds it is the container — a non-root
 user, `no-new-privileges`, and only the volumes the compose file mounts.
 
 **What lands there.** One gzipped JSON document per aligned pair, named
-`<author> - <title> [<pair key>].vxalign`, written first to a dot-prefixed
+`<author> - <title> [<pair key>].rpalign`, written first to a dot-prefixed
 temporary in the same directory, fsynced, then renamed into place, so the sync
 client or backup job watching that folder never replicates half a file. The
 only file ever deleted is one whose name ends in the same bracketed pair key —
@@ -285,8 +285,8 @@ user cannot write to is reported as a problem instead of being forced.
 
 **What comes back out of it is untrusted input**, exactly as an EPUB is: the
 folder belongs to the operator, their sync client, and whoever else can reach
-the share. A file is used only if it ends in `.vxalign`, gunzips, parses as
-JSON, carries the Versovox format tag, declares a format version this build
+the share. A file is used only if it ends in `.rpalign`, gunzips, parses as
+JSON, carries the ReadPort format tag, declares a format version this build
 understands, satisfies the schema, uses fingerprint schemes this build
 implements, and has segment columns that all agree on their length. Identity
 is never taken from a filename, a path or an id — a file is matched to a pair
@@ -322,7 +322,7 @@ Both are accepted V1 limitations of trusting a folder the operator chose.
 
 ## Secrets and logging
 
-- `VX_SESSION_SECRET` supports `_FILE` (Docker secrets). If unset, a random
+- `RP_SESSION_SECRET` supports `_FILE` (Docker secrets). If unset, a random
   secret is generated once and stored with mode 0600 in the data dir.
 - Tokens are never logged; session cookies never reach client-side
   JavaScript (`HttpOnly`); the web bundle contains no secrets.

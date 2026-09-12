@@ -1,5 +1,5 @@
 import { type FastifyReply, type FastifyRequest } from 'fastify';
-import { type Role } from '@versovox/shared';
+import { type Role } from '@readport/shared';
 
 /**
  * Role checks. Roles are flat, not hierarchical by accident: an admin can do

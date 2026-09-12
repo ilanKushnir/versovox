@@ -1,4 +1,4 @@
-import { type AlignmentGap, type AlignmentSegment } from '@versovox/shared';
+import { type AlignmentGap, type AlignmentSegment } from '@readport/shared';
 
 /**
  * Shared timing + honesty layer.

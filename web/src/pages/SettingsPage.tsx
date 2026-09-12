@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { type Job, type Settings } from '@versovox/shared';
+import { type Job, type Settings } from '@readport/shared';
 import { api, ApiError } from '../api/client';
 import { useSession } from '../state/session';
 import { useToast } from '../components/ui';
@@ -10,7 +10,7 @@ import { alignerModel, type ModelInfo, type ModelsResponse } from '../lib/types'
 import { applyAppThemeColor } from '../lib/themeColor';
 import { Link } from 'react-router-dom';
 import { folderApi, LibraryFolders } from '../components/LibraryFolders';
-import { ROLE_LABELS, type Role } from '@versovox/shared';
+import { ROLE_LABELS, type Role } from '@readport/shared';
 
 interface DashboardStats {
   ebooks: number;
@@ -57,7 +57,7 @@ export function SettingsPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [appTheme, setAppTheme] = useState<string>(
-    () => localStorage.getItem('vx-app-theme') ?? 'auto',
+    () => localStorage.getItem('rp-app-theme') ?? 'auto',
   );
   const isAdmin = user?.role === 'admin';
   const stats = data?.stats ?? null;
@@ -85,7 +85,7 @@ export function SettingsPage() {
     const root = document.documentElement;
     if (appTheme === 'auto') root.removeAttribute('data-app-theme');
     else root.setAttribute('data-app-theme', appTheme);
-    localStorage.setItem('vx-app-theme', appTheme);
+    localStorage.setItem('rp-app-theme', appTheme);
     applyAppThemeColor();
   }, [appTheme]);
 
@@ -309,7 +309,7 @@ export function SettingsPage() {
       <section className="settings-section" aria-label="Background activity">
         <h2>Background activity</h2>
         {jobs.length === 0 ? (
-          <p style={{ color: 'var(--vx-text-soft)', fontSize: 14.5 }}>No background jobs yet.</p>
+          <p style={{ color: 'var(--rp-text-soft)', fontSize: 14.5 }}>No background jobs yet.</p>
         ) : (
           <div className="list-card">
             {jobs.slice(0, 12).map((j) => (
@@ -317,7 +317,7 @@ export function SettingsPage() {
                 {j.state === 'running' ? (
                   <span className="spinner" style={{ width: 15, height: 15 }} />
                 ) : j.state === 'failed' ? (
-                  <IconAlert size={15} style={{ color: 'var(--vx-danger)' }} />
+                  <IconAlert size={15} style={{ color: 'var(--rp-danger)' }} />
                 ) : (
                   <IconCheck size={15} style={{ opacity: j.state === 'done' ? 1 : 0.4 }} />
                 )}
@@ -325,7 +325,7 @@ export function SettingsPage() {
                   <span style={{ fontWeight: 600 }}>{jobLabel(j.type)}</span>
                   {j.detail ? ` — ${j.detail}` : ''}
                   {j.error ? (
-                    <span style={{ display: 'block', color: 'var(--vx-danger)', fontSize: 13 }}>
+                    <span style={{ display: 'block', color: 'var(--rp-danger)', fontSize: 13 }}>
                       {j.error.replace(/^model-missing:[^|]*\|/, '')}
                     </span>
                   ) : null}
@@ -349,8 +349,8 @@ export function SettingsPage() {
         </p>
         <AccountSelfService via={via} />
         {via === 'proxy' ? (
-          <p style={{ fontSize: 13.5, color: 'var(--vx-text-soft)' }}>
-            Sign-in is handled by the reverse proxy in front of Versovox; sign out from there.
+          <p style={{ fontSize: 13.5, color: 'var(--rp-text-soft)' }}>
+            Sign-in is handled by the reverse proxy in front of ReadPort; sign out from there.
           </p>
         ) : (
           <button className="btn btn--secondary" onClick={() => void logout()}>
@@ -427,7 +427,7 @@ function LibrariesEditor({
         onChange={setEbookDirs}
         folders={folders}
         disabled={pinnedE}
-        pinnedNote={pinnedE ? 'Pinned by VX_EBOOK_DIRS on the server.' : null}
+        pinnedNote={pinnedE ? 'Pinned by RP_EBOOK_DIRS on the server.' : null}
       />
       <h3 className="settings-h3">Audiobook folders</h3>
       <LibraryFolders
@@ -436,12 +436,12 @@ function LibrariesEditor({
         onChange={setAudioDirs}
         folders={folders}
         disabled={pinnedA}
-        pinnedNote={pinnedA ? 'Pinned by VX_AUDIOBOOK_DIRS on the server.' : null}
+        pinnedNote={pinnedA ? 'Pinned by RP_AUDIOBOOK_DIRS on the server.' : null}
       />
       <h3 className="settings-h3">Alignment folder</h3>
       <p className="settings-section__lede">
         Where the timings are saved once a book has been lined up, so they survive rebuilding the
-        container. This is the only folder Versovox writes to — mount it read-write. Without one,
+        container. This is the only folder ReadPort writes to — mount it read-write. Without one,
         the timings live in the app&rsquo;s own data and a rebuild takes them with it.
       </p>
       <LibraryFolders
@@ -450,7 +450,7 @@ function LibrariesEditor({
         onChange={setAlignDirs}
         folders={folders}
         disabled={pinnedAl}
-        pinnedNote={pinnedAl ? 'Pinned by VX_ALIGNMENT_DIRS on the server.' : null}
+        pinnedNote={pinnedAl ? 'Pinned by RP_ALIGNMENT_DIRS on the server.' : null}
       />
       {data.alignments && (
         <div className="align-store">
@@ -611,11 +611,11 @@ function OfflineStorageSection({ storage }: { storage: { usage: number; quota: n
           available for offline books.
         </p>
       ) : (
-        <p style={{ fontSize: 14.5, color: 'var(--vx-text-soft)' }}>
+        <p style={{ fontSize: 14.5, color: 'var(--rp-text-soft)' }}>
           Storage usage is not reported by this browser.
         </p>
       )}
-      <p style={{ color: 'var(--vx-text-soft)', fontSize: 13.5 }}>
+      <p style={{ color: 'var(--rp-text-soft)', fontSize: 13.5 }}>
         Downloads are per-title and explicit — manage them from each book page.
       </p>
     </section>
@@ -776,7 +776,7 @@ function AlignmentSection({
           model={model}
           isAdmin={isAdmin}
           cta="Download"
-          licenceNote="Fine for your own library, not for a paid service. Everything else in Versovox is AGPL-3.0."
+          licenceNote="Fine for your own library, not for a paid service. Everything else in ReadPort is AGPL-3.0."
           onDownload={() => void download()}
           onRemove={() => void remove()}
         />
@@ -785,7 +785,7 @@ function AlignmentSection({
         <div className="banner banner--error" role="alert">
           <IconAlert size={16} />
           <span className="grow">
-            This server&rsquo;s catalog is out of date — update Versovox.
+            This server&rsquo;s catalog is out of date — update ReadPort.
           </span>
         </div>
       )}

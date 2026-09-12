@@ -15,7 +15,7 @@ import { openDatabase } from './index.js';
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-migrate-'));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-migrate-'));
 });
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
@@ -23,7 +23,7 @@ afterEach(() => {
 
 /** A database as it stood before `upTo` + 1 was written. */
 function databaseAtVersion(upTo: number): void {
-  const db = new DatabaseSync(path.join(dir, 'versovox.db'));
+  const db = new DatabaseSync(path.join(dir, 'readport.db'));
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(
     'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);',

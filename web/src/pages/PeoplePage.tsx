@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { ROLE_LABELS, type InviteDto, type Role, type UserDto } from '@versovox/shared';
+import { ROLE_LABELS, type InviteDto, type Role, type UserDto } from '@readport/shared';
 import { api, ApiError } from '../api/client';
 import { useSession } from '../state/session';
 import { Sheet, useToast } from '../components/ui';

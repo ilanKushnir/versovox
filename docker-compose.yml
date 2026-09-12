@@ -1,6 +1,6 @@
-# Versovox self-hosting quick start.
+# ReadPort self-hosting quick start.
 #
-#   1. cp .env.example .env   (set VX_SESSION_SECRET: openssl rand -hex 32)
+#   1. cp .env.example .env   (set RP_SESSION_SECRET: openssl rand -hex 32)
 #   2. Edit the library mounts below to point at your real folders.
 #   3. docker compose up -d
 #   4. Open http://<host>:8383 and create the admin account.
@@ -9,10 +9,10 @@
 # (Caddy, Traefik, nginx) with a certificate in front. See docs/self-hosting.md.
 
 services:
-  versovox:
+  readport:
     build: .
-    # Or, when published: image: ghcr.io/OWNER/versovox:latest
-    container_name: versovox
+    # Or, when published: image: ghcr.io/OWNER/readport:latest
+    container_name: readport
     restart: unless-stopped
     ports:
       - '8383:8383'
@@ -20,38 +20,38 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Etc/UTC}
-      VX_SESSION_SECRET: ${VX_SESSION_SECRET:?set VX_SESSION_SECRET in .env}
+      RP_SESSION_SECRET: ${RP_SESSION_SECRET:?set RP_SESSION_SECRET in .env}
       # One-time first-run bootstrap token (required to create the admin
       # account). Leave empty to let the server generate one and print it in
-      # `docker compose logs versovox` on first start.
-      VX_SETUP_TOKEN: ${VX_SETUP_TOKEN:-}
-      VX_TRUST_HTTPS: ${VX_TRUST_HTTPS:-0}
+      # `docker compose logs readport` on first start.
+      RP_SETUP_TOKEN: ${RP_SETUP_TOKEN:-}
+      RP_TRUST_HTTPS: ${RP_TRUST_HTTPS:-0}
       # Proxy trust is OFF by default (client IPs cannot be spoofed via
       # X-Forwarded-For). Behind a reverse proxy set "1" (local/private
       # proxies) or a comma-separated list of proxy IPs/CIDRs.
-      VX_TRUST_PROXY: ${VX_TRUST_PROXY:-0}
-      VX_EBOOK_DIRS: /library/ebooks
-      VX_AUDIOBOOK_DIRS: /library/audiobooks
-      # Where finished alignments are saved. THE ONE FOLDER VERSOVOX WRITES TO,
+      RP_TRUST_PROXY: ${RP_TRUST_PROXY:-0}
+      RP_EBOOK_DIRS: /library/ebooks
+      RP_AUDIOBOOK_DIRS: /library/audiobooks
+      # Where finished alignments are saved. THE ONE FOLDER READPORT WRITES TO,
       # which is why it has no :ro below — keep it and a rebuilt container
       # offers to import everything it already worked out.
-      VX_ALIGNMENT_DIRS: /library/alignments
-      VX_DEFAULT_LANGUAGE: ${VX_DEFAULT_LANGUAGE:-en}
-      VX_SCAN_INTERVAL_MINUTES: ${VX_SCAN_INTERVAL_MINUTES:-60}
+      RP_ALIGNMENT_DIRS: /library/alignments
+      RP_DEFAULT_LANGUAGE: ${RP_DEFAULT_LANGUAGE:-en}
+      RP_SCAN_INTERVAL_MINUTES: ${RP_SCAN_INTERVAL_MINUTES:-60}
       # Optional reverse-proxy SSO (Authentik etc.) — see docs/security.md.
-      VX_PROXY_AUTH_HEADER: ${VX_PROXY_AUTH_HEADER:-}
-      VX_PROXY_AUTH_SOURCES: ${VX_PROXY_AUTH_SOURCES:-}
-      VX_PROXY_AUTH_ADMINS: ${VX_PROXY_AUTH_ADMINS:-}
+      RP_PROXY_AUTH_HEADER: ${RP_PROXY_AUTH_HEADER:-}
+      RP_PROXY_AUTH_SOURCES: ${RP_PROXY_AUTH_SOURCES:-}
+      RP_PROXY_AUTH_ADMINS: ${RP_PROXY_AUTH_ADMINS:-}
       # The bundled worker handles scans/alignment. Set to 0 when enabling
       # the dedicated worker service below.
-      VX_INLINE_WORKER: ${VX_INLINE_WORKER:-1}
-      VX_JOB_CONCURRENCY: ${VX_JOB_CONCURRENCY:-2}
+      RP_INLINE_WORKER: ${RP_INLINE_WORKER:-1}
+      RP_JOB_CONCURRENCY: ${RP_JOB_CONCURRENCY:-2}
     volumes:
-      # Versovox-owned writable state. SQLite lives in vx-data: keep it on
+      # ReadPort-owned writable state. SQLite lives in rp-data: keep it on
       # a local disk volume, never on SMB/NFS.
-      - vx-data:/data
-      - vx-cache:/cache
-      - vx-models:/models
+      - rp-data:/data
+      - rp-cache:/cache
+      - rp-models:/models
       # Source libraries: ALWAYS read-only. Point these at your existing
       # Calibre/CWA, Kavita, Audiobookshelf, or plain folders.
       - ./fixtures/library/ebooks:/library/ebooks:ro
@@ -68,33 +68,33 @@ services:
 
   # Optional dedicated worker for scans and alignment. Enable with:
   #   docker compose --profile worker up -d
-  # and set VX_INLINE_WORKER=0 on the versovox service.
+  # and set RP_INLINE_WORKER=0 on the readport service.
   worker:
     build: .
     profiles: ['worker']
-    container_name: versovox-worker
+    container_name: readport-worker
     restart: unless-stopped
     command: ['node', 'server/dist/worker-entry.js']
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Etc/UTC}
-      VX_EBOOK_DIRS: /library/ebooks
-      VX_AUDIOBOOK_DIRS: /library/audiobooks
-      VX_ALIGNMENT_DIRS: /library/alignments
-      VX_JOB_CONCURRENCY: ${VX_JOB_CONCURRENCY:-2}
+      RP_EBOOK_DIRS: /library/ebooks
+      RP_AUDIOBOOK_DIRS: /library/audiobooks
+      RP_ALIGNMENT_DIRS: /library/alignments
+      RP_JOB_CONCURRENCY: ${RP_JOB_CONCURRENCY:-2}
     healthcheck:
       test: ['CMD', 'pgrep', '-f', 'worker-entry']
       interval: 30s
       timeout: 5s
       retries: 3
     volumes:
-      - vx-data:/data
-      - vx-cache:/cache
-      - vx-models:/models
+      - rp-data:/data
+      - rp-cache:/cache
+      - rp-models:/models
       - ./fixtures/library/ebooks:/library/ebooks:ro
       - ./fixtures/library/audiobooks:/library/audiobooks:ro
-      # The worker is what writes them when VX_INLINE_WORKER=0.
+      # The worker is what writes them when RP_INLINE_WORKER=0.
       - ./alignments:/library/alignments
     deploy:
       resources:
@@ -104,6 +104,6 @@ services:
       - no-new-privileges:true
 
 volumes:
-  vx-data:
-  vx-cache:
-  vx-models:
+  rp-data:
+  rp-cache:
+  rp-models:

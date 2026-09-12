@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { type ReadingListItem } from '@versovox/shared';
+import { type ReadingListItem } from '@readport/shared';
 import { api, isOffline } from '../api/client';
 import { useSession } from '../state/session';
 import { useShelves } from '../state/shelves';

@@ -39,7 +39,7 @@ import {
   withinKeepaliveBudget,
 } from './engine';
 import { idbPut } from './idb';
-import { type ProgressEvent } from '@versovox/shared';
+import { type ProgressEvent } from '@readport/shared';
 
 /** The engine's synchronous storage (queue owner, last-gasp stash). */
 class MemoryStorage {
@@ -141,7 +141,7 @@ describe('baseRevision propagation', () => {
 
 describe('queue ownership (a revoked session must not cost the reader their writing)', () => {
   it('the same account signing back in keeps its un-synced backlog', async () => {
-    localStorage.setItem('vx-progress-owner', 'user-a');
+    localStorage.setItem('rp-progress-owner', 'user-a');
     await recordCheckpoint('bookQ', 'pause', audio(0.4), { flush: false });
     await claimProgressQueue('user-a');
     expect(store('pending-events').size).toBe(1);
@@ -150,7 +150,7 @@ describe('queue ownership (a revoked session must not cost the reader their writ
   });
 
   it('a backlog left by ANOTHER account is discarded, never posted to the new one', async () => {
-    localStorage.setItem('vx-progress-owner', 'user-a');
+    localStorage.setItem('rp-progress-owner', 'user-a');
     await recordCheckpoint('bookQ', 'pause', audio(0.4), { flush: false });
     await claimProgressQueue('user-b');
     expect(store('pending-events').size).toBe(0);

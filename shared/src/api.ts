@@ -277,7 +277,7 @@ export type PathCheck = z.infer<typeof pathCheckSchema>;
 export const settingsSchema = z.object({
   /** Used when a book's own metadata does not say what language it is in. */
   defaultLanguage: z.string().min(2).max(16),
-  /** Folders scanned for books. Read-only; pinned by VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS. */
+  /** Folders scanned for books. Read-only; pinned by RP_EBOOK_DIRS / RP_AUDIOBOOK_DIRS. */
   ebookDirs: dirListSchema.default([]),
   audiobookDirs: dirListSchema.default([]),
   /**

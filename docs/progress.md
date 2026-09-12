@@ -28,7 +28,7 @@ forward.**
    the same browser.
 5. **Resume** combines the newest acknowledged server state with any newer
    unacknowledged local events — using the _same_ decision function the
-   server runs (`@versovox/shared` `resolveResume`), so offline reading
+   server runs (`@readport/shared` `resolveResume`), so offline reading
    resumes correctly and reconciles idempotently later.
 
 ## Server (append-only + reconciled state)

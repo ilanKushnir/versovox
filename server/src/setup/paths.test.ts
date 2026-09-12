@@ -7,7 +7,7 @@ import { checkLibraryPath, containerMounts } from './paths.js';
 let tmp: string;
 
 beforeAll(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-paths-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-paths-'));
 });
 afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true });

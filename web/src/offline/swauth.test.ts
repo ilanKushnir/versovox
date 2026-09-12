@@ -179,15 +179,15 @@ interface SwRequest {
   headers: Headers;
 }
 
-const OFFLINE_CACHE = 'vx-offline-v1';
-const SHELL_CACHE = 'vx-shell-dev';
+const OFFLINE_CACHE = 'rp-offline-v1';
+const SHELL_CACHE = 'rp-shell-dev';
 
 /** The hashed bundles this worker's build precached (spliced in as the vite build does). */
 const PRECACHE = ['/', '/manifest.webmanifest', '/assets/index-dev.js'];
 
 function loadSw() {
   const src = SW_SRC.replace(
-    /const PRECACHE = \/\*__VX_PRECACHE__\*\/ \[[^\]]*\];/,
+    /const PRECACHE = \/\*__RP_PRECACHE__\*\/ \[[^\]]*\];/,
     `const PRECACHE = ${JSON.stringify(PRECACHE)};`,
   );
   if (src === SW_SRC) throw new Error('the precache placeholder web/vite.config.ts fills is gone');
@@ -296,13 +296,13 @@ describe('offline cache ownership (a shared device serves nobody else’s books)
     // The previous account's private content is gone from the device.
     const cache = await sw.caches.open(OFFLINE_CACHE);
     expect(await cache.match('/api/books/b1')).toBeUndefined();
-    expect(sw.messages).toContainEqual({ type: 'vx-offline-purged', reason: 'account-changed' });
+    expect(sw.messages).toContainEqual({ type: 'rp-offline-purged', reason: 'account-changed' });
   });
 
   it('cached audio is refused for a different account as well', async () => {
     const cache = await sw.caches.open(OFFLINE_CACHE);
-    await cache.put('/api/books/b1/track/0?vxmeta=1', json({ size: 4, chunkSize: 4 }));
-    await cache.put('/api/books/b1/track/0?vxchunk=0', new Response(new Uint8Array(4)));
+    await cache.put('/api/books/b1/track/0?rpmeta=1', json({ size: 4, chunkSize: 4 }));
+    await cache.put('/api/books/b1/track/0?rpchunk=0', new Response(new Uint8Array(4)));
     await cache.put('/__vx/offline-owner', json({ userId: 'ada' }));
     sw.network.mockImplementation(async (req) => {
       if (keyOf(req).endsWith('/api/auth/me')) return me('grace');
@@ -424,16 +424,16 @@ describe('app shell cache', () => {
 
   it('serves the precached web app manifest when the network is gone', async () => {
     const cache = await sw.caches.open(SHELL_CACHE);
-    await cache.put('/manifest.webmanifest', new Response('{"name":"Versovox"}'));
+    await cache.put('/manifest.webmanifest', new Response('{"name":"ReadPort"}'));
     const res = await sw.request('/manifest.webmanifest');
-    expect(await res!.text()).toContain('Versovox');
+    expect(await res!.text()).toContain('ReadPort');
     expect(sw.network).not.toHaveBeenCalled();
   });
 
   it('POISONING: the SPA catch-all is never cached under a hashed bundle’s URL', async () => {
     sw.network.mockImplementation(
       async () =>
-        new Response('<!doctype html><title>Versovox</title>', {
+        new Response('<!doctype html><title>ReadPort</title>', {
           status: 200,
           headers: { 'content-type': 'text/html' },
         }),
@@ -461,9 +461,9 @@ describe('downloaded audio is only served when the whole span is present', () =>
 
   async function seedTrack(present: number[]) {
     const cache = await sw.caches.open(OFFLINE_CACHE);
-    await cache.put('/api/books/b1/track/0?vxmeta=1', json(meta));
+    await cache.put('/api/books/b1/track/0?rpmeta=1', json(meta));
     for (const i of present) {
-      await cache.put(`/api/books/b1/track/0?vxchunk=${i}`, new Response(new Uint8Array(100)));
+      await cache.put(`/api/books/b1/track/0?rpchunk=${i}`, new Response(new Uint8Array(100)));
     }
     await cache.put('/__vx/offline-owner', json({ userId: 'ada' }));
   }

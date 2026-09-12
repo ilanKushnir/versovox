@@ -1,9 +1,9 @@
 # HTTP API
 
 All endpoints are same-origin JSON under `/api`, authenticated by session
-cookie except where noted. Mutating requests require the `x-vx-csrf: 1`
+cookie except where noted. Mutating requests require the `x-rp-csrf: 1`
 header. Schemas are zod-validated; canonical types live in
-`shared/src` (`@versovox/shared`). A role named below is a floor rather than
+`shared/src` (`@readport/shared`). A role named below is a floor rather than
 an exact match — roles rank reader, curator, admin, and anything a curator may
 do an admin may do too.
 
@@ -14,8 +14,8 @@ do an admin may do too.
 | GET    | `/api/health`           | public; liveness — `{status, version, time}`                                         |
 | GET    | `/api/setup/status`     | public; `{needsSetup, setupTokenSource, libraries, languages, defaultLanguage}`      |
 | POST   | `/api/setup/verify`     | public until first user exists; rate limited; checks the bootstrap token             |
-| POST   | `/api/setup/test-paths` | admin, or `x-vx-setup-token` header before setup; `{paths, kind?}` folder checks     |
-| GET    | `/api/setup/browse`     | admin, or `x-vx-setup-token` header before setup; folder picker                      |
+| POST   | `/api/setup/test-paths` | admin, or `x-rp-setup-token` header before setup; `{paths, kind?}` folder checks     |
+| GET    | `/api/setup/browse`     | admin, or `x-rp-setup-token` header before setup; folder picker                      |
 | POST   | `/api/setup`            | public until first user exists; creates admin (+ folders, language), starts the scan |
 | POST   | `/api/auth/login`       | rate limited; `403 account-disabled` for disabled accounts                           |
 | POST   | `/api/auth/logout`      |                                                                                      |
@@ -200,7 +200,7 @@ uses to decide how far to rewind before playing.
 | POST   | `/api/alignments/export` | admin; queues `export-alignments` → `{queued}` |
 
 Finished alignments live as files in a folder the operator mounts from their
-own library, which is the only place Versovox writes. Both jobs run by
+own library, which is the only place ReadPort writes. Both jobs run by
 themselves — import after every scan, export when an alignment finishes — so
 these two routes are for the operator who has just mounted another folder and
 does not want to wait for the next scan. Both are deduplicated, so pressing the
@@ -217,7 +217,7 @@ portable until the mount is fixed.
 
 | Method | Path             | Notes                                                                           |
 | ------ | ---------------- | ------------------------------------------------------------------------------- |
-| POST   | `/api/preflight` | admin, or `x-vx-setup-token` before setup; "can this container actually align?" |
+| POST   | `/api/preflight` | admin, or `x-rp-setup-token` before setup; "can this container actually align?" |
 
 Read-only: it probes binaries with `-version`, stats directories and asks the
 catalog what is on disk. Nothing is written, downloaded or enqueued. It is a
@@ -292,8 +292,8 @@ about:
   volume after an uninstall.
 
 `GET /api/models` also re-queues any alignment that was blocked on a
-`model-missing` error, so a model dropped into `VX_MODELS_DIR` by hand or by
-the `versovox-model` CLI unblocks work without a restart. That error is
+`model-missing` error, so a model dropped into `RP_MODELS_DIR` by hand or by
+the `readport-model` CLI unblocks work without a restart. That error is
 structured (`model-missing:<id>|<message>`) and surfaces on a pair as
 `lastAlignJob.modelMissing`, which is what lets the Pairing page offer a
 download button instead of a red error.

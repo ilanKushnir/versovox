@@ -12,7 +12,7 @@ import {
   type HandoffStatus,
   type Locator,
   type SwitchResolution,
-} from '@versovox/shared';
+} from '@readport/shared';
 import { type DB, nowIso } from '../db/index.js';
 import { newId } from '../util/ids.js';
 import { type AlignerResult } from './timings.js';

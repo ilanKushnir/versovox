@@ -1,4 +1,4 @@
-import { type Annotation } from '@versovox/shared';
+import { type Annotation } from '@readport/shared';
 import { domToOffset, rangeForSpan, type TextMap } from './textmap';
 
 /**
@@ -40,9 +40,9 @@ export function colorOf(a: Annotation): HighlightColor {
 
 /** Registry names, one per colour plus one for notes. Must match the CSS. */
 const registryFor = (a: Annotation): string =>
-  a.kind === 'note' ? 'vx-note' : `vx-hl-${colorOf(a)}`;
+  a.kind === 'note' ? 'rp-note' : `rp-hl-${colorOf(a)}`;
 
-const ALL_REGISTRIES = ['vx-note', ...HIGHLIGHT_COLORS.map((c) => `vx-hl-${c}`)];
+const ALL_REGISTRIES = ['rp-note', ...HIGHLIGHT_COLORS.map((c) => `rp-hl-${c}`)];
 
 type HighlightApi = {
   highlights?: Map<string, unknown> & {

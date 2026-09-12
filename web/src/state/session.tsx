@@ -108,7 +108,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   //    contract in api/client.ts), so no flush is attempted here; the queue
   //    is kept and delivered when this account signs in again.
   //  - The service worker's own online revocation check posts
-  //    'vx-unauthorized' after purging the offline cache; the page then
+  //    'rp-unauthorized' after purging the offline cache; the page then
   //    clears its IndexedDB state and drops to the login screen.
   useEffect(() => {
     const invalidate = async () => {
@@ -119,12 +119,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const unset = setUnauthorizedHandler(invalidate);
     const onSwMessage = (e: MessageEvent) => {
       const msg = e.data as { type?: string } | null;
-      if (msg?.type === 'vx-unauthorized') void invalidate();
+      if (msg?.type === 'rp-unauthorized') void invalidate();
       // The service worker found this device's cached books belonged to a
       // different account and deleted them. Nothing is wrong, but the registry
       // still lists them as available offline, and a book that claims to be
       // downloaded and is not is worse than one that never claimed it.
-      if (msg?.type === 'vx-offline-purged') void idbClear(STORES.downloads).catch(() => {});
+      if (msg?.type === 'rp-offline-purged') void idbClear(STORES.downloads).catch(() => {});
     };
     navigator.serviceWorker?.addEventListener('message', onSwMessage);
     return () => {

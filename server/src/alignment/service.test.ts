@@ -1,4 +1,4 @@
-import { SWITCH_MAX_REWIND_MS } from '@versovox/shared';
+import { SWITCH_MAX_REWIND_MS } from '@readport/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openMemoryDatabase, nowIso, type DB } from '../db/index.js';
 import {

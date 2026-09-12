@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LANGUAGES, languageLabel } from '@versovox/shared';
+import { LANGUAGES, languageLabel } from '@readport/shared';
 import { api } from '../api/client';
 import { type BookSummary, type PairDto, type ProcessingSummary } from '../lib/types';
 import { Cover, EmptyState, Sheet, useToast } from '../components/ui';
@@ -649,7 +649,7 @@ function PairCard({
         pair.status !== 'rejected' &&
         !running &&
         !job?.modelMissing && (
-          <div style={{ fontSize: 13.5, color: 'var(--vx-text-soft)' }}>{UNALIGNED_PAIR_NOTE}</div>
+          <div style={{ fontSize: 13.5, color: 'var(--rp-text-soft)' }}>{UNALIGNED_PAIR_NOTE}</div>
         )
       )}
 
@@ -749,7 +749,7 @@ function ManualLinkSheet({ onClose, onLinked }: { onClose: () => void; onLinked:
 
   return (
     <Sheet title="Link two books manually" onClose={onClose}>
-      <p style={{ color: 'var(--vx-text-soft)', fontSize: 13.5, marginBlockStart: 0 }}>
+      <p style={{ color: 'var(--rp-text-soft)', fontSize: 13.5, marginBlockStart: 0 }}>
         {MANUAL_LINK_NOTE}
       </p>
       {error && (

@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Canonical locators. One contract, reused by the reader, the player, the
  * progress pipeline, annotations, alignment, and the switch endpoint.
  *
- * Ebook positions are anchored to the derived text index that Versovox
+ * Ebook positions are anchored to the derived text index that ReadPort
  * extracts from the EPUB (never to the mutable rendered DOM):
  *  - `spineIdx`: index into the spine reading order.
  *  - `sentenceId`: stable content-derived sentence id ("s" + hash), survives

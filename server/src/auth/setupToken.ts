@@ -10,7 +10,7 @@ import { type DB } from '../db/index.js';
  * started instance first cannot take it over.
  *
  * Sources, in order:
- *   1. VX_SETUP_TOKEN / VX_SETUP_TOKEN_FILE (recommended; set it in .env).
+ *   1. RP_SETUP_TOKEN / RP_SETUP_TOKEN_FILE (recommended; set it in .env).
  *   2. Otherwise a random token is generated on first boot and written to
  *      <dataDir>/setup-token (0600) and to the server log.
  * There is no default token. The token is consumed (file removed, in-memory
@@ -49,7 +49,7 @@ export function ensureSetupToken(
   if (config.setupToken) {
     token = config.setupToken;
     source = 'env';
-    log.info('First-run setup is locked with VX_SETUP_TOKEN.');
+    log.info('First-run setup is locked with RP_SETUP_TOKEN.');
   } else {
     let existing: string | null = null;
     try {
@@ -67,7 +67,7 @@ export function ensureSetupToken(
     generatedPath = tokenPath;
     log.warn(
       `First-run setup token (required to create the admin account): ${token}\n` +
-        `    Also stored at ${tokenPath}. Set VX_SETUP_TOKEN in .env to choose your own.`,
+        `    Also stored at ${tokenPath}. Set RP_SETUP_TOKEN in .env to choose your own.`,
     );
   }
 

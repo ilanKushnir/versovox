@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api/client';
 import { useSession, type User } from '../state/session';
-import { VersoMark } from '../components/icons';
+import { ReadPortMark } from '../components/icons';
 
 function AuthCard({
   title,
@@ -25,8 +25,8 @@ function AuthCard({
       <div className="auth-page__glow" aria-hidden="true" />
       <form className="auth-card" onSubmit={onSubmit}>
         <span className="brand">
-          <VersoMark size={34} style={{ color: 'var(--vx-primary)' }} />
-          <span className="brand__name">Versovox</span>
+          <ReadPortMark size={34} style={{ color: 'var(--rp-primary)' }} />
+          <span className="brand__name">ReadPort</span>
         </span>
         <p className="auth-card__tagline">Read and listen in tandem</p>
         <h1>{title}</h1>
@@ -78,7 +78,7 @@ export function LoginPage() {
   return (
     <AuthCard
       title="Welcome back"
-      lede="Sign in to your Versovox server."
+      lede="Sign in to your ReadPort server."
       onSubmit={submit}
       submitLabel="Sign in"
       busy={busy}

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { RECENTLY_ADDED_DAYS, RECENTLY_ADDED_LIMIT, type BookSummary } from '@versovox/shared';
+import { RECENTLY_ADDED_DAYS, RECENTLY_ADDED_LIMIT, type BookSummary } from '@readport/shared';
 import { libraryRoots } from '../../domain/settings.js';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';

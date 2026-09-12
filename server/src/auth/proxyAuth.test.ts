@@ -13,7 +13,7 @@ let app: FastifyInstance;
 let tmp: string;
 
 beforeAll(async () => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-proxyauth-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-proxyauth-'));
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
@@ -89,7 +89,7 @@ describe('proxy header SSO', () => {
       method: 'POST',
       url: '/api/setup',
       remoteAddress: '192.168.1.99',
-      headers: { 'x-vx-csrf': '1', 'content-type': 'application/json' },
+      headers: { 'x-rp-csrf': '1', 'content-type': 'application/json' },
       payload: {
         username: 'late',
         password: 'long-enough-password',
@@ -113,7 +113,7 @@ describe('proxy header SSO', () => {
       method: 'POST',
       url: '/api/auth/login',
       remoteAddress: '192.168.1.99',
-      headers: { 'x-vx-csrf': '1', 'content-type': 'application/json' },
+      headers: { 'x-rp-csrf': '1', 'content-type': 'application/json' },
       payload: { username: 'dana', password: '!proxy-sso' },
     });
     expect(res.statusCode).toBe(401);

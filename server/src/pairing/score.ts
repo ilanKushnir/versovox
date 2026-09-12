@@ -1,4 +1,4 @@
-import { type PairEvidence } from '@versovox/shared';
+import { type PairEvidence } from '@readport/shared';
 import {
   normalizeAuthor,
   normalizeTitle,

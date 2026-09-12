@@ -2,15 +2,15 @@
 
 ## Precedence
 
-1. **Environment variables** (`VX_*`) — pin values in Compose; the settings
+1. **Environment variables** (`RP_*`) — pin values in Compose; the settings
    they pin are shown read-only ("env") in the admin UI.
 2. **In-app admin settings** — stored in the database, editable in
    Settings; only for keys not pinned by env.
 3. **Built-in defaults.**
 
-Every `VX_*` variable also accepts a `VX_*_FILE` variant whose value is a
+Every `RP_*` variable also accepts a `RP_*_FILE` variant whose value is a
 path to a file containing the value (Docker secrets friendly), e.g.
-`VX_SESSION_SECRET_FILE=/run/secrets/vx_session_secret`.
+`RP_SESSION_SECRET_FILE=/run/secrets/rp_session_secret`.
 
 `.env.example` is an annotated copy of everything below, and is what the
 bundled `docker-compose.yml` reads.
@@ -19,28 +19,28 @@ bundled `docker-compose.yml` reads.
 
 | Variable                   | Default                            | Description                                                                                                                                                                                             |
 | -------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VX_PORT`                  | `8383`                             | HTTP port.                                                                                                                                                                                              |
-| `VX_HOST`                  | `127.0.0.1` (image sets `0.0.0.0`) | Bind address.                                                                                                                                                                                           |
-| `VX_DATA_DIR`              | `./data` (image: `/data`)          | SQLite, derived ebook indexes, reading progress, and the fallback alignment folder. Local disk only — never SMB/NFS.                                                                                    |
-| `VX_CACHE_DIR`             | `./cache` (image: `/cache`)        | Cover images. Reproducible: safe to delete.                                                                                                                                                             |
-| `VX_MODELS_DIR`            | `./models` (image: `/models`)      | The alignment model, in `mms-fa/` (317 MB, one download for every language). Reproducible: safe to delete and fetch again.                                                                              |
-| `VX_EBOOK_DIRS`            | —                                  | Comma-separated ebook roots, up to 16, mounted `:ro`. Optional: when unset, the setup wizard / Settings → Libraries store the roots in the database.                                                    |
-| `VX_AUDIOBOOK_DIRS`        | —                                  | Comma-separated audiobook roots, as above.                                                                                                                                                              |
-| `VX_ALIGNMENT_DIRS`        | —                                  | Comma-separated folders that finished alignments are written into — the only library folders Versovox writes to, so no `:ro`. Unset means `<data>/alignments`. See below.                               |
-| `VX_SESSION_SECRET`        | auto-generated                     | HMAC key for session tokens. Set explicitly in production; rotating it signs everyone out. If unset, one is generated and persisted at `<data>/session-secret` (0600).                                  |
-| `VX_SETUP_TOKEN`           | auto-generated                     | One-time first-run bootstrap token required to create the admin account. If unset, generated on first start, printed in the log, stored at `<data>/setup-token` (0600). Consumed when the admin exists. |
-| `VX_TRUST_PROXY`           | `0`                                | Proxy trust for client IPs. `0` (default): forwarded headers ignored. `1`: trust local/private-network proxies. Otherwise: comma-separated proxy IPs/CIDRs.                                             |
-| `VX_TRUST_HTTPS`           | `0`                                | Set `1` behind HTTPS: marks session cookies `Secure`.                                                                                                                                                   |
-| `VX_SESSION_DAYS`          | `30`                               | Session lifetime, 1–365.                                                                                                                                                                                |
-| `VX_INLINE_WORKER`         | `1`                                | Run background jobs in the web process. Set `0` when using the dedicated worker container.                                                                                                              |
-| `VX_JOB_CONCURRENCY`       | `2`                                | Simultaneous **alignments** (1–8). Two more slots are always free: one for the model download, one for scans/indexing/pairing, so a long alignment never blocks the library. See below.                 |
-| `VX_ALIGN_THREADS`         | `4`                                | Threads **one** alignment may give the model (1–32). Should track the container's CPU allowance, not the host's core count. See below.                                                                  |
-| `VX_DEFAULT_LANGUAGE`      | `en`                               | BCP-47 language of last resort, used when nothing about a book says what it is in.                                                                                                                      |
-| `VX_SCAN_INTERVAL_MINUTES` | `60`                               | Minutes between automatic library rescans so titles added in Calibre/Audiobookshelf appear on their own; `0` disables (manual/API rescans only). Maximum a week.                                        |
-| `VX_PROXY_AUTH_HEADER`     | —                                  | Reverse-proxy SSO: header carrying the signed-in username (e.g. `x-authentik-username`). Empty = disabled. See docs/security.md.                                                                        |
-| `VX_PROXY_AUTH_SOURCES`    | —                                  | Comma-separated proxy IPs/CIDRs whose header is trusted (checked on the TCP peer). Required for proxy SSO.                                                                                              |
-| `VX_PROXY_AUTH_ADMINS`     | —                                  | Comma-separated usernames (as sent by the proxy) that get the admin role. On an empty instance the first proxied user is admin regardless.                                                              |
-| `VX_LOG_LEVEL`             | `info`                             | fatal/error/warn/info/debug/trace.                                                                                                                                                                      |
+| `RP_PORT`                  | `8383`                             | HTTP port.                                                                                                                                                                                              |
+| `RP_HOST`                  | `127.0.0.1` (image sets `0.0.0.0`) | Bind address.                                                                                                                                                                                           |
+| `RP_DATA_DIR`              | `./data` (image: `/data`)          | SQLite, derived ebook indexes, reading progress, and the fallback alignment folder. Local disk only — never SMB/NFS.                                                                                    |
+| `RP_CACHE_DIR`             | `./cache` (image: `/cache`)        | Cover images. Reproducible: safe to delete.                                                                                                                                                             |
+| `RP_MODELS_DIR`            | `./models` (image: `/models`)      | The alignment model, in `mms-fa/` (317 MB, one download for every language). Reproducible: safe to delete and fetch again.                                                                              |
+| `RP_EBOOK_DIRS`            | —                                  | Comma-separated ebook roots, up to 16, mounted `:ro`. Optional: when unset, the setup wizard / Settings → Libraries store the roots in the database.                                                    |
+| `RP_AUDIOBOOK_DIRS`        | —                                  | Comma-separated audiobook roots, as above.                                                                                                                                                              |
+| `RP_ALIGNMENT_DIRS`        | —                                  | Comma-separated folders that finished alignments are written into — the only library folders ReadPort writes to, so no `:ro`. Unset means `<data>/alignments`. See below.                               |
+| `RP_SESSION_SECRET`        | auto-generated                     | HMAC key for session tokens. Set explicitly in production; rotating it signs everyone out. If unset, one is generated and persisted at `<data>/session-secret` (0600).                                  |
+| `RP_SETUP_TOKEN`           | auto-generated                     | One-time first-run bootstrap token required to create the admin account. If unset, generated on first start, printed in the log, stored at `<data>/setup-token` (0600). Consumed when the admin exists. |
+| `RP_TRUST_PROXY`           | `0`                                | Proxy trust for client IPs. `0` (default): forwarded headers ignored. `1`: trust local/private-network proxies. Otherwise: comma-separated proxy IPs/CIDRs.                                             |
+| `RP_TRUST_HTTPS`           | `0`                                | Set `1` behind HTTPS: marks session cookies `Secure`.                                                                                                                                                   |
+| `RP_SESSION_DAYS`          | `30`                               | Session lifetime, 1–365.                                                                                                                                                                                |
+| `RP_INLINE_WORKER`         | `1`                                | Run background jobs in the web process. Set `0` when using the dedicated worker container.                                                                                                              |
+| `RP_JOB_CONCURRENCY`       | `2`                                | Simultaneous **alignments** (1–8). Two more slots are always free: one for the model download, one for scans/indexing/pairing, so a long alignment never blocks the library. See below.                 |
+| `RP_ALIGN_THREADS`         | `4`                                | Threads **one** alignment may give the model (1–32). Should track the container's CPU allowance, not the host's core count. See below.                                                                  |
+| `RP_DEFAULT_LANGUAGE`      | `en`                               | BCP-47 language of last resort, used when nothing about a book says what it is in.                                                                                                                      |
+| `RP_SCAN_INTERVAL_MINUTES` | `60`                               | Minutes between automatic library rescans so titles added in Calibre/Audiobookshelf appear on their own; `0` disables (manual/API rescans only). Maximum a week.                                        |
+| `RP_PROXY_AUTH_HEADER`     | —                                  | Reverse-proxy SSO: header carrying the signed-in username (e.g. `x-authentik-username`). Empty = disabled. See docs/security.md.                                                                        |
+| `RP_PROXY_AUTH_SOURCES`    | —                                  | Comma-separated proxy IPs/CIDRs whose header is trusted (checked on the TCP peer). Required for proxy SSO.                                                                                              |
+| `RP_PROXY_AUTH_ADMINS`     | —                                  | Comma-separated usernames (as sent by the proxy) that get the admin role. On an empty instance the first proxied user is admin regardless.                                                              |
+| `RP_LOG_LEVEL`             | `info`                             | fatal/error/warn/info/debug/trace.                                                                                                                                                                      |
 | `PUID` / `PGID` / `TZ`     | `1000`/`1000`/`Etc/UTC`            | Container user mapping and timezone (entrypoint).                                                                                                                                                       |
 
 There is deliberately no variable for how closely the aligner listens or for
@@ -56,10 +56,10 @@ rest, admin only.
 
 | Setting           | Default    | Set in                               | Pinned by             |
 | ----------------- | ---------- | ------------------------------------ | --------------------- |
-| `defaultLanguage` | `en`       | Settings → Alignment → Language      | `VX_DEFAULT_LANGUAGE` |
-| `ebookDirs`       | none       | Settings → Libraries, and the wizard | `VX_EBOOK_DIRS`       |
-| `audiobookDirs`   | none       | Settings → Libraries, and the wizard | `VX_AUDIOBOOK_DIRS`   |
-| `alignmentDirs`   | none       | Settings → Libraries, and the wizard | `VX_ALIGNMENT_DIRS`   |
+| `defaultLanguage` | `en`       | Settings → Alignment → Language      | `RP_DEFAULT_LANGUAGE` |
+| `ebookDirs`       | none       | Settings → Libraries, and the wizard | `RP_EBOOK_DIRS`       |
+| `audiobookDirs`   | none       | Settings → Libraries, and the wizard | `RP_AUDIOBOOK_DIRS`   |
+| `alignmentDirs`   | none       | Settings → Libraries, and the wizard | `RP_ALIGNMENT_DIRS`   |
 | `alignPrecision`  | `standard` | Settings → Alignment                 | —                     |
 | `autoAlign`       | `true`     | Settings → Alignment, and the wizard | —                     |
 | `alignSpeedRatio` | `0`        | nowhere — the worker measures it     | —                     |
@@ -91,9 +91,9 @@ single book can always be overridden on the Pairing page.
 
 An alignment is hours of CPU, and until it is written down it lives only in the
 container's database, where a from-scratch redeploy throws it away.
-`VX_ALIGNMENT_DIRS` (or Settings → Libraries) points at a folder in your own
+`RP_ALIGNMENT_DIRS` (or Settings → Libraries) points at a folder in your own
 library, mounted read-write, and every finished alignment is saved there as one
-gzipped `.vxalign` file. A fresh install scans that folder and imports whatever
+gzipped `.rpalign` file. A fresh install scans that folder and imports whatever
 it recognises, so a rebuilt container is immediately as capable as the one it
 replaced.
 
@@ -106,7 +106,7 @@ Leaving it unset is supported and is not the recommendation: alignments then go
 to `<data>/alignments`, which survives a restart but not a rebuild that discards
 the volume. The one setup mistake worth watching for is the opposite of the
 usual one — every other library line in the stock Compose file ends in `:ro`,
-and copying that pattern here gives you a folder Versovox cannot write to. The
+and copying that pattern here gives you a folder ReadPort cannot write to. The
 folder tester in the wizard and in Settings catches it by actually writing a
 probe file, because a bind mount can report friendly permission bits and still
 refuse.
@@ -115,7 +115,7 @@ refuse.
 
 Two numbers multiply, and only their product matters to the CPU allowance:
 
-- `VX_JOB_CONCURRENCY` is how many books may be aligned at the same time. The
+- `RP_JOB_CONCURRENCY` is how many books may be aligned at the same time. The
   worker runs three lanes — this many heavy slots, one slot for the model
   download, one for everything light (scans, indexing, pairing) — so an
   alignment that runs for half an hour cannot stop a new book appearing in the
@@ -123,7 +123,7 @@ Two numbers multiply, and only their product matters to the CPU allowance:
   nowhere else: it is in `settingsSchema` because the settings page reports it,
   not because it can be set there, and a value written through the API is
   stored and then ignored. Set it in Compose.
-- `VX_ALIGN_THREADS` is how many threads each of those alignments gives the
+- `RP_ALIGN_THREADS` is how many threads each of those alignments gives the
   model. Past the container's CPU allowance the model gets slower rather than
   faster, so this should track the allowance and not the host's core count.
 
@@ -188,8 +188,8 @@ folder is tested where the server sees it: existence, readability, a shallow
 count of the matching files, and, for the alignment folder, whether a file can
 actually be created in it. A picker lists what the container has mounted, read
 from the kernel rather than guessed, so the paths offered are the ones that can
-possibly work. Folders pinned by `VX_EBOOK_DIRS`, `VX_AUDIOBOOK_DIRS` or
-`VX_ALIGNMENT_DIRS` are shown read-only.
+possibly work. Folders pinned by `RP_EBOOK_DIRS`, `RP_AUDIOBOOK_DIRS` or
+`RP_ALIGNMENT_DIRS` are shown read-only.
 
 The ready step reviews all of that, offers the alignment model download and the
 "align new matches automatically" switch, and runs the readiness report from

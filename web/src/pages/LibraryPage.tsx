@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useParams } from 'react-router-dom';
-import { AUTO_SHELVES, type AutoShelfId, type BookSummary } from '@versovox/shared';
+import { AUTO_SHELVES, type AutoShelfId, type BookSummary } from '@readport/shared';
 import { api } from '../api/client';
 import { useShelves } from '../state/shelves';
 import { AddToSheet } from '../components/AddToSheet';
@@ -424,7 +424,7 @@ function ShelfEmpty({ showing, filtered }: { showing: Showing; filtered: boolean
       'reading-now': 'Open anything and it appears here until you finish it.',
       finished: 'Books you mark as finished collect here.',
       'both-formats':
-        'This fills up as Versovox matches an ebook to its audiobook. The Pairing page shows what it is considering.',
+        'This fills up as ReadPort matches an ebook to its audiobook. The Pairing page shows what it is considering.',
       'recently-added': 'Nothing new has turned up in the last month.',
     };
     return (
@@ -438,7 +438,7 @@ function ShelfEmpty({ showing, filtered }: { showing: Showing; filtered: boolean
   }
   return (
     <EmptyState icon={<IconLibrary size={44} />} title="Your library is empty">
-      Versovox reads ebook and audiobook folders you already have, and never writes to them. Choose
+      ReadPort reads ebook and audiobook folders you already have, and never writes to them. Choose
       those folders in Settings → Libraries; each one is tested before it is saved.
     </EmptyState>
   );

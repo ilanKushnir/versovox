@@ -136,7 +136,7 @@ export async function runExportAlignments(
 }
 
 /**
- * Stream a catalog speech model into VX_MODELS_DIR. Writes to `<file>.part`
+ * Stream a catalog speech model into RP_MODELS_DIR. Writes to `<file>.part`
  * with progress updates and renames only once the whole file arrived and
  * matches the published size, so a half-download is never mistaken for a
  * model. Resumable across attempts via HTTP Range.
@@ -428,7 +428,7 @@ export function derivedRevForAttempt(job: Pick<JobRow, 'id' | 'lease_token'>): s
 export const DERIVED_GC_GRACE_MS = 5 * 60_000;
 
 /** Sidecar recording when each non-active entry was first seen retired. */
-const GC_REGISTRY_FILE = '.vx-gc.json';
+const GC_REGISTRY_FILE = '.rp-gc.json';
 
 /**
  * Deferred, reference-safe garbage collection of derived versions. Runs

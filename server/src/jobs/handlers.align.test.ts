@@ -109,7 +109,7 @@ const alignmentCount = (pairId: string): number =>
   ).c;
 
 beforeAll(async () => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-forcedalign-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-forcedalign-'));
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),

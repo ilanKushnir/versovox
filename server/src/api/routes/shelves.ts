@@ -13,7 +13,7 @@ import {
   SHELVES_PER_USER_MAX,
   type ReadingListItem,
   type ShelfSummary,
-} from '@versovox/shared';
+} from '@readport/shared';
 import { type AppContext } from '../../context.js';
 import { type DB } from '../../db/index.js';
 import { nowIso } from '../../db/index.js';

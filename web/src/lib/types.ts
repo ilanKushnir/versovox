@@ -5,7 +5,7 @@ import {
   type SwitchResolution,
   type TrackInfo,
   type Locator,
-} from '@versovox/shared';
+} from '@readport/shared';
 
 export interface BookDetail {
   book: BookSummary;
@@ -128,30 +128,15 @@ export interface ResolveResponse {
 
 export type { Annotation, BookSummary, Locator };
 
+/** One entry of GET /api/models (server: ModelSpec plus its install state). */
 export interface ModelInfo {
   id: string;
   label: string;
-  family: 'openai' | 'ivrit-ai' | 'meta';
-  /**
-   * Which runtime consumes it: `ctc-onnx` is the forced aligner (one model,
-   * every language), `whisper-ggml` is speech recognition. Optional because a
-   * server from before forced alignment only ever shipped whisper models.
-   */
-  kind?: 'whisper-ggml' | 'ctc-onnx';
-  /**
-   * What the model is FOR (server: ModelSpec.purpose). Since forced alignment
-   * became the default engine only the `aligner` is required, so the settings
-   * page groups by this rather than by language. Optional: a server from
-   * before 0.7.0 sends no purpose at all.
-   */
-  purpose?: 'aligner' | 'language-id' | 'transcription';
-  /** Present when the licence is not permissive; shown BEFORE the download button. */
-  licence?: string;
-  languages: string[] | '*';
+  /** Shown BEFORE the download button — the aligner is non-commercial. */
+  licence: string;
   file: string;
   sizeBytes: number;
   note: string;
-  cost: number;
   installed: boolean;
   installedBytes: number;
   download: { state: string; progress: number; detail: string | null } | null;
@@ -166,11 +151,10 @@ export interface EngineStatus {
 
 export interface ModelsResponse {
   modelsDir: string;
-  whisperAvailable: boolean;
   /** Whether onnxruntime-node loaded, i.e. whether forced alignment can run at all. */
   alignerRuntime?: EngineStatus;
   models: ModelInfo[];
-  languages: { code: string; label: string; native: string; models: string[] }[];
+  languages: { code: string; label: string; native: string }[];
 }
 
 /** Catalog id of the alignment model (server: ALIGNER_MODEL_ID). */

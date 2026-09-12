@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { AUTO_SHELVES, type AutoShelfId } from '@versovox/shared';
+import { AUTO_SHELVES, type AutoShelfId } from '@readport/shared';
 import { useShelves } from '../state/shelves';
 import { useToast } from './ui';
 import {

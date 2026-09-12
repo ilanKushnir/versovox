@@ -8,7 +8,7 @@ import { hashFileChunks, trackSourceVersion } from './integrity.js';
 let tmp: string;
 
 beforeAll(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-integrity-'));
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-integrity-'));
 });
 
 afterAll(() => {

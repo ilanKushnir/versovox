@@ -148,7 +148,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
   const allowed = (req: { user: { role: string } | null; headers: Record<string, unknown> }) => {
     if (req.user) return hasRole(req.user.role, 'admin');
     if (userCount() > 0) return false;
-    const raw = req.headers['x-vx-setup-token'];
+    const raw = req.headers['x-rp-setup-token'];
     const token = Array.isArray(raw) ? raw[0] : raw;
     return typeof token === 'string' && !!ctx.setupToken && ctx.setupToken.matches(token);
   };
@@ -290,7 +290,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
         : dirs.map(([n]) => n).join(', ') + ' are writable',
       ...(unwritable.length
         ? {
-            fix: 'Mount these read-write and make sure the container user owns them (VX_DATA_DIR, VX_CACHE_DIR, VX_MODELS_DIR).',
+            fix: 'Mount these read-write and make sure the container user owns them (RP_DATA_DIR, RP_CACHE_DIR, RP_MODELS_DIR).',
           }
         : {}),
     });
@@ -320,7 +320,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
             : `${folderChecks.length} folder${folderChecks.length === 1 ? '' : 's'}, ${found}${sampledAny ? '+' : ''} file${found === 1 && !sampledAny ? '' : 's'} visible`,
       ...(folderChecks.length === 0
         ? {
-            fix: 'Add them here or later under Settings → Libraries. Versovox only ever reads them.',
+            fix: 'Add them here or later under Settings → Libraries. ReadPort only ever reads them.',
           }
         : unreadable.length
           ? {
