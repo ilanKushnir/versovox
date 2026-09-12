@@ -4,6 +4,8 @@ import { type AudioLocator, type EbookLocator } from '@versovox/shared';
 import { api, isOffline } from '../api/client';
 import { type Annotation, type BookDetail, type ResolveResponse } from '../lib/types';
 import { Cover, EmptyState, Sheet, useToast } from '../components/ui';
+import { AddToSheet } from '../components/AddToSheet';
+import { useShelves } from '../state/shelves';
 import {
   IconAlert,
   IconBookmark,
@@ -11,7 +13,10 @@ import {
   IconDownload,
   IconHeadphones,
   IconLink,
+  IconClose,
+  IconList,
   IconOffline,
+  IconShelf,
   IconSwitch,
   IconTrash,
 } from '../components/icons';
@@ -51,7 +56,14 @@ export function BookPage() {
   const [ambient, setAmbient] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
   const [offlineSheet, setOfflineSheet] = useState(false);
+  const [addTo, setAddTo] = useState(false);
+  const [member, setMember] = useState<{
+    shelfIds: string[];
+    onReadingList: boolean;
+    readingListPosition: number | null;
+  } | null>(null);
   const autoSwitched = useRef(false);
+  const { overview, refresh: refreshShelves } = useShelves();
 
   const load = useCallback(async () => {
     try {
@@ -67,6 +79,24 @@ export function BookPage() {
     }
     setDl(await getDownloadState(id));
   }, [id]);
+
+  const loadMembership = useCallback(async () => {
+    try {
+      setMember(
+        await api<{
+          shelfIds: string[];
+          onReadingList: boolean;
+          readingListPosition: number | null;
+        }>(`/api/books/${id}/shelves`),
+      );
+    } catch {
+      setMember(null);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadMembership();
+  }, [loadMembership]);
 
   useEffect(() => {
     void load();
@@ -336,8 +366,33 @@ export function BookPage() {
                 <IconHeadphones size={18} /> {pct > 0.001 ? 'Continue listening' : 'Listen'}
               </Link>
             )}
+            <button className="btn btn--secondary" onClick={() => setAddTo(true)}>
+              <IconShelf size={17} /> Add to…
+            </button>
             <OfflineButton dl={dl} onClick={() => void openOfflineSheet()} />
           </div>
+          <MembershipChips
+            member={member}
+            shelfNames={new Map((overview?.shelves ?? []).map((s) => [s.id, s.name]))}
+            onRemoveShelf={(shelfId, name) =>
+              void (async () => {
+                await api(`/api/shelves/${shelfId}/books/${id}`, { method: 'DELETE' }).catch(
+                  () => {},
+                );
+                await loadMembership();
+                await refreshShelves();
+                toast.show(`Taken off ${name}`);
+              })()
+            }
+            onRemoveQueue={() =>
+              void (async () => {
+                await api(`/api/reading-list/${id}`, { method: 'DELETE' }).catch(() => {});
+                await loadMembership();
+                await refreshShelves();
+                toast.show('Taken off your reading list');
+              })()
+            }
+          />
         </div>
       </div>
 
@@ -492,14 +547,81 @@ export function BookPage() {
           }}
         />
       )}
+      {addTo && (
+        <AddToSheet
+          bookId={id}
+          title={book.title}
+          onClose={() => setAddTo(false)}
+          onChanged={() => void loadMembership()}
+        />
+      )}
     </main>
   );
 }
 
 /**
- * The one entry point to offline downloads, so it carries a visible word —
- * an icon alone has no tooltip on touch, which is where most reading and
- * most flights happen.
+ * Where this book already sits. Removing is one click from here, which is
+ * the point: the panel is for adding, the chips are for undoing.
+ */
+function MembershipChips({
+  member,
+  shelfNames,
+  onRemoveShelf,
+  onRemoveQueue,
+}: {
+  member: { shelfIds: string[]; onReadingList: boolean; readingListPosition: number | null } | null;
+  shelfNames: Map<string, string>;
+  onRemoveShelf: (shelfId: string, name: string) => void;
+  onRemoveQueue: () => void;
+}) {
+  if (!member || (member.shelfIds.length === 0 && !member.onReadingList)) return null;
+  return (
+    <div className="membership" role="group" aria-label="Shelves this book is on">
+      {member.onReadingList && (
+        <span className="membership__chip">
+          <IconList size={13} />
+          Reading list
+          {member.readingListPosition ? ` · ${ordinal(member.readingListPosition)}` : ''}
+          <button
+            className="membership__x"
+            aria-label="Take off the reading list"
+            onClick={onRemoveQueue}
+          >
+            <IconClose size={13} />
+          </button>
+        </span>
+      )}
+      {member.shelfIds.map((sid) => {
+        const name = shelfNames.get(sid);
+        if (!name) return null;
+        return (
+          <span className="membership__chip" key={sid}>
+            <IconShelf size={13} />
+            {name}
+            <button
+              className="membership__x"
+              aria-label={`Take off ${name}`}
+              onClick={() => onRemoveShelf(sid, name)}
+            >
+              <IconClose size={13} />
+            </button>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function ordinal(n: number): string {
+  const rest = n % 100;
+  if (rest >= 11 && rest <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+
+/**
+ * The one entry point to offline downloads, so it carries a visible word — an
+ * icon alone has no tooltip on touch, which is where most reading and most
+ * flights happen.
  */
 function OfflineButton({ dl, onClick }: { dl: DownloadState | null; onClick: () => void }) {
   const downloading = dl?.status === 'downloading';

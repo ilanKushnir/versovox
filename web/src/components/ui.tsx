@@ -47,24 +47,18 @@ export function trapTabFocus(
   }
 }
 
-export function Sheet({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
+/**
+ * Focus trap for a modal surface: Tab cycles inside it, Escape closes, and
+ * the control that opened it gets focus back. Shared by the Sheet and the
+ * Drawer rather than copied, so the two can never drift apart.
+ */
+export function useFocusTrap(ref: { current: HTMLElement | null }, onClose: () => void): void {
   // The latest onClose lives in a ref so a parent re-render (the player
   // re-renders on every timeupdate) never re-runs the focus effect and
   // yanks focus away from the control the user is on.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   useEffect(() => {
-    // Focus trap: Tab cycles inside the dialog; Escape closes; the element
-    // that opened the sheet gets focus back when it closes.
     const opener = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -86,7 +80,20 @@ export function Sheet({
       document.removeEventListener('keydown', onKey);
       opener?.focus?.();
     };
-  }, []);
+  }, [ref]);
+}
+
+export function Sheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap(ref, onClose);
   return createPortal(
     <>
       <div className="sheet-backdrop" onClick={onClose} aria-hidden="true" />
@@ -106,6 +113,46 @@ export function Sheet({
           </button>
         </div>
         <div className="sheet__body">{children}</div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+/**
+ * A panel that slides in from the inline start. Used at tablet widths where
+ * the shelf rail does not fit but the book grid still needs its pixels; the
+ * same content renders in the rail, in here, and in a Sheet on a phone.
+ */
+export function Drawer({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap(ref, onClose);
+  return createPortal(
+    <>
+      <div className="sheet-backdrop" onClick={onClose} aria-hidden="true" />
+      <div
+        className="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        ref={ref}
+      >
+        <div className="sheet__header">
+          <span className="sheet__title">{title}</span>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <IconClose />
+          </button>
+        </div>
+        <div className="drawer__body">{children}</div>
       </div>
     </>,
     document.body,

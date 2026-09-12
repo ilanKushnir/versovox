@@ -762,6 +762,364 @@ describe('Versovox API', () => {
     expect(del.statusCode).toBe(200);
   });
 
+  it('shelves: named, ordered, idempotent, and countable in one request', async () => {
+    const summer = (
+      await authed({ method: 'POST', url: '/api/shelves', payload: { name: '  Summer   reads ' } })
+    ).json() as { shelf: { id: string; name: string } };
+    // Whitespace is tidied so two shelves cannot look identical in the list.
+    expect(summer.shelf.name).toBe('Summer reads');
+    const winter = (
+      await authed({ method: 'POST', url: '/api/shelves', payload: { name: 'Winter' } })
+    ).json() as { shelf: { id: string } };
+
+    const taken = await authed({
+      method: 'POST',
+      url: '/api/shelves',
+      payload: { name: 'summer READS' },
+    });
+    expect(taken.statusCode).toBe(409);
+    expect(taken.json()).toMatchObject({ error: 'shelf-name-taken' });
+    expect(
+      (await authed({ method: 'POST', url: '/api/shelves', payload: { name: '   ' } })).statusCode,
+    ).toBe(400);
+
+    // Adding is idempotent: a second tap reports "already there", not a copy.
+    const first = await authed({
+      method: 'PUT',
+      url: `/api/shelves/${summer.shelf.id}/books/${lanternEbookId}`,
+    });
+    expect(first.json()).toMatchObject({ added: true, count: 1 });
+    const again = await authed({
+      method: 'PUT',
+      url: `/api/shelves/${summer.shelf.id}/books/${lanternEbookId}`,
+    });
+    expect(again.json()).toMatchObject({ added: false, count: 1 });
+    expect(
+      (
+        await authed({
+          method: 'PUT',
+          url: `/api/shelves/${summer.shelf.id}/books/does-not-exist`,
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    // Bulk add skips what is already there and what does not exist.
+    const lib = (await authed({ url: '/api/library' })).json() as { books: { id: string }[] };
+    const everything = lib.books.map((b) => b.id);
+    const bulk = (
+      await authed({
+        method: 'POST',
+        url: `/api/shelves/${summer.shelf.id}/books`,
+        payload: { bookIds: [...everything, 'ghost'] },
+      })
+    ).json() as { added: number; skipped: number };
+    expect(bulk.added).toBe(everything.length - 1);
+    expect(bulk.skipped).toBe(2); // the Lantern ebook, already on, plus the ghost
+
+    // Manual order survives a move into the middle: the third item is asked
+    // to follow the first, and only that one row changes.
+    const before = (await authed({ url: `/api/shelves/${summer.shelf.id}/books` })).json() as {
+      books: { id: string }[];
+      missingCount: number;
+    };
+    expect(before.missingCount).toBe(0);
+    const order = before.books.map((b) => b.id);
+    expect(order.length).toBeGreaterThanOrEqual(3);
+    const moved = await authed({
+      method: 'PATCH',
+      url: `/api/shelves/${summer.shelf.id}/books/${order[2]}/position`,
+      payload: { afterBookId: order[0] },
+    });
+    expect(moved.statusCode).toBe(200);
+    const after = (await authed({ url: `/api/shelves/${summer.shelf.id}/books` })).json() as {
+      books: { id: string }[];
+    };
+    expect(after.books.map((b) => b.id)).toEqual([order[0], order[2], order[1], ...order.slice(3)]);
+    // Naming a neighbour that is no longer there is a stale picture of the
+    // list, not a server error.
+    expect(
+      (
+        await authed({
+          method: 'PATCH',
+          url: `/api/shelves/${summer.shelf.id}/books/${order[2]}/position`,
+          payload: { afterBookId: 'vanished' },
+        })
+      ).statusCode,
+    ).toBe(409);
+    // Sorting still works inside a shelf.
+    const byTitle = (
+      await authed({ url: `/api/shelves/${summer.shelf.id}/books?sort=title` })
+    ).json() as { books: { title: string }[] };
+    expect(byTitle.books.map((b) => b.title)).toEqual(
+      [...byTitle.books.map((b) => b.title)].sort((a, b) => a.localeCompare(b)),
+    );
+
+    // Shelves themselves reorder the same way.
+    const movedShelf = await authed({
+      method: 'PATCH',
+      url: `/api/shelves/${winter.shelf.id}`,
+      payload: { afterShelfId: null },
+    });
+    expect(movedShelf.statusCode).toBe(200);
+    let overview = (await authed({ url: '/api/shelves' })).json() as {
+      shelves: { id: string; name: string; count: number }[];
+    };
+    expect(overview.shelves.map((s) => s.id)).toEqual([winter.shelf.id, summer.shelf.id]);
+
+    // A rename with no move must NOT reorder anything (the zod `.partial()`
+    // trap: an injected default would send the shelf to the top).
+    const renamed = await authed({
+      method: 'PATCH',
+      url: `/api/shelves/${summer.shelf.id}`,
+      payload: { name: 'Summer' },
+    });
+    expect(renamed.statusCode).toBe(200);
+    overview = (await authed({ url: '/api/shelves' })).json() as {
+      shelves: { id: string; name: string; count: number }[];
+    };
+    expect(overview.shelves.map((s) => s.id)).toEqual([winter.shelf.id, summer.shelf.id]);
+    expect(overview.shelves[1]!.name).toBe('Summer');
+    expect(overview.shelves[1]!.count).toBe(everything.length);
+
+    // Membership as the book page asks for it.
+    const member = (await authed({ url: `/api/books/${lanternEbookId}/shelves` })).json() as {
+      shelfIds: string[];
+      onReadingList: boolean;
+    };
+    expect(member.shelfIds).toEqual([summer.shelf.id]);
+    expect(member.onReadingList).toBe(false);
+
+    const removed = await authed({
+      method: 'DELETE',
+      url: `/api/shelves/${summer.shelf.id}/books/${lanternEbookId}`,
+    });
+    expect(removed.json()).toMatchObject({ removed: true, count: everything.length - 1 });
+    expect(
+      (await authed({ method: 'DELETE', url: `/api/shelves/${winter.shelf.id}` })).statusCode,
+    ).toBe(200);
+    expect(
+      (await authed({ method: 'DELETE', url: `/api/shelves/${winter.shelf.id}` })).statusCode,
+    ).toBe(404);
+    await authed({ method: 'DELETE', url: `/api/shelves/${summer.shelf.id}` });
+  });
+
+  it('the reading list is a queue: position, notes and re-ordering', async () => {
+    const lib = (await authed({ url: '/api/library' })).json() as {
+      books: { id: string; title: string }[];
+    };
+    const ids = lib.books.map((b) => b.id).slice(0, 3);
+    for (const id of ids) {
+      await authed({ method: 'PUT', url: `/api/reading-list/${id}` });
+    }
+    const queued = (await authed({ url: '/api/reading-list' })).json() as {
+      items: { book: { id: string } }[];
+      missingCount: number;
+    };
+    expect(queued.items.map((i) => i.book.id)).toEqual(ids);
+
+    // Queueing something already queued is a no-op that reports where it is,
+    // so the confirmation can be specific rather than vague.
+    const jump = (
+      await authed({
+        method: 'PUT',
+        url: `/api/reading-list/${ids[2]}`,
+        payload: { position: 'top' },
+      })
+    ).json() as { added: boolean; position: number };
+    expect(jump).toMatchObject({ added: false, position: 3 });
+
+    const fourth = lib.books[3]!.id;
+    const next = (
+      await authed({
+        method: 'PUT',
+        url: `/api/reading-list/${fourth}`,
+        payload: { position: 'top', note: 'after the sequel' },
+      })
+    ).json() as { added: boolean; position: number; count: number };
+    expect(next).toMatchObject({ added: true, position: 1, count: 4 });
+
+    const moved = await authed({
+      method: 'PATCH',
+      url: `/api/reading-list/${fourth}/position`,
+      payload: { afterBookId: ids[0] },
+    });
+    expect(moved.statusCode).toBe(200);
+    const reordered = (await authed({ url: '/api/reading-list' })).json() as {
+      items: { book: { id: string }; note: string | null }[];
+    };
+    expect(reordered.items.map((i) => i.book.id)).toEqual([ids[0], fourth, ids[1], ids[2]]);
+    expect(reordered.items[1]!.note).toBe('after the sequel');
+
+    const noted = await authed({
+      method: 'PATCH',
+      url: `/api/reading-list/${fourth}`,
+      payload: { note: 'book club, November' },
+    });
+    expect(noted.statusCode).toBe(200);
+    expect(
+      (
+        await authed({
+          method: 'PATCH',
+          url: '/api/reading-list/not-queued',
+          payload: { note: 'x' },
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    // The sidebar knows what is next without fetching the queue.
+    const overview = (await authed({ url: '/api/shelves' })).json() as {
+      readingList: { count: number; nextBookId: string; nextTitle: string };
+    };
+    expect(overview.readingList.count).toBe(4);
+    expect(overview.readingList.nextBookId).toBe(ids[0]);
+    expect(overview.readingList.nextTitle).toBeTruthy();
+
+    for (const id of [...ids, fourth]) {
+      await authed({ method: 'DELETE', url: `/api/reading-list/${id}` });
+    }
+    expect((await authed({ url: '/api/reading-list' })).json()).toMatchObject({ items: [] });
+  });
+
+  it('automatic shelves count the same books the library lists', async () => {
+    const overview = (await authed({ url: '/api/shelves' })).json() as {
+      auto: { id: string; count: number }[];
+    };
+    const count = (id: string) => overview.auto.find((a) => a.id === id)!.count;
+
+    // Both formats is one row per TITLE, not per file: `paired` returns both
+    // sides of every pair and would read as twice as many books.
+    const paired = (await authed({ url: '/api/library?filter=paired' })).json() as {
+      books: { id: string; kind: string; pair: { pairId: string } }[];
+    };
+    const both = (await authed({ url: '/api/library?filter=both-formats' })).json() as {
+      books: { id: string; kind: string; pair: { pairId: string } }[];
+    };
+    expect(both.books.length).toBeGreaterThan(0);
+    expect(paired.books.length).toBe(both.books.length * 2);
+    expect(both.books.length).toBe(count('both-formats'));
+    expect(new Set(both.books.map((b) => b.pair.pairId)).size).toBe(both.books.length);
+    // The ebook side is the one kept, so the cover and the title are the ones
+    // a reader recognises.
+    expect(both.books.every((b) => b.kind === 'ebook')).toBe(true);
+
+    const recent = (await authed({ url: '/api/library?filter=recently-added' })).json() as {
+      books: { id: string }[];
+    };
+    expect(recent.books.length).toBe(count('recently-added'));
+    const all = (await authed({ url: '/api/library' })).json() as { books: unknown[] };
+    // Everything in the sample library was scanned in a moment ago.
+    expect(recent.books.length).toBe(all.books.length);
+
+    const inProgress = (await authed({ url: '/api/library?filter=in-progress' })).json() as {
+      books: unknown[];
+    };
+    expect(inProgress.books.length).toBe(count('reading-now'));
+    const finished = (await authed({ url: '/api/library?filter=finished' })).json() as {
+      books: unknown[];
+    };
+    expect(finished.books.length).toBe(count('finished'));
+
+    expect((await authed({ url: '/api/library?filter=nonsense' })).statusCode).toBe(400);
+  });
+
+  it('shelves belong to one person: nobody else can read, move or delete them', async () => {
+    const mine = (
+      await authed({ method: 'POST', url: '/api/shelves', payload: { name: 'Private' } })
+    ).json() as { shelf: { id: string } };
+    await authed({ method: 'PUT', url: `/api/shelves/${mine.shelf.id}/books/${lanternEbookId}` });
+    await authed({ method: 'PUT', url: `/api/reading-list/${lanternEbookId}` });
+
+    const created = await authed({
+      method: 'POST',
+      url: '/api/users',
+      payload: { username: 'nadia', password: 'nadia-password-123', role: 'curator' },
+    });
+    expect(created.statusCode).toBe(201);
+    const nadiaId = (created.json() as { user: { id: string } }).user.id;
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'x-vx-csrf': '1' },
+      payload: { username: 'nadia', password: 'nadia-password-123' },
+    });
+    const nadiaCookie = login.headers['set-cookie']!.toString().split(';')[0]!;
+    const asNadia = (opts: {
+      method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+      url: string;
+      payload?: unknown;
+    }) =>
+      app.inject({
+        method: opts.method ?? 'GET',
+        url: opts.url,
+        payload: opts.payload as never,
+        headers: {
+          cookie: nadiaCookie,
+          'x-vx-csrf': '1',
+          ...(opts.payload !== undefined ? { 'content-type': 'application/json' } : {}),
+        },
+      });
+
+    // A curator outranks a reader over the library and has no standing at all
+    // over somebody else's shelves. 404 everywhere, never 403: a 403 would
+    // confirm the shelf id exists.
+    for (const attempt of [
+      { url: `/api/shelves/${mine.shelf.id}/books` },
+      { method: 'PATCH' as const, url: `/api/shelves/${mine.shelf.id}`, payload: { name: 'Hers' } },
+      { method: 'DELETE' as const, url: `/api/shelves/${mine.shelf.id}` },
+      { method: 'PUT' as const, url: `/api/shelves/${mine.shelf.id}/books/${lanternAudioId}` },
+      {
+        method: 'POST' as const,
+        url: `/api/shelves/${mine.shelf.id}/books`,
+        payload: { bookIds: [lanternAudioId] },
+      },
+      {
+        method: 'PATCH' as const,
+        url: `/api/shelves/${mine.shelf.id}/books/${lanternEbookId}/position`,
+        payload: { afterBookId: null },
+      },
+      { method: 'DELETE' as const, url: `/api/shelves/${mine.shelf.id}/books/${lanternEbookId}` },
+    ]) {
+      const res = await asNadia(attempt);
+      expect([attempt.url, res.statusCode]).toEqual([attempt.url, 404]);
+    }
+
+    // She sees her own empty sidebar, and the queue is hers too.
+    const hers = (await asNadia({ url: '/api/shelves' })).json() as {
+      shelves: unknown[];
+      readingList: { count: number };
+    };
+    expect(hers.shelves).toEqual([]);
+    expect(hers.readingList.count).toBe(0);
+    expect((await asNadia({ url: `/api/books/${lanternEbookId}/shelves` })).json()).toMatchObject({
+      shelfIds: [],
+      onReadingList: false,
+    });
+    // Removing from her queue a book only I have queued removes nothing.
+    expect(
+      (await asNadia({ method: 'DELETE', url: `/api/reading-list/${lanternEbookId}` })).json(),
+    ).toMatchObject({ removed: false });
+    expect((await authed({ url: `/api/books/${lanternEbookId}/shelves` })).json()).toMatchObject({
+      shelfIds: [mine.shelf.id],
+      onReadingList: true,
+    });
+
+    // Deleting the account takes her furniture with it through the foreign
+    // key, not through the route's hand-written table list.
+    await asNadia({ method: 'POST', url: '/api/shelves', payload: { name: 'Hers' } });
+    await asNadia({ method: 'PUT', url: `/api/reading-list/${lanternAudioId}` });
+    expect((await authed({ method: 'DELETE', url: `/api/users/${nadiaId}` })).statusCode).toBe(200);
+    const left = ctx.db
+      .prepare(
+        'SELECT (SELECT COUNT(*) FROM shelves WHERE user_id = ?) AS s, (SELECT COUNT(*) FROM reading_list WHERE user_id = ?) AS r',
+      )
+      .get(nadiaId, nadiaId) as { s: number; r: number };
+    expect(left).toMatchObject({ s: 0, r: 0 });
+    // Mine are untouched.
+    expect((await authed({ url: `/api/shelves/${mine.shelf.id}/books` })).statusCode).toBe(200);
+    await authed({ method: 'DELETE', url: `/api/shelves/${mine.shelf.id}` });
+    await authed({ method: 'DELETE', url: `/api/reading-list/${lanternEbookId}` });
+  });
+
   it('settings respect env pinning and persist', async () => {
     const before = (await authed({ url: '/api/settings' })).json() as { envPinned: string[] };
     // VX_DEFAULT_LANGUAGE is set for this test config.

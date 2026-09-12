@@ -29,7 +29,7 @@ body:
     attributes:
       label: ReadPort version
       description: The image tag you are running, or the commit if you built it yourself.
-      placeholder: "0.9.0"
+      placeholder: '0.9.0'
     validations:
       required: true
   - type: dropdown

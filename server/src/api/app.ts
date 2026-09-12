@@ -11,6 +11,7 @@ import { registerReaderRoutes } from './routes/reader.js';
 import { registerAudioRoutes } from './routes/audio.js';
 import { registerProgressRoutes } from './routes/progress.js';
 import { registerAnnotationRoutes } from './routes/annotations.js';
+import { registerShelfRoutes } from './routes/shelves.js';
 import { registerPairRoutes } from './routes/pairs.js';
 import { registerJobRoutes, registerOfflineRoutes, registerSettingsRoutes } from './routes/misc.js';
 import { registerModelRoutes } from './routes/models.js';
@@ -130,6 +131,9 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
   registerAudioRoutes(app, ctx);
   registerProgressRoutes(app, ctx);
   registerAnnotationRoutes(app, ctx);
+  // Personal-data neighbourhood: shelves belong next to the other things a
+  // reader owns rather than beside the library-wide routes.
+  registerShelfRoutes(app, ctx);
   registerPairRoutes(app, ctx);
   registerJobRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);

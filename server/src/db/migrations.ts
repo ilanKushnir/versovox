@@ -307,4 +307,63 @@ ALTER TABLE books ADD COLUMN text_fingerprint TEXT;
 ALTER TABLE books ADD COLUMN audio_timeline_fingerprint TEXT;
 `,
   },
+  {
+    version: 8,
+    sql: `
+-- Shelves are personal furniture, not library metadata: two people on one
+-- server share every book and no shelf at all. The owner is on the row and
+-- the foreign key carries the deletion rule, because the older per-user
+-- tables (progress, annotations) are cleaned up by a hand-written list of
+-- table names in the users route, and a list like that is one forgotten line
+-- away from leaving a deleted account's shelves behind.
+CREATE TABLE shelves (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  -- A fractional rank, not a position integer. Dropping a shelf between two
+  -- others writes ONE row; a position column would rewrite every row below
+  -- it, a transaction that grows with the list and can half-apply if the
+  -- process dies mid-drag. See server/src/util/rank.ts.
+  sort_key TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- "Summer" and "summer" side by side is a typo the user will blame on us.
+CREATE UNIQUE INDEX idx_shelves_user_name ON shelves(user_id, name COLLATE NOCASE);
+CREATE INDEX idx_shelves_user_order ON shelves(user_id, sort_key);
+
+-- Membership. The composite primary key is what makes "add to shelf"
+-- idempotent: tapping an already-shelved book a second time is a no-op
+-- instead of a duplicate the user then has to hunt down. Books are never
+-- deleted by the scanner, only marked 'missing' when a drive is unmounted,
+-- so a shelf survives an unplugged disk; the cascade is a safety net rather
+-- than the normal path.
+CREATE TABLE shelf_items (
+  shelf_id TEXT NOT NULL REFERENCES shelves(id) ON DELETE CASCADE,
+  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  sort_key TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (shelf_id, book_id)
+);
+-- sort_key is compared byte for byte. The rank alphabet is 0-9A-Za-z and
+-- case is significant, so this index must never acquire COLLATE NOCASE.
+CREATE INDEX idx_shelf_items_order ON shelf_items(shelf_id, sort_key);
+
+-- The reading list is not a shelf that happens to be ordered. There is
+-- exactly one per person, it cannot be renamed or deleted, and its order IS
+-- its content. Folding it into shelves would mean every shelf route growing
+-- an "unless this is the reading list" branch, and one missing branch
+-- deletes somebody's queue. The composite primary key states the rule in the
+-- schema instead: one row per user per book, no duplicates, no second queue.
+CREATE TABLE reading_list (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  sort_key TEXT NOT NULL,
+  note TEXT,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, book_id)
+);
+CREATE INDEX idx_reading_list_order ON reading_list(user_id, sort_key);
+`,
+  },
 ];
