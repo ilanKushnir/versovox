@@ -38,9 +38,14 @@ earlier working name and is not documented here.
 - Notes carried by a dashed underline in the text rather than being invisible,
   and a **Notes & marks** page that collects every mark across every book and
   searches note, quoted passage, title and author at once.
-- A sidebar of shelves — automatic ones (Reading, Finished, Downloaded,
-  Wishlist) alongside shelves you make yourself — and a **reading list** you
-  can order by hand.
+- A sidebar of shelves — automatic ones (Reading now, Finished, Both formats,
+  Recently added, On this device) alongside shelves you make yourself — and a
+  **reading list** you can order by hand.
+- **Browse by what the library already says**: groups built from Calibre tags,
+  audiobook genre tags, narrators, publishers, years, Calibre ratings, series,
+  authors and languages, with counts, one click from the grid. A grouping the
+  library cannot support is never offered, and each reader picks which ones
+  they see. Nothing is written back to the files.
 
 ### Alignment
 

@@ -10,6 +10,7 @@ import {
 import { AUTO_SHELVES } from '@readport/shared';
 import { SessionProvider, useSession } from './state/session';
 import { ShelvesProvider, useShelves } from './state/shelves';
+import { FacetsProvider } from './state/facets';
 import { Drawer, Sheet, ToastProvider } from './components/ui';
 import { Sidebar } from './components/Sidebar';
 import { IconLibrary, IconLink, IconSettings, IconShelf, ReadPortMark } from './components/icons';
@@ -81,6 +82,8 @@ function ShelfHeaderButton({ onOpen }: { onOpen: () => void }) {
     if (user) return overview?.shelves.find((s) => s.id === user[1])?.name ?? null;
     if (location.pathname === '/reading-list') return 'Reading list';
     if (location.pathname === '/shelf/on-this-device') return 'On this device';
+    const facet = /^\/browse\/[a-z]+\/(.+)$/.exec(location.pathname);
+    if (facet) return decodeURIComponent(facet[1]!);
     const auto = /^\/shelf\/([a-z-]+)$/.exec(location.pathname);
     return AUTO_SHELVES.find((s) => s.id === auto?.[1])?.label ?? null;
   })();
@@ -200,6 +203,9 @@ const router = createBrowserRouter([
       // sort keep working inside a shelf.
       { path: '/shelf/u/:shelfId', element: <LibraryPage /> },
       { path: '/shelf/:autoShelf', element: <LibraryPage /> },
+      // One value of one of the library's own groupings. Same page, same
+      // search and sort — a genre is a shelf the library already had.
+      { path: '/browse/:facetKind/:facetValue', element: <LibraryPage /> },
       { path: '/reading-list', element: <ReadingListPage /> },
       { path: '/book/:id', element: <BookPage /> },
       { path: '/read/:id', element: <ReaderPage /> },
@@ -218,7 +224,9 @@ export function App() {
     <SessionProvider>
       <ToastProvider>
         <ShelvesProvider>
-          <RouterProvider router={router} />
+          <FacetsProvider>
+            <RouterProvider router={router} />
+          </FacetsProvider>
         </ShelvesProvider>
       </ToastProvider>
     </SessionProvider>

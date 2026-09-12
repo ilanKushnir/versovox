@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useParams } from 'react-router-dom';
-import { AUTO_SHELVES, type AutoShelfId, type BookSummary } from '@readport/shared';
+import {
+  AUTO_SHELVES,
+  type AutoShelfId,
+  type BookSummary,
+  type FacetKind,
+  facetSpec,
+  formatFacet,
+  isFacetKind,
+} from '@readport/shared';
 import { api, ApiError } from '../api/client';
 import { useShelves } from '../state/shelves';
 import { AddToSheet } from '../components/AddToSheet';
@@ -36,7 +44,9 @@ type Showing =
   | { kind: 'library' }
   | { kind: 'auto'; id: AutoShelfId }
   | { kind: 'device' }
-  | { kind: 'user'; id: string };
+  | { kind: 'user'; id: string }
+  /** One value of one of the library's own groupings — a genre, a narrator. */
+  | { kind: 'facet'; facet: FacetKind; value: string };
 
 const AUTO_IDS = AUTO_SHELVES.map((s) => s.id) as string[];
 
@@ -54,12 +64,15 @@ export function LibraryPage() {
   const { overview, refreshDownloads } = useShelves();
   const showing = useMemo<Showing>(() => {
     if (params.shelfId) return { kind: 'user', id: params.shelfId };
+    if (params.facetKind && params.facetValue && isFacetKind(params.facetKind)) {
+      return { kind: 'facet', facet: params.facetKind, value: params.facetValue };
+    }
     if (params.autoShelf === 'on-this-device') return { kind: 'device' };
     if (params.autoShelf && AUTO_IDS.includes(params.autoShelf)) {
       return { kind: 'auto', id: params.autoShelf as AutoShelfId };
     }
     return { kind: 'library' };
-  }, [params.shelfId, params.autoShelf]);
+  }, [params.shelfId, params.autoShelf, params.facetKind, params.facetValue]);
 
   const [data, setData] = useState<LibraryData | null>(null);
   const [shelfName, setShelfName] = useState<string | null>(null);
@@ -79,7 +92,11 @@ export function LibraryPage() {
   const chipsRef = useRef<HTMLElement>(null);
 
   const shelfKey =
-    showing.kind === 'library' ? 'library' : `${showing.kind}:${'id' in showing ? showing.id : ''}`;
+    showing.kind === 'library'
+      ? 'library'
+      : showing.kind === 'facet'
+        ? `facet:${showing.facet}:${showing.value}`
+        : `${showing.kind}:${'id' in showing ? showing.id : ''}`;
 
   // Arriving at a different shelf starts fresh. Inside "Recently added" the
   // point IS recency, so that is where its sort starts.
@@ -125,6 +142,7 @@ export function LibraryPage() {
       if (debouncedQuery.trim()) params.set('query', debouncedQuery.trim());
       if (kind !== 'all') params.set('kind', kind);
       if (showing.kind === 'auto') params.set('filter', showing.id);
+      if (showing.kind === 'facet') params.set('facet', formatFacet(showing.facet, showing.value));
       params.set('sort', sort);
       const res = await api<LibraryData>(`/api/library?${params}`);
       if (seq !== requestSeq.current) return;
@@ -234,7 +252,9 @@ export function LibraryPage() {
         ? 'On this device'
         : showing.kind === 'auto'
           ? AUTO_SHELVES.find((s) => s.id === showing.id)!.label
-          : 'Library';
+          : showing.kind === 'facet'
+            ? showing.value
+            : 'Library';
 
   const showChips = showing.kind !== 'library' || (overview?.shelves.length ?? 0) > 0;
   const chips = [
@@ -468,6 +488,22 @@ function ShelfEmpty({
         }
       >
         Press the + on any cover in the library, then pick this shelf.
+      </EmptyState>
+    );
+  }
+  if (showing.kind === 'facet') {
+    return (
+      <EmptyState
+        icon={<IconLibrary size={40} />}
+        title={`Nothing under ${showing.value}`}
+        action={
+          <Link className="btn" to="/">
+            Browse the library
+          </Link>
+        }
+      >
+        {facetSpec(showing.facet).label} come from the books themselves, so this one goes away when
+        the last book carrying it does.
       </EmptyState>
     );
   }

@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import fs from 'node:fs';
 import path from 'node:path/posix';
+import { normaliseLanguage } from '@readport/shared';
 import { EPUB_ZIP_LIMITS, type ZipDirIndex } from './zip.js';
 
 /**
@@ -26,6 +27,15 @@ export interface EpubMeta {
   directionDeclared: boolean;
   publisher: string | null;
   description: string | null;
+  /**
+   * `dc:subject`. This is where Calibre writes its tags, so for most
+   * self-hosted libraries it is the genre list the owner curated by hand.
+   */
+  subjects: string[];
+  /** `calibre:rating`, converted from its 0–10 half-stars to 0–5 stars. */
+  rating: number | null;
+  /** Publication year from `dc:date`, when it looks like one. */
+  year: number | null;
 }
 
 export interface SpineItem {
@@ -126,6 +136,27 @@ function asText(node: unknown): string {
   return '';
 }
 
+/**
+ * Calibre stores a rating out of ten — five stars in half-star steps — in a
+ * `calibre:rating` meta element. Everything outside that range is somebody
+ * else's convention and is better ignored than guessed at.
+ */
+function calibreRating(content: unknown): number | null {
+  const n = Number(content);
+  if (!Number.isFinite(n) || n <= 0 || n > 10) return null;
+  return Math.round((n / 2) * 2) / 2;
+}
+
+/** A four-digit year out of a `dc:date`, which may be a full ISO timestamp. */
+function yearFrom(value: string): number | null {
+  const m = /(\d{4})/.exec(value.trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  // Nothing in a library is from the year 800 or from 2400; a number that far
+  // out is an identifier that happened to have four digits.
+  return year >= 1000 && year <= new Date().getFullYear() + 2 ? year : null;
+}
+
 /** Compressed archive size cap (streaming extraction enforces the rest). */
 export const MAX_EPUB_BYTES = EPUB_ZIP_LIMITS.maxCompressedBytes;
 /** Metadata documents (container/OPF/nav/NCX) may not exceed this. */
@@ -172,18 +203,37 @@ export function parseEpub(files: EpubStore): ParsedEpub {
   }
   let series: string | null = null;
   let seriesIdx: number | null = null;
+  let rating: number | null = null;
   for (const m of md.meta ?? []) {
     const name = m?.['@_name'] ?? '';
     const property = m?.['@_property'] ?? '';
     if (name === 'calibre:series') series = m?.['@_content'] ?? null;
     if (name === 'calibre:series_index') seriesIdx = Number(m?.['@_content']) || null;
+    if (name === 'calibre:rating') rating = calibreRating(m?.['@_content']);
     if (property === 'belongs-to-collection') series = asText(m) || series;
     if (property === 'group-position') seriesIdx = Number(asText(m)) || seriesIdx;
   }
+  // dc:subject repeats, so it may arrive as one node or as a list. Calibre
+  // also writes several tags into one element separated by commas, which is
+  // not in the spec but is what half the libraries out there look like.
+  const subjectNodes: unknown[] = Array.isArray(md.subject)
+    ? md.subject
+    : md.subject == null
+      ? []
+      : [md.subject];
+  const subjects = Array.from(
+    new Set(
+      subjectNodes
+        .flatMap((node) => asText(node).split(/\s*[,;]\s*/))
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0 && t.length <= 60),
+    ),
+  );
   const meta: EpubMeta = {
     title: asText(md.title).trim() || 'Untitled',
     author: asText(md.creator).trim() || null,
-    language: asText(md.language).trim().toLowerCase() || null,
+    // One canonical form, so "en-GB" and an audiobook's "eng" agree.
+    language: normaliseLanguage(asText(md.language)),
     identifiers,
     series,
     seriesIdx,
@@ -191,6 +241,9 @@ export function parseEpub(files: EpubStore): ParsedEpub {
     directionDeclared: ['rtl', 'ltr'].includes(String(pkg.spine?.['@_page-progression-direction'])),
     publisher: asText(md.publisher).trim() || null,
     description: asText(md.description).trim() || null,
+    subjects,
+    rating,
+    year: yearFrom(asText(md.date)),
   };
 
   // --- manifest ---

@@ -10,6 +10,12 @@ export const lantern = {
   author: 'Rivka Sharon',
   language: 'en',
   isbn: '9780000000017',
+  subjects: ['Literary Fiction', 'Coastal', 'Solitude'],
+  narrator: 'Dalia Peretz',
+  series: 'Ash Harbor',
+  seriesIdx: 1,
+  year: 2021,
+  rating: 4.5,
   chapters: [
     {
       title: "The Keeper's Ledger",
@@ -102,6 +108,10 @@ export const fieldNotes = {
   title: 'Field Notes from a Quiet Valley',
   author: 'Tamar Bell',
   language: 'en',
+  subjects: ['Nature Writing', 'Essays'],
+  narrator: 'Tamar Bell',
+  year: 2019,
+  rating: 4,
   parts: [
     {
       title: 'Part One: The Creek',
@@ -138,6 +148,12 @@ export const clockmaker = {
   title: "The Clockmaker's Garden",
   author: 'Noa Adler',
   language: 'en',
+  subjects: ['Literary Fiction', 'Magical Realism'],
+  narrator: 'Yonatan Kesler',
+  series: 'Ash Harbor',
+  seriesIdx: 2,
+  year: 2023,
+  rating: 3.5,
   chapters: [
     {
       title: 'Winding',

@@ -7,6 +7,7 @@ import { type AppContext } from '../context.js';
 import { attachUser, csrfCheck, requireUser } from './guards.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerLibraryRoutes } from './routes/library.js';
+import { registerPrefsRoutes } from './routes/prefs.js';
 import { registerReaderRoutes } from './routes/reader.js';
 import { registerAudioRoutes } from './routes/audio.js';
 import { registerProgressRoutes } from './routes/progress.js';
@@ -127,6 +128,7 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
 
   registerAuthRoutes(app, ctx);
   registerLibraryRoutes(app, ctx);
+  registerPrefsRoutes(app, ctx);
   registerReaderRoutes(app, ctx);
   registerAudioRoutes(app, ctx);
   registerProgressRoutes(app, ctx);

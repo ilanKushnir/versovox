@@ -366,4 +366,47 @@ CREATE TABLE reading_list (
 CREATE INDEX idx_reading_list_order ON reading_list(user_id, sort_key);
 `,
   },
+  {
+    version: 9,
+    sql: `
+-- What the library already says about itself: Calibre's tags, an audiobook's
+-- genre and narrator, a publisher, a year, a rating. Read from the files, not
+-- invented here, and never written back to them.
+--
+-- A table rather than more columns on books, because these are many-to-one
+-- (a book has several tags) and because the sidebar's question — "which
+-- values exist, and how many books each" — is a GROUP BY, which wants an
+-- index it can walk rather than a JSON column it has to parse per row.
+--
+-- Only the facets that are NOT already columns on books live here. Author,
+-- series and language stay where they are: duplicating them would give the
+-- sidebar a second source of truth that can silently disagree with the
+-- library list about the same book.
+CREATE TABLE book_facets (
+  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  -- As written in the file, so a value can be shown back to its owner in
+  -- their own capitalisation.
+  value TEXT NOT NULL,
+  -- Folded for grouping and matching. Two files spelling one genre
+  -- "Science Fiction" and "science fiction" are one shelf, not two.
+  fold TEXT NOT NULL,
+  PRIMARY KEY (book_id, kind, fold)
+);
+CREATE INDEX idx_book_facets_kind ON book_facets(kind, fold);
+
+-- Per-person interface state. Which sidebar groups someone wants is theirs,
+-- not the server's: two people sharing a library browse it differently, and
+-- one of them turning off Narrators must not take it from the other.
+-- A key/value table rather than columns, so the next preference is a write
+-- rather than a migration.
+CREATE TABLE user_prefs (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+`,
+  },
 ];

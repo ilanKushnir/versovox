@@ -3537,3 +3537,134 @@ select.input {
     min-height: 44px;
   }
 }
+
+/* ------------------------------------------------------- browse by facet */
+
+/* A group holds its own list of values, so it stacks rather than sitting in
+   the row of icon + label + count that every other sidebar item is. */
+.sidebar__item--group {
+  flex-direction: column;
+  align-items: stretch;
+}
+.sidebar__row--group {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: start;
+}
+.sidebar__row--group > svg:first-child {
+  color: var(--rp-text-soft);
+  opacity: 0.8;
+}
+.sidebar__values {
+  list-style: none;
+  margin: 2px 0 var(--sp-2);
+  /* Indented to the group's label, and carrying a hairline so a long list
+     still reads as belonging to the group above it. */
+  padding: 0 0 0 var(--sp-4);
+  margin-inline-start: calc(var(--sp-3) + 8px);
+  border-inline-start: 1px solid var(--rp-border);
+}
+.sidebar__value {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 34px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-control);
+  text-decoration: none;
+  color: var(--rp-text-soft);
+  font-size: 13.5px;
+}
+.sidebar__value:hover {
+  background: var(--rp-surface);
+  color: var(--rp-text);
+}
+.sidebar__value.is-active {
+  background: var(--rp-primary);
+  color: var(--rp-on-primary);
+}
+.sidebar__valuename {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar__more {
+  width: 100%;
+  min-height: 34px;
+  padding-inline: var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--rp-interactive);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 620;
+  text-align: start;
+  cursor: pointer;
+}
+.sidebar__more:hover {
+  background: var(--rp-surface);
+}
+.sidebar__iconbtn--text {
+  width: auto;
+  padding-inline: var(--sp-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.sidebar__empty button {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--rp-interactive);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Choosing what Browse offers. `.sheet__lede` and `.sheet__actions` are the
+   shared sheet furniture; only the picker itself is new. */
+.facet-picker {
+  list-style: none;
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.facet-picker__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  min-height: 48px;
+  padding: var(--sp-2) var(--sp-2);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.facet-picker__row:hover {
+  background: var(--rp-surface);
+}
+.facet-picker__row input {
+  width: 20px;
+  height: 20px;
+  margin-block-start: 3px;
+  flex: none;
+  accent-color: var(--rp-primary);
+}
+.facet-picker__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.facet-picker__text small {
+  color: var(--rp-text-soft);
+  font-size: 12.5px;
+}

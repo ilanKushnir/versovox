@@ -13,6 +13,8 @@ import { realResolveWithin } from '../util/paths.js';
 import { applyScan, scanRoots } from '../scanner/scan.js';
 import { extractEpub, loadManifest, loadSentences, loadSentencesText } from '../epub/extract.js';
 import { extractCover, probeAudio } from '../audio/probe.js';
+import { normaliseLanguage } from '@readport/shared';
+import { facetsForBook, writeFacets } from '../library/facets.js';
 import { CANDIDATE_THRESHOLD, scorePair } from '../pairing/score.js';
 import { storeAlignment } from '../alignment/service.js';
 import { textFingerprint, timelineFingerprint } from '../alignment/portable.js';
@@ -634,6 +636,19 @@ export async function runIndexEbook(
         textFp,
         bookId,
       );
+      // The library's own tags, as ways to browse it. In the same transaction
+      // as the metadata they came from, so the sidebar can never show a genre
+      // for a book whose indexing rolled back.
+      writeFacets(
+        db,
+        bookId,
+        facetsForBook({
+          genres: result.meta.subjects,
+          publisher: result.meta.publisher,
+          year: result.meta.year,
+          rating: result.meta.rating,
+        }),
+      );
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');
@@ -726,6 +741,9 @@ export async function runIndexAudio(
     let title: string | null = null;
     let author: string | null = null;
     let language: string | null = null;
+    const genres = new Set<string>();
+    let narrator: string | null = null;
+    let year: number | null = null;
     const chapters: { title: string; startMs: number; endMs: number }[] = [];
     let hasEmbeddedCover = false;
     let firstTrackAbs: string | null = null;
@@ -766,6 +784,12 @@ export async function runIndexAudio(
       title = title ?? probe.album ?? probe.title;
       author = author ?? probe.artist;
       language = language ?? probe.language;
+      // Tags are per file, and a multi-file audiobook usually repeats them.
+      // Union rather than first-wins: a book split by chapter sometimes tags
+      // only some parts, and a genre on part three counts.
+      for (const g of probe.genres) genres.add(g);
+      narrator = narrator ?? probe.narrator;
+      year = year ?? probe.year;
       hasEmbeddedCover = hasEmbeddedCover || probe.hasCover;
     }
 
@@ -802,7 +826,9 @@ export async function runIndexAudio(
     ).run(
       title,
       author,
-      language ? language.toLowerCase().slice(0, 5) : null,
+      // ffmpeg reports ISO 639-2; an EPUB declares ISO 639-1. Stored in one
+      // form so the two halves of a paired book agree about their language.
+      normaliseLanguage(language),
       absoluteMs,
       coverPath,
       nowIso(),
@@ -812,6 +838,7 @@ export async function runIndexAudio(
       timelineFingerprint(trackDurationsMs),
       bookId,
     );
+    writeFacets(db, bookId, facetsForBook({ genres: [...genres], narrator, year }));
   } catch (err) {
     markBookError(ctx, guard, bookId, err);
     throw err;

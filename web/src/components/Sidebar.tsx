@@ -17,6 +17,7 @@ import {
   IconMore,
 } from './icons';
 import { useReorder } from './reorder';
+import { BrowseGroups } from './BrowseGroups';
 
 /**
  * One shelf list, rendered in three places: the persistent rail on a wide
@@ -437,6 +438,10 @@ export function Sidebar({
       <p className="sidebar__live visually-hidden" role="status" aria-live="polite">
         {reorder.announcement}
       </p>
+
+      {/* Last, because it is the library describing itself rather than
+          anything the reader made: shelves they built come first. */}
+      <BrowseGroups onNavigate={onNavigate} />
 
       {onCollapse && (
         <div className="sidebar__foot">

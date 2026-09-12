@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { LANGUAGES, type LanguageSpec } from '@readport/shared';
+import { LANGUAGES, languageByCode, type LanguageSpec } from '@readport/shared';
 
-export { LANGUAGES, type LanguageSpec };
+export { LANGUAGES, languageByCode, type LanguageSpec };
 
 /**
  * The alignment model: what it is, where it comes from, and whether it is here.
@@ -56,12 +56,6 @@ export const MODELS: ModelSpec[] = [ALIGNER];
 
 export function modelById(id: string): ModelSpec | undefined {
   return MODELS.find((m) => m.id === id);
-}
-
-export function languageByCode(code: string | null | undefined): LanguageSpec | undefined {
-  if (!code) return undefined;
-  const base = code.toLowerCase().split(/[-_]/)[0]!;
-  return LANGUAGES.find((l) => l.code === base);
 }
 
 export function modelPath(modelsDir: string, spec: ModelSpec): string {

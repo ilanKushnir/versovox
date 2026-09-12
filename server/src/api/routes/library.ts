@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { RECENTLY_ADDED_DAYS, RECENTLY_ADDED_LIMIT, type BookSummary } from '@readport/shared';
+import {
+  RECENTLY_ADDED_DAYS,
+  RECENTLY_ADDED_LIMIT,
+  type BookSummary,
+  parseFacet,
+} from '@readport/shared';
+import { bookIdsWithFacet, facetGroups, foldFacet } from '../../library/facets.js';
 import { libraryRoots } from '../../domain/settings.js';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';
@@ -75,6 +81,13 @@ const libraryQuerySchema = z.object({
     .enum(['paired', 'in-progress', 'finished', 'both-formats', 'recently-added'])
     .optional(),
   sort: z.enum(['title', 'author', 'recent', 'added']).optional(),
+  /**
+   * One of the library's own groupings, as `kind:value` — see shared/facets.
+   * A value here, not an endpoint of its own, for the same reason the
+   * automatic shelves are: one code path owns filtering, sorting, the
+   * missing-book exclusion and the continue rail.
+   */
+  facet: z.string().max(120).optional(),
 });
 
 export function registerLibraryRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -116,6 +129,21 @@ export function registerLibraryRoutes(app: FastifyInstance, ctx: AppContext): vo
       }
       const keep = new Set([...byPair.values()].map((b) => b.id));
       books = books.filter((b) => keep.has(b.id));
+    }
+    if (q.facet) {
+      const parsed = parseFacet(q.facet);
+      if (!parsed) return reply.code(400).send({ error: 'bad-facet' });
+      const { kind, value } = parsed;
+      // Author, series and language are columns on the book; everything else
+      // is in the facet table. One place knows which is which.
+      const ids = bookIdsWithFacet(db, kind, value);
+      if (ids) books = books.filter((b) => ids.has(b.id));
+      else {
+        const want = foldFacet(value);
+        const column = (b: BookSummary) =>
+          kind === 'author' ? b.author : kind === 'series' ? b.series : b.language;
+        books = books.filter((b) => foldFacet(column(b) ?? '') === want);
+      }
     }
     if (q.filter === 'recently-added') {
       // What the last scan turned up. Distinct from sort=added, which
@@ -160,6 +188,15 @@ export function registerLibraryRoutes(app: FastifyInstance, ctx: AppContext): vo
 
     return { books, continueRail, scanActive: scanning.c > 0 };
   });
+
+  /**
+   * Every way this particular library can be browsed, with counts.
+   *
+   * Computed rather than configured: a library with one publisher is not
+   * offered a Publishers group, and one with three hundred authors is. The
+   * client decides which of these to show, but not which exist.
+   */
+  app.get('/api/facets', async () => ({ groups: facetGroups(db) }));
 
   app.post('/api/library/rescan', async (req, reply) => {
     if (req.user!.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });

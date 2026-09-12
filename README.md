@@ -44,6 +44,14 @@ loss-resistant progress.)
   RTL support (declared or inferred from the language), calm hideable
   chrome. Publisher CSS is intentionally not applied in V1 (see
   docs/reader-and-player.md for exact limitations).
+- **Browse the library the way it already describes itself**: a sidebar of
+  shelves — automatic ones, your own, and an ordered reading list — plus
+  groups built from the metadata your files already carry. Calibre tags,
+  audiobook genre tags, narrators, publishers, years, Calibre ratings, series,
+  authors and languages, each with counts, each one click from the grid. A
+  grouping your library cannot support is never offered, and **Edit** lets
+  each reader choose which ones they want. Nothing is written back to your
+  files.
 - **Marks you can find again**: highlights in five colours, picked as you
   make one and changed afterwards by tapping the highlight; notes carried by
   a dashed underline rather than being invisible; bookmarks; and a **Notes &

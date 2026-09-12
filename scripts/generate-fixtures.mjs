@@ -48,6 +48,13 @@ function buildEpub({
   author,
   language,
   isbn,
+  // The metadata a real library carries. Written the way Calibre writes it,
+  // so the sample library exercises the same parsing a real one will.
+  subjects = [],
+  series = null,
+  seriesIdx = null,
+  year = null,
+  rating = null,
   direction = 'ltr',
   chaptersXhtml,
   extraFiles = {},
@@ -108,6 +115,11 @@ ${navLis.map((l) => '  ' + l).join('\n')}
     <dc:language>${language}</dc:language>
     <dc:publisher>ReadPort Samples</dc:publisher>
     <dc:description>An original sample story bundled with ReadPort for demonstration and testing.</dc:description>
+${subjects.map((t) => `    <dc:subject>${t}</dc:subject>`).join('\n')}
+${year ? `    <dc:date>${year}-01-01</dc:date>` : ''}
+${series ? `    <meta name="calibre:series" content="${series}"/>` : ''}
+${seriesIdx ? `    <meta name="calibre:series_index" content="${seriesIdx}"/>` : ''}
+${rating ? `    <meta name="calibre:rating" content="${rating * 2}"/>` : ''}
     <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
   </metadata>
   <manifest>
@@ -293,6 +305,11 @@ async function main() {
       author: b.author,
       language: b.language,
       isbn: b.isbn,
+      subjects: b.subjects,
+      series: b.series,
+      seriesIdx: b.seriesIdx,
+      year: b.year,
+      rating: b.rating,
       chaptersXhtml,
       extraFiles: {
         'img/lantern.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200"><rect width="320" height="200" fill="#F1EBE1"/><rect x="140" y="40" width="40" height="110" fill="#2F5D48"/><circle cx="160" cy="52" r="26" fill="#C9A227"/><rect x="120" y="150" width="80" height="12" fill="#1F2620"/></svg>`,
@@ -333,6 +350,9 @@ async function main() {
         artist: b.author,
         track: `${i + 1}/${b.chapters.length}`,
         language: 'eng',
+        genre: (b.subjects ?? []).join('; '),
+        composer: b.narrator ?? '',
+        date: String(b.year ?? ''),
       });
       fs.rmSync(wavPath);
       console.log(`audio ${mp3Path}`);
@@ -367,6 +387,11 @@ async function main() {
       author: b.author,
       language: b.language,
       isbn: '9780000000024',
+      subjects: b.subjects,
+      series: b.series,
+      seriesIdx: b.seriesIdx,
+      year: b.year,
+      rating: b.rating,
       direction: 'rtl',
       chaptersXhtml,
       coverContent: coverSvg({
@@ -396,6 +421,9 @@ async function main() {
         album: b.title,
         artist: b.author,
         track: `${i + 1}/${b.parts.length}`,
+        genre: (b.subjects ?? []).join('; '),
+        composer: b.narrator ?? '',
+        date: String(b.year ?? ''),
       });
       fs.rmSync(wavPath);
       console.log(`audio ${mp3Path}`);
@@ -434,7 +462,19 @@ async function main() {
     const wavPath = path.join(dir, 'tmp.wav');
     fs.writeFileSync(wavPath, Buffer.concat([wavHeader(fmt, pcm.length), pcm]));
     const m4bPath = path.join(dir, 'The Clockmakers Garden.m4b');
-    encodeM4b(wavPath, m4bPath, { title: b.title, album: b.title, artist: b.author }, chapters);
+    encodeM4b(
+      wavPath,
+      m4bPath,
+      {
+        title: b.title,
+        album: b.title,
+        artist: b.author,
+        genre: (b.subjects ?? []).join('; '),
+        composer: b.narrator ?? '',
+        date: String(b.year ?? ''),
+      },
+      chapters,
+    );
     fs.rmSync(wavPath);
     fs.writeFileSync(
       path.join(dir, 'cover.svg'),

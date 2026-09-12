@@ -58,6 +58,8 @@ step.
 | GET    | `/api/library?query&kind&filter&sort` | `{books, continueRail, scanActive}`           |
 | GET    | `/api/library?filter=both-formats`    | one row per paired title (see Shelves)        |
 | GET    | `/api/library?filter=recently-added`  | arrivals of the last 30 days, capped at 60    |
+| GET    | `/api/library?facet=kind:value`       | one grouping the library itself carries       |
+| GET    | `/api/facets`                         | every grouping this library supports, counted |
 | POST   | `/api/library/rescan`                 | admin                                         |
 | GET    | `/api/library/roots`                  | admin; the configured read-only roots         |
 | GET    | `/api/books/:id`                      | detail: chapters, tracks, pair, progress      |
@@ -115,6 +117,47 @@ A highlight's colour is a short lowercase word, not a hex value, so the reader
 can restyle the palette without rewriting anyone's marks. `PATCH` is how a
 colour is changed after the fact and how a note gets its text. Deletes are
 soft: the row is tombstoned rather than removed.
+
+## Browsing by the library's own metadata
+
+`GET /api/facets` answers what _this_ library can be browsed by, computed from
+the books rather than configured: Calibre tags (`dc:subject`), audiobook genre
+tags, narrators (`narrator`, else `composer`), publishers, years, Calibre
+ratings, plus the author, series and language already on the book row. Each
+group carries its values and how many books hold each.
+
+Two rules are enforced here rather than in the client:
+
+- a grouping with fewer than two distinct values is not returned at all — one
+  publisher is not a way to browse anything;
+- books the scanner has marked `missing` are excluded throughout, so a genre
+  never leads to an empty grid.
+
+Counts are of **rows, not titles**: a paired book shows up as an ebook and an
+audiobook, so a genre both sides carry counts two, which is exactly how many
+cards `?facet=` then returns. A count that did not match its own list would be
+the worse lie.
+
+Values are grouped case- and whitespace-insensitively (`Science Fiction` and
+`science fiction` are one), and one spelling is chosen to display; filtering
+matches on the same fold. The filter's wire form is `kind:value`, split at the
+_first_ colon only, so `series:Dune: Part Two` works.
+
+Author, series and language are read from the `books` columns; everything else
+comes from `book_facets`, rebuilt inside the same transaction that writes a
+book's metadata. Nothing is ever written back to the library's files.
+
+| Method | Path                 | Notes                                                        |
+| ------ | -------------------- | ------------------------------------------------------------ |
+| GET    | `/api/facets`        | `{groups: [{kind, label, values: [{value, label, count}]}]}` |
+| GET    | `/api/prefs/sidebar` | `{sidebar: {facets, chosen}}`; `chosen:false` = never set    |
+| PUT    | `/api/prefs/sidebar` | `{facets, chosen}`; per account, deduped, order preserved    |
+
+Which groups appear is per person, not per server: two people share every book
+and no furniture. An empty `facets` with `chosen:true` means "show none" and is
+honoured; `chosen:false` means the defaults apply, and those adapt — a library
+with no genres and no series gets the first two groupings it does support
+rather than an empty section.
 
 ## Shelves & reading list
 

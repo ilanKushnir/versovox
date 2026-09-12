@@ -270,6 +270,27 @@ export const IconSwitch = (p: P) => (
     <path d="M20 16H7M10 12.8 6.5 16l3.5 3.2" />
   </I>
 );
+/** A tag, for the genres a library already carries. */
+export const IconTag = (p: P) => (
+  <I {...p}>
+    <path d="M4.5 11.3V5.2a.7.7 0 0 1 .7-.7h6.1c.2 0 .4.1.5.2l7 7a.7.7 0 0 1 0 1l-6.1 6.1a.7.7 0 0 1-1 0l-7-7a.7.7 0 0 1-.2-.5z" />
+    <circle cx="8.4" cy="8.4" r="1.15" />
+  </I>
+);
+/** A star, for ratings a reader gave in Calibre. */
+export const IconStar = (p: P) => (
+  <I {...p}>
+    <path d="m12 4.3 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 10l5.4-.8z" />
+  </I>
+);
+/** Two figures, for the people a book is by or read by. */
+export const IconPeople = (p: P) => (
+  <I {...p}>
+    <circle cx="9.3" cy="8.2" r="3.1" />
+    <path d="M3.7 19.3c0-2.9 2.5-4.9 5.6-4.9s5.6 2 5.6 4.9" />
+    <path d="M16 5.6a3.1 3.1 0 0 1 0 5.9M17.2 14.9c1.9.6 3.1 2.2 3.1 4.4" />
+  </I>
+);
 export const IconShelf = (p: P) => (
   <I {...p}>
     <path d="M4.2 5.2h3.2v11.1H4.2zM9 5.2h3.2v11.1H9z" />

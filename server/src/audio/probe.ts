@@ -20,6 +20,19 @@ export interface AudioProbe {
   chapters: AudioChapter[];
   hasCover: boolean;
   codec: string | null;
+  /**
+   * Genres, from the `genre` tag. Audiobookshelf writes several separated by
+   * a slash or a semicolon; iTunes-produced m4b files write one.
+   */
+  genres: string[];
+  /**
+   * Who reads it. There is no standard tag for this: `composer` is the
+   * convention Audiobookshelf and Libation use, `narrator` is written by some
+   * taggers, and `artist` is the author, not the narrator.
+   */
+  narrator: string | null;
+  /** Publication year from `date`, `year` or `originalyear`, when present. */
+  year: number | null;
 }
 
 export async function probeAudio(filePath: string): Promise<AudioProbe> {
@@ -61,7 +74,31 @@ export async function probeAudio(filePath: string): Promise<AudioProbe> {
     chapters,
     hasCover,
     codec: (audioStream?.codec_name as string | undefined) ?? null,
+    genres: splitTagList(tags['genre']),
+    narrator: tags['narrator'] ?? tags['composer'] ?? null,
+    year: yearFromTag(tags['date'] ?? tags['year'] ?? tags['originalyear']),
   };
+}
+
+/** One tag holding several values, as taggers variously write them. */
+function splitTagList(value: string | undefined): string[] {
+  if (!value) return [];
+  return Array.from(
+    new Set(
+      value
+        .split(/\s*[,;/]\s*/)
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0 && t.length <= 60),
+    ),
+  );
+}
+
+/** A four-digit year out of a tag that may be a year or a full date. */
+function yearFromTag(value: string | undefined): number | null {
+  const m = value ? /(\d{4})/.exec(value) : null;
+  if (!m) return null;
+  const year = Number(m[1]);
+  return year >= 1000 && year <= new Date().getFullYear() + 2 ? year : null;
 }
 
 export interface ExtractCoverOptions {
