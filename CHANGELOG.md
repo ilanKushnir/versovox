@@ -20,6 +20,11 @@ earlier working name and is not documented here.
   scrubber with chapter ticks, configurable skips, 0.5–3× with pitch
   preserved and remembered per book, a sleep timer, and a lock-screen Media
   Session that reports live position.
+- **Read along**: the narration playing over the page you are reading. The
+  spoken sentence is washed as it is read, the page turns itself to keep up,
+  and tapping any line moves the voice to it. Turning a page by hand stops the
+  page following; it starts again on its own once the voice reaches wherever
+  you went.
 - **Two-way switching** on aligned pairs, at the sentence: reader ⇄ player
   from either surface, from the book page, and from the library. Switching
   from reading to listening lands _behind_ you by however far the alignment

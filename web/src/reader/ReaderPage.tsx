@@ -20,6 +20,7 @@ import {
   IconClose,
   IconTrash,
   IconHeadphones,
+  IconReadAlong,
   IconSearch,
   IconSun,
   IconToc,
@@ -38,9 +39,13 @@ import {
   HIGHLIGHT_COLORS,
   colorOf,
   markAtPoint,
+  offsetAtPoint,
   paintMarks,
+  paintSpeaking,
   type HighlightColor,
 } from './marks';
+import { NarrationBar, useNarration } from './Narration';
+import { shouldFollow } from './readalong';
 import { liveCheckpointOffset } from './liveOffset';
 import {
   computePageLayout,
@@ -107,6 +112,10 @@ export function ReaderPage() {
     label: string;
   } | null>(null);
   const [contentsTab, setContentsTab] = useState<'toc' | 'marks'>('toc');
+  /** Read-along: the narration playing over the page the reader is on. */
+  const [readAlong, setReadAlong] = useState(false);
+  /** Whether the page still moves itself to keep up with the voice. */
+  const [following, setFollowing] = useState(true);
 
   const [systemDark, setSystemDark] = useState(
     () => typeof matchMedia === 'function' && matchMedia(DARK_MQ).matches,
@@ -131,6 +140,14 @@ export function ReaderPage() {
   const swipeRef = useRef<{ x: number; y: number; t: number } | null>(null);
   /** The next deliberate page turn re-claims progress for this session. */
   const needsClaimRef = useRef(true);
+  /**
+   * True from asking for a chapter until it has rendered and been paginated.
+   * `page` and `pageCount` describe the OLD chapter in that window, so a
+   * second page turn arriving inside it would be answered with stale numbers
+   * — which, at the end of the last-but-one chapter, reads as "past the last
+   * page of the last chapter" and marks the book finished.
+   */
+  const chapterLoadingRef = useRef(false);
 
   const language = manifest?.language ?? null;
   // Direction from the OPF when declared; otherwise infer from the language
@@ -215,6 +232,7 @@ export function ReaderPage() {
   // Load chapter content when spineIdx changes.
   useEffect(() => {
     if (spineIdx < 0 || !manifest) return;
+    chapterLoadingRef.current = true;
     let alive = true;
     (async () => {
       try {
@@ -404,6 +422,7 @@ export function ReaderPage() {
     }
     textMapRef.current = buildTextMap(content);
     const count = applyPagination();
+    chapterLoadingRef.current = false;
 
     const target = pendingTargetRef.current;
     pendingTargetRef.current = null;
@@ -575,9 +594,18 @@ export function ReaderPage() {
         }
       }, 600);
     };
+    // Reading along, in scroll mode: a wheel or a finger means the reader is
+    // moving the page themselves, so the narration stops dragging it back.
+    // Listening for the gesture rather than for `scroll` is deliberate — the
+    // follow effect scrolls too, and a scroll event cannot say who caused it.
+    const onUserScroll = () => setFollowing(false);
     scroller.addEventListener('scroll', onScroll, { passive: true });
+    scroller.addEventListener('wheel', onUserScroll, { passive: true });
+    scroller.addEventListener('touchmove', onUserScroll, { passive: true });
     return () => {
       scroller.removeEventListener('scroll', onScroll);
+      scroller.removeEventListener('wheel', onUserScroll);
+      scroller.removeEventListener('touchmove', onUserScroll);
       if (timer) clearTimeout(timer);
       if (footerTimer) clearTimeout(footerTimer);
     };
@@ -588,6 +616,10 @@ export function ReaderPage() {
   const gotoChapter = useCallback(
     (s: number, charOffset = 0, intent: 'seek' | 'open' = 'seek', fragment?: string) => {
       if (!manifest) return;
+      // Jumping by hand — contents, search, a bookmark, the slider — takes the
+      // wheel back from the narration, exactly as turning a page does. The one
+      // caller that must not is the narration itself, which re-arms after.
+      setFollowing(false);
       const clamped = Math.max(0, Math.min(s, manifest.chapters.length - 1));
       // A jump of more than a page away leaves a way back.
       if (
@@ -635,6 +667,10 @@ export function ReaderPage() {
   gotoChapterRef.current = gotoChapter;
 
   const nextPage = useCallback(() => {
+    if (chapterLoadingRef.current) return;
+    // Moving the page by hand takes the wheel from the narration; it is given
+    // back on its own once the voice reaches wherever the reader went.
+    setFollowing(false);
     if (prefs.mode === 'scroll') {
       const s = scrollerRef.current;
       if (s) s.scrollTop += s.clientHeight * 0.9;
@@ -665,6 +701,8 @@ export function ReaderPage() {
   ]);
 
   const prevPage = useCallback(() => {
+    if (chapterLoadingRef.current) return;
+    setFollowing(false);
     if (prefs.mode === 'scroll') {
       const s = scrollerRef.current;
       if (s) s.scrollTop -= s.clientHeight * 0.9;
@@ -684,6 +722,126 @@ export function ReaderPage() {
       void recordCheckpoint(id, 'seek', locatorAt(manifest, [], spineIdx - 1, back));
     }
   }, [prefs.mode, page, spineIdx, manifest, goToPage, id]);
+
+  /* -------------------------------------------------------- read along */
+
+  const pair =
+    detail?.book.pair && detail.book.pair.status !== 'candidate' ? detail.book.pair : null;
+  const startOffset = useCallback(() => currentOffsetRef.current, []);
+
+  /**
+   * The narration has run off the end (or the start) of this chapter. Follow
+   * it, and stay in follow mode — this is the voice moving the page, which is
+   * the whole point, not the reader taking over.
+   */
+  const onLeaveChapter = useCallback(
+    (dir: 'next' | 'prev') => {
+      if (!manifest || chapterLoadingRef.current) return;
+      const target = dir === 'next' ? spineIdx + 1 : spineIdx - 1;
+      if (target < 0 || target >= manifest.chapters.length) return;
+      const offset =
+        dir === 'next' ? 0 : Math.max(0, (manifest.chapters[target]?.charCount ?? 1) - 2);
+      // Deliberately not gotoChapter: this is the voice carrying the page, not
+      // the reader jumping. It must leave no "back to where you were" chip
+      // behind, and must not release auto-follow the way a jump does.
+      handoffCleanupRef.current?.();
+      pendingTargetRef.current = { charOffset: offset };
+      chapterLoadingRef.current = true;
+      setSpineIdx(target);
+      needsClaimRef.current = false;
+      void recordCheckpoint(id, 'seek', locatorAt(manifest, [], target, offset));
+    },
+    [manifest, spineIdx, id],
+  );
+
+  const narration = useNarration({
+    enabled: readAlong,
+    following,
+    pairId: pair?.pairId ?? null,
+    audioBookId: pair?.otherBookId ?? null,
+    spineIdx,
+    sentences,
+    startOffset,
+    onLeaveChapter,
+  });
+
+  /**
+   * Wash the sentence being spoken, and bring the page to it.
+   *
+   * Following is abandoned as soon as the reader turns a page themselves and
+   * picked up again the moment the voice reaches whatever page they went to,
+   * so looking ahead costs nothing and needs no undoing.
+   */
+  useEffect(() => {
+    const map = textMapRef.current;
+    if (!readAlong) {
+      paintSpeaking(map, null);
+      return;
+    }
+    const cue = narration.cue;
+    paintSpeaking(map, cue ? { start: cue.charStart, end: cue.charEnd } : null);
+    if (!cue || !map) return;
+    const onScreen = spanOnScreen(
+      map,
+      cue.charStart,
+      (prefs.mode === 'paginated'
+        ? pagesRef.current
+        : scrollerRef.current
+      )?.getBoundingClientRect(),
+    );
+    if (!shouldFollow(following, cue, onScreen)) return;
+    if (!following) setFollowing(true);
+    if (onScreen) return;
+    if (prefs.mode === 'paginated') {
+      const target = pageForOffset(cue.charStart);
+      if (target !== page) goToPage(target);
+    } else {
+      const range = rangeForSpan(map, cue.charStart, cue.charStart + 1);
+      const scroller = scrollerRef.current;
+      if (range && scroller) {
+        const r = range.getBoundingClientRect();
+        const base = scroller.getBoundingClientRect();
+        // A third of the way down, not at the very top: the eye wants to see
+        // where the sentence is going as well as where it started.
+        scroller.scrollTop += r.top - base.top - base.height * 0.34;
+      }
+    }
+  }, [readAlong, narration.cue, following, prefs.mode, page, goToPage, pageForOffset]);
+
+  // Leaving the reader stops the voice; so does closing the tab.
+  useEffect(() => () => paintSpeaking(null, null), []);
+
+  /**
+   * A tap while reading along. On a timed sentence it moves the voice there —
+   * the gesture the whole feature turns on. On the margin, or on text the
+   * aligner never timed, it falls through to the reader's own behaviour, so
+   * no existing gesture is lost.
+   */
+  const seekVoiceAt = useCallback(
+    (x: number, y: number): boolean => {
+      if (!readAlong || !narration.ready) return false;
+      const offset = offsetAtPoint(textMapRef.current, x, y);
+      if (offset === null) return false;
+      narration.playFrom(offset);
+      setFollowing(true);
+      return true;
+    },
+    [readAlong, narration],
+  );
+
+  const startReadAlong = useCallback(() => {
+    setFollowing(true);
+    setReadAlong(true);
+    setChrome(true);
+    try {
+      if (!localStorage.getItem('rp-readalong-hint')) {
+        localStorage.setItem('rp-readalong-hint', '1');
+        toast.show('Reading along — tap any line to move the voice there');
+      }
+    } catch {
+      /* private mode: the hint is a nicety, not a requirement */
+    }
+  }, [toast]);
 
   // Keyboard.
   useEffect(() => {
@@ -1011,7 +1169,7 @@ export function ReaderPage() {
 
   return (
     <div
-      className={`reader-page ${chrome ? '' : 'chrome-hidden'}`}
+      className={`reader-page ${chrome ? '' : 'chrome-hidden'} ${readAlong ? 'is-readalong' : ''}`}
       data-reader-theme={theme}
       style={
         {
@@ -1126,6 +1284,7 @@ export function ReaderPage() {
                     const sel = document.getSelection();
                     if (sel && !sel.isCollapsed) return;
                     if (openMarkAt(e.clientX, e.clientY)) return;
+                    if (seekVoiceAt(e.clientX, e.clientY)) return;
                     setChrome((c) => !c);
                   }
                 }}
@@ -1148,6 +1307,7 @@ export function ReaderPage() {
                 const sel = document.getSelection();
                 if (sel && !sel.isCollapsed) return;
                 if (openMarkAt(e.clientX, e.clientY)) return;
+                if (seekVoiceAt(e.clientX, e.clientY)) return;
                 setChrome((c) => !c);
               }}
               onPointerDown={() => handoffCleanupRef.current?.()}
@@ -1294,6 +1454,32 @@ export function ReaderPage() {
       <div
         className={`immersive-chrome immersive-chrome--bottom immersive-chrome--bar-${prefs.progressBar}`}
       >
+        {/* The transport sits inside the bottom chrome so it can never land on
+            top of it, and the chrome refuses to hide while it is here: you
+            must always be one tap from pausing. */}
+        {readAlong && (
+          <NarrationBar
+            n={narration}
+            following={following}
+            onResume={() => {
+              setFollowing(true);
+              const cue = narration.cue;
+              const map = textMapRef.current;
+              if (!cue || !map) return;
+              if (prefs.mode === 'paginated') goToPage(pageForOffset(cue.charStart));
+              else {
+                const range = rangeForSpan(map, cue.charStart, cue.charStart + 1);
+                const scroller = scrollerRef.current;
+                if (range && scroller) {
+                  const r = range.getBoundingClientRect();
+                  const base = scroller.getBoundingClientRect();
+                  scroller.scrollTop += r.top - base.top - base.height * 0.34;
+                }
+              }
+            }}
+            onClose={() => setReadAlong(false)}
+          />
+        )}
         {prefs.progressBar === 'full' && (
           <input
             className="slider"
@@ -1344,23 +1530,42 @@ export function ReaderPage() {
             </span>
           )}
           <span className="grow" />
-          {detail?.book.pair && detail.book.pair.status !== 'candidate' && (
-            <button
-              className="tandem-pill"
-              onClick={() => void switchToAudio()}
-              disabled={!detail.book.pair.switchable}
-              title={
-                detail.book.pair.switchable
-                  ? 'Switch to the audiobook at this sentence'
-                  : 'Alignment not ready — switching unavailable'
-              }
-            >
-              <IconHeadphones size={17} />
-              <span>
-                {detail.book.pair.switchable ? 'Listen from here' : 'Audio · aligning…'}
-                <small />
-              </span>
-            </button>
+          {pair && (
+            <div className="reader-tandem">
+              {/* Read along adds the voice to the page; Listen instead leaves
+                  the page for the player. Two different things, so two
+                  buttons — the one people came for reads first. */}
+              <button
+                className="tandem-pill tandem-pill--lead"
+                onClick={readAlong ? () => setReadAlong(false) : startReadAlong}
+                disabled={!pair.switchable}
+                aria-pressed={readAlong}
+                title={
+                  pair.switchable
+                    ? 'Play the narration over the page you are reading'
+                    : 'Alignment not ready — the narration cannot follow the text yet'
+                }
+              >
+                <IconReadAlong size={17} />
+                <span>
+                  {!pair.switchable
+                    ? 'Audio · aligning…'
+                    : readAlong
+                      ? 'Reading along'
+                      : 'Read along'}
+                </span>
+              </button>
+              {pair.switchable && !readAlong && (
+                <button
+                  className="tandem-pill"
+                  onClick={() => void switchToAudio()}
+                  title="Leave the page and switch to the audiobook at this sentence"
+                >
+                  <IconHeadphones size={17} />
+                  <span>Listen instead</span>
+                </button>
+              )}
+            </div>
           )}
           {prefs.progressBar !== 'hidden' && <span>{formatPct(bookPct)}</span>}
         </div>
@@ -1529,6 +1734,10 @@ export function ReaderPage() {
           </button>
         </Sheet>
       )}
+
+      {/* The narration itself. Mounted only while reading along, so turning it
+          off is the same act as unmounting the element that makes the sound. */}
+      {narration.element}
     </div>
   );
 }
@@ -1611,6 +1820,23 @@ function isRtlLanguage(lang: string | null): boolean {
 type HighlightApi = {
   highlights?: Map<string, unknown> & { set(k: string, v: unknown): void; delete(k: string): void };
 };
+
+/**
+ * Whether a character offset is currently on screen.
+ *
+ * Asked of geometry rather than of offsets, because a two-page spread shows
+ * two ranges that are not contiguous and a scroll view shows a window that no
+ * offset arithmetic knows the height of. The paginated container clips, so a
+ * range on another page has a rect well outside the box.
+ */
+function spanOnScreen(map: TextMap, offset: number, box: DOMRect | undefined): boolean {
+  if (!box) return false;
+  const range = rangeForSpan(map, offset, offset + 1);
+  if (!range) return false;
+  const r = range.getBoundingClientRect();
+  if (r.width === 0 && r.height === 0) return false;
+  return r.bottom > box.top && r.top < box.bottom && r.right > box.left && r.left < box.right;
+}
 
 function paintHandoff(map: TextMap, start: number, end: number): () => void {
   const css = CSS as unknown as HighlightApi;

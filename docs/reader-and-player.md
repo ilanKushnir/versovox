@@ -169,6 +169,51 @@ Any deliberate jump (bookmark, chapter, search result, slider) that moves more
 than a page away shows a **Back to where you were** pill naming the chapter you
 left; it stays until used or dismissed.
 
+## Read-along
+
+Switching moves you between two surfaces; **read-along** puts both on one.
+Press **Read along** in the reader of an aligned pair and the narration starts
+at the sentence in front of you, the spoken sentence is washed as it is read,
+and the page turns itself to keep up. The player is untouched by this — this is
+the reader, with a voice.
+
+The transport is deliberately four controls: play/pause, back (the same skip
+length the player uses), speed, and stop. Everything else a listener wants —
+sleep timer, chapter list, bookmarks — already lives in the player, one tap
+away. It sits inside the reader's bottom chrome and that chrome refuses to
+hide while it is there: you should never need two taps to stop a book that is
+talking.
+
+**Tap any line to move the voice to it.** A tap on a timed sentence seeks the
+narration; a tap on the margin, or on text the aligner never timed, falls
+through to the reader's own behaviour, so no existing gesture is lost.
+
+**Looking ahead is free.** Turning a page, scrolling, or jumping from the
+contents hands the wheel back to you, and the page stops following. It starts
+following again on its own the moment the voice reaches whatever page you went
+to — there is nothing to press, and the _Back to the voice_ button in the
+transport is there for when you would rather not wait.
+
+Where the alignment says nothing, read-along says so rather than guessing:
+
+- between two sentences, the wash is held for up to 2.5 s, so an ordinary
+  pause does not make it blink;
+- past that, in a stretch with no timings, the wash is dropped and the
+  transport reads _the narration is ahead of the timed text_;
+- a chapter with no timings at all — front matter, or one the aligner skipped
+  — is walked past rather than dead-ending the feature;
+- a sentence the aligner never timed is never given an interpolated cue. An
+  invented cue would put the wash on a line with exactly the same confidence
+  as a measured one.
+
+Listening this way records heartbeats against the **audiobook's** position as
+well as the ebook's, so opening the player afterwards resumes where the reading
+got to rather than where listening last stopped.
+
+The arithmetic — joining sentences to timings, deciding what is a pause and
+what is a hole, and turning a book-absolute position into a file and an offset
+— is in `web/src/reader/readalong.ts`, pure and unit-tested.
+
 ## Two-way switching
 
 When a pair is aligned, the reader shows **Listen from here**, the player

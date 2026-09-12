@@ -185,6 +185,21 @@ export const IconDownload = (p: P) => (
     <path d="M5 19h14" />
   </I>
 );
+/** Read along: lines of text with the narration rising off them. */
+export const IconReadAlong = (p: P) => (
+  <I {...p}>
+    <path d="M3.5 6.5h9M3.5 10.5h9M3.5 14.5h6M3.5 18.5h7.5" />
+    <path d="M15.5 9.2v5.6M18 7v10M20.5 10.4v3.2" />
+  </I>
+);
+/** Bring the page back to whatever is being spoken. */
+export const IconTarget = (p: P) => (
+  <I {...p}>
+    <circle cx="12" cy="12" r="7" />
+    <circle cx="12" cy="12" r="2.4" />
+    <path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6" />
+  </I>
+);
 export const IconTrash = (p: P) => (
   <I {...p}>
     <path d="M5 7h14M9.5 7V4.8h5V7M7 7l.8 12.2h8.4L17 7" />

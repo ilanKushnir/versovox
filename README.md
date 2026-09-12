@@ -60,6 +60,13 @@ loss-resistant progress.)
   strong match waits until the narration itself has been checked against the
   text, and a pair that fails that check is handed back undecided rather
   than aligned wrongly.
+- **Read along**: the narration playing over the page you are reading, with
+  the spoken sentence washed as it is read and the page turning itself to keep
+  up. Tap any line to move the voice to it. Turning a page by hand hands the
+  wheel back to you, and the page follows again by itself once the voice
+  catches up to where you went — looking ahead costs nothing and needs no
+  undoing. Where the alignment has nothing to say the wash is dropped and the
+  bar says so, rather than guessing.
 - **Two-way switching** on aligned pairs: reader ⇄ player at the same
   sentence — from inside the reader/player, from the book page, and from
   the library's "Listen/Read instead" — with a temporary handoff marker,
