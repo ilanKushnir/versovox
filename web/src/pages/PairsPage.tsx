@@ -132,7 +132,7 @@ export function PairsPage() {
   const linked = (pairs ?? []).filter((p) => p.status === 'auto' || p.status === 'confirmed');
   const rejected = (pairs ?? []).filter((p) => p.status === 'rejected');
 
-  /** Linked, not transcribed yet, and not already queued: what Start acts on. */
+  /** Linked, not aligned yet, and not already queued: what Start acts on. */
   const startable = (pairs ?? []).filter(
     (p) =>
       (p.status === 'auto' || p.status === 'confirmed') &&
@@ -196,23 +196,23 @@ export function PairsPage() {
       <ProcessingQueue canManage={isAdmin} onChange={() => void load()} />
 
       {isAdmin && summary && startable.length > 0 && (
-        <section className="worksum" aria-label="Transcription work">
+        <section className="worksum" aria-label="Alignment work">
           <div className="worksum__body">
             <h2 className="worksum__title">
               {startable.length} verified {startable.length === 1 ? 'book is' : 'books are'} ready
-              to transcribe
+              to align
             </h2>
             <p className="worksum__lede">
               {summary.estimatedMs != null ? (
                 <>
-                  {formatSpan(summary.estimatedMs)} of computing in total, measured from this
-                  server&rsquo;s own speed ({(summary.speedRatio * 60).toFixed(0)} minutes of audio
-                  per hour). They run one at a time and you can stop any of them.
+                  {formatSpan(summary.estimatedMs)} of computing for{' '}
+                  {formatDuration(summary.pendingAudioMs)} of audio, measured from this
+                  server&rsquo;s own speed. They run one at a time and you can stop any of them.
                 </>
               ) : (
                 <>
                   {formatDuration(summary.pendingAudioMs)} of audio in total. The first run will
-                  measure how fast this server transcribes, and the estimate appears here.
+                  measure how fast this server aligns, and the estimate appears here.
                 </>
               )}
             </p>
@@ -396,7 +396,7 @@ function PairCard({
   onAction: (id: string, a: PairAction) => void;
   onLanguage: (id: string, language: string | null) => void;
   onDownloadModel: (modelId: string, language: string) => void;
-  /** Verified, not transcribed yet: offer it for bulk starting. */
+  /** Verified, not aligned yet: offer it for bulk starting. */
   selectable?: boolean;
   selected?: boolean;
   onSelect?: (id: string) => void;

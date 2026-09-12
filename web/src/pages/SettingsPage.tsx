@@ -4,7 +4,7 @@ import { api, ApiError } from '../api/client';
 import { useSession } from '../state/session';
 import { useToast } from '../components/ui';
 import { IconAlert, IconCheck, IconDownload, IconTrash } from '../components/icons';
-import { formatBytes, formatDate } from '../lib/format';
+import { formatBytes, formatDate, formatSpan } from '../lib/format';
 import { storageEstimate } from '../offline/downloads';
 import {
   alignerModel,
@@ -304,16 +304,15 @@ export function SettingsPage() {
       <section className="settings-section" aria-label="Processing" id="processing">
         <h2>Processing</h2>
         <p className="settings-section__lede">
-          Listening to a whole audiobook is the slow part — an hour or more of computing per book,
-          even with forced alignment. Titles are matched on their metadata first; with forced
-          alignment the run itself is the edition check, because a different edition produces no
-          anchors and the pair is handed back to you undecided. These options decide what happens
-          once a pair looks right.
+          Listening to the narration is the expensive part. Titles are matched on their metadata
+          first; with forced alignment the run itself is the edition check, because a different
+          edition produces no anchors and the pair is handed back to you undecided. These options
+          decide what happens once a pair looks right.
           {s.transcribeSpeedRatio > 0 && (
             <>
               {' '}
-              Measured on this server: {(s.transcribeSpeedRatio * 60).toFixed(0)} minutes of audio
-              per hour of computing.
+              Measured on this server: {formatSpan((6 * 3600_000) / s.transcribeSpeedRatio)} of
+              computing for a six-hour audiobook.
             </>
           )}
         </p>
