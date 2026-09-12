@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useCallback, useId, useRef, useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { AUTO_SHELVES, type AutoShelfId } from '@readport/shared';
 import { useShelves } from '../state/shelves';
 import { useToast } from './ui';
@@ -88,6 +88,7 @@ export function Sidebar({
 }) {
   const { overview, deviceCount, createShelf, renameShelf, deleteShelf, moveShelf } = useShelves();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
@@ -96,6 +97,11 @@ export function Sidebar({
   const [editName, setEditName] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Two Sidebars are mounted whenever the overlay is open — the rail is still
+  // in the DOM behind it, only hidden. Fixed ids would collide, and a
+  // `<label for>` in the panel you can see would point at the input you
+  // cannot. Every id here is scoped to this instance.
+  const uid = useId();
 
   const shelves = overview?.shelves ?? [];
   const ids = shelves.map((s) => s.id);
@@ -106,7 +112,11 @@ export function Sidebar({
   const reorder = useReorder({
     ids,
     labelOf: nameOf,
-    onCommit: (id, afterId) => void moveShelf(id, afterId),
+    onCommit: (id, afterId) => {
+      void moveShelf(id, afterId).then((ok) => {
+        if (!ok) toast.show('Could not save the new order — check the connection.');
+      });
+    },
   });
   const byId = new Map(shelves.map((s) => [s.id, s]));
 
@@ -162,9 +172,17 @@ export function Sidebar({
   const remove = async (id: string) => {
     const shelf = byId.get(id);
     if (!shelf) return;
+    // Deleting the shelf you are standing on used to leave the grid pointed
+    // at a 404, under a banner about the server connection. Step back to the
+    // library first.
+    const looking = location.pathname === `/shelf/u/${id}`;
     try {
       await deleteShelf(id);
       closeEdit();
+      if (looking) {
+        navigate('/');
+        onNavigate?.();
+      }
       toast.show(`Removed ${shelf.name}`);
     } catch {
       toast.show('Could not remove that shelf just now.');
@@ -231,10 +249,12 @@ export function Sidebar({
         <p className="sidebar__empty">A shelf is just a name and a pile of books.</p>
       )}
       <ul className="sidebar__group">
-        {reorder.ids.map((id) => {
+        {reorder.ids.map((id, index) => {
           const shelf = byId.get(id);
           if (!shelf) return null;
           const grabbed = reorder.grabbed === id;
+          const first = index === 0;
+          const last = index === reorder.ids.length - 1;
           return (
             <li
               key={id}
@@ -246,11 +266,11 @@ export function Sidebar({
               {editing === id ? (
                 <div className="sidebar__edit">
                   <form onSubmit={(e) => void saveName(e, id)}>
-                    <label className="visually-hidden" htmlFor={`shelf-name-${id}`}>
+                    <label className="visually-hidden" htmlFor={`${uid}-shelf-${id}`}>
                       Shelf name
                     </label>
                     <input
-                      id={`shelf-name-${id}`}
+                      id={`${uid}-shelf-${id}`}
                       className="input"
                       autoFocus
                       value={editName}
@@ -286,17 +306,58 @@ export function Sidebar({
                       </div>
                     </>
                   ) : (
-                    <div className="sidebar__editactions">
-                      <button
-                        className="btn btn--danger btn--sm"
-                        onClick={() => setConfirmRemove(true)}
-                      >
-                        Remove…
-                      </button>
-                      <button className="btn btn--ghost btn--sm" onClick={closeEdit}>
-                        Done
-                      </button>
-                    </div>
+                    <>
+                      {/* The grip needs either a pointer drag or Space and the
+                          arrows. Neither is available to a switch or a voice
+                          control, so the order is reachable from here too. */}
+                      {reorder.ids.length > 1 && (
+                        <div
+                          className="sidebar__moves"
+                          role="group"
+                          aria-label={`Move ${shelf.name}`}
+                        >
+                          <button
+                            className="btn btn--ghost btn--sm"
+                            disabled={first}
+                            onClick={() => reorder.moveTo(id, 'top')}
+                          >
+                            To top
+                          </button>
+                          <button
+                            className="btn btn--ghost btn--sm"
+                            disabled={first}
+                            onClick={() => reorder.moveTo(id, 'up')}
+                          >
+                            Up
+                          </button>
+                          <button
+                            className="btn btn--ghost btn--sm"
+                            disabled={last}
+                            onClick={() => reorder.moveTo(id, 'down')}
+                          >
+                            Down
+                          </button>
+                          <button
+                            className="btn btn--ghost btn--sm"
+                            disabled={last}
+                            onClick={() => reorder.moveTo(id, 'bottom')}
+                          >
+                            To bottom
+                          </button>
+                        </div>
+                      )}
+                      <div className="sidebar__editactions">
+                        <button
+                          className="btn btn--danger btn--sm"
+                          onClick={() => setConfirmRemove(true)}
+                        >
+                          Remove…
+                        </button>
+                        <button className="btn btn--ghost btn--sm" onClick={closeEdit}>
+                          Done
+                        </button>
+                      </div>
+                    </>
                   )}
                 </div>
               ) : (
@@ -343,11 +404,11 @@ export function Sidebar({
       </ul>
       {creating ? (
         <form className="sidebar__new" onSubmit={submitNew}>
-          <label className="visually-hidden" htmlFor="new-shelf-name">
+          <label className="visually-hidden" htmlFor={`${uid}-new`}>
             Shelf name
           </label>
           <input
-            id="new-shelf-name"
+            id={`${uid}-new`}
             ref={inputRef}
             className="input"
             value={name}

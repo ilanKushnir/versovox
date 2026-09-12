@@ -33,7 +33,13 @@ export const AUTO_SHELVES: { id: AutoShelfId; label: string; blurb: string }[] =
     label: 'Reading now',
     blurb: 'Started and not yet finished, most recent first.',
   },
-  { id: 'finished', label: 'Finished', blurb: 'Everything you have marked as finished.' },
+  {
+    id: 'finished',
+    label: 'Finished',
+    // Not "marked as finished": nothing in the app marks a book by hand, and
+    // a blurb that names a control nobody can find is worse than no blurb.
+    blurb: 'Books you have read or listened to the end.',
+  },
   {
     id: 'both-formats',
     label: 'Both formats',

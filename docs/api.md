@@ -126,23 +126,23 @@ TEXT rank minted only on the server (`server/src/util/rank.ts`), so a move
 writes exactly one row; the client sends the gesture (`afterBookId`), never a
 key, and a neighbour that moved underneath answers `409 stale-order`.
 
-| Method | Path                                      | Notes                                                                        |
-| ------ | ----------------------------------------- | ---------------------------------------------------------------------------- |
-| GET    | `/api/shelves`                            | the whole sidebar: automatic counts, own shelves, queue count + what is next |
-| POST   | `/api/shelves`                            | `{name}`; `409 shelf-name-taken` (case-insensitive), `409 too-many-shelves`  |
-| PATCH  | `/api/shelves/:id`                        | `{name?, afterShelfId?}` — an ABSENT `afterShelfId` means "do not move"      |
-| DELETE | `/api/shelves/:id`                        | removes the shelf and its membership; no book, no file                       |
-| GET    | `/api/shelves/:id/books?sort=`            | `manual` (default) \| `title` \| `author` \| `added`; + `missingCount`       |
-| PUT    | `/api/shelves/:id/books/:bookId`          | idempotent add → `{added, count}`; optional `{afterBookId}`                  |
-| POST   | `/api/shelves/:id/books`                  | `{bookIds: []}` up to 200 in one transaction → `{added, skipped}`            |
-| DELETE | `/api/shelves/:id/books/:bookId`          | `{removed, count}`                                                           |
-| PATCH  | `/api/shelves/:id/books/:bookId/position` | `{afterBookId}`; null = first                                                |
-| GET    | `/api/reading-list`                       | queue order, with notes; missing books reported not hidden                   |
-| PUT    | `/api/reading-list/:bookId`               | idempotent; `{position?: 'top'\|'end', afterBookId?, note?}` → `{position}`  |
-| PATCH  | `/api/reading-list/:bookId`               | `{note}` — a note belongs to a place in the queue, not to a book             |
-| PATCH  | `/api/reading-list/:bookId/position`      | `{afterBookId}`; null = first                                                |
-| DELETE | `/api/reading-list/:bookId`               | `{removed}`                                                                  |
-| GET    | `/api/books/:id/shelves`                  | `{shelfIds, onReadingList, readingListPosition}` for the book page           |
+| Method | Path                                      | Notes                                                                              |
+| ------ | ----------------------------------------- | ---------------------------------------------------------------------------------- |
+| GET    | `/api/shelves`                            | the whole sidebar: automatic counts, own shelves, queue count + what is next       |
+| POST   | `/api/shelves`                            | `{name}`; `409 shelf-name-taken` (case-insensitive), `409 too-many-shelves`        |
+| PATCH  | `/api/shelves/:id`                        | `{name?, afterShelfId?}` — an ABSENT `afterShelfId` means "do not move"            |
+| DELETE | `/api/shelves/:id`                        | removes the shelf and its membership; no book, no file                             |
+| GET    | `/api/shelves/:id/books?sort=`            | `manual` (default) \| `title` \| `author` \| `added`; + `missingCount`             |
+| PUT    | `/api/shelves/:id/books/:bookId`          | idempotent add → `{added, count}`; optional `{afterBookId}`                        |
+| POST   | `/api/shelves/:id/books`                  | `{bookIds: []}` up to 200 in one transaction → `{added, skipped}`                  |
+| DELETE | `/api/shelves/:id/books/:bookId`          | `{removed, count}`                                                                 |
+| PATCH  | `/api/shelves/:id/books/:bookId/position` | `{afterBookId}`; null = first                                                      |
+| GET    | `/api/reading-list`                       | queue order, with notes; missing books reported not hidden                         |
+| PUT    | `/api/reading-list/:bookId`               | queue or re-place; `{position?, afterBookId?, note?}` → `{added, moved, position}` |
+| PATCH  | `/api/reading-list/:bookId`               | `{note}` — a note belongs to a place in the queue, not to a book                   |
+| PATCH  | `/api/reading-list/:bookId/position`      | `{afterBookId}`; null = first                                                      |
+| DELETE | `/api/reading-list/:bookId`               | `{removed}`                                                                        |
+| GET    | `/api/books/:id/shelves`                  | `{shelfIds, onReadingList, readingListPosition}` for the book page                 |
 
 The automatic shelves are NOT endpoints of their own: `filter=reading-now` is
 `in-progress`, and `both-formats` and `recently-added` are two more values on
@@ -151,6 +151,14 @@ the missing-book exclusion. `both-formats` keeps one row per pair (the ebook
 side, or the audio side when the ebook is missing), because a title owned
 twice is one title. "On this device" has no endpoint at all — downloads live
 in one browser and only that browser can count them.
+
+`PUT /api/reading-list/:bookId` with a `position` or an `afterBookId` MOVES a
+book that is already queued; with an empty body it only queues one that is
+not. "Read next" has to mean the front of the queue even for a book sitting
+seventh, or the button is describing something other than what it does. Every
+`position` reported back — here and in `readingListPosition` — counts the list
+the reader can actually open, so a queued book on an unmounted drive holds its
+rank without pushing the visible numbers along.
 
 ## Pairing & alignment
 

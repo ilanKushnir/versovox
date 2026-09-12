@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useParams } from 'react-router-dom';
 import { AUTO_SHELVES, type AutoShelfId, type BookSummary } from '@readport/shared';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { useShelves } from '../state/shelves';
 import { AddToSheet } from '../components/AddToSheet';
 import { Cover, EmptyState } from '../components/ui';
@@ -64,6 +64,8 @@ export function LibraryPage() {
   const [data, setData] = useState<LibraryData | null>(null);
   const [shelfName, setShelfName] = useState<string | null>(null);
   const [missingCount, setMissingCount] = useState(0);
+  /** This shelf answered 404: it was removed, here or on another device. */
+  const [gone, setGone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offlineBooks, setOfflineBooks] = useState<BookSummary[] | null>(null);
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
@@ -104,6 +106,7 @@ export function LibraryPage() {
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
     try {
+      setGone(false);
       if (showing.kind === 'user') {
         const res = await api<{
           shelf: { name: string };
@@ -130,8 +133,20 @@ export function LibraryPage() {
       setMissingCount(0);
       setError(null);
       setOfflineBooks(null);
-    } catch {
+    } catch (err) {
       if (seq !== requestSeq.current) return;
+      // A shelf that is not there is not a connection problem. Deleting a
+      // shelf on another device used to leave this page telling you to check
+      // the server.
+      if (showing.kind === 'user' && err instanceof ApiError && err.status === 404) {
+        setGone(true);
+        setData({ books: [], continueRail: [], scanActive: false });
+        setShelfName(null);
+        setMissingCount(0);
+        setError(null);
+        setOfflineBooks(null);
+        return;
+      }
       // Offline (or server down): fall back to the titles downloaded into
       // this browser, read entirely from local storage.
       const list = await loadDownloads();
@@ -212,7 +227,9 @@ export function LibraryPage() {
 
   const heading =
     showing.kind === 'user'
-      ? (shelfName ?? 'Shelf')
+      ? gone
+        ? 'Shelf removed'
+        : (shelfName ?? 'Shelf')
       : showing.kind === 'device'
         ? 'On this device'
         : showing.kind === 'auto'
@@ -233,7 +250,7 @@ export function LibraryPage() {
   ];
 
   return (
-    <main className="app-main" id="library-main">
+    <main className="app-main" id="main-content" tabIndex={-1}>
       <h1 className="visually-hidden">{heading}</h1>
 
       {/* Moving between shelves on a narrow screen: a swipe and a tap, no
@@ -309,46 +326,49 @@ export function LibraryPage() {
             </span>
           )}
         </div>
-        <div className="toolbar">
-          <div className="searchbox">
-            <IconSearch size={17} />
-            <input
-              className="input"
-              type="search"
-              placeholder="Search title, author, series"
-              aria-label="Search this shelf"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+        {/* Nothing to search, filter or sort on a shelf that is not there. */}
+        {gone ? null : (
+          <div className="toolbar">
+            <div className="searchbox">
+              <IconSearch size={17} />
+              <input
+                className="input"
+                type="search"
+                placeholder="Search title, author, series"
+                aria-label="Search this shelf"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <div className="segmented segmented--inline" role="group" aria-label="Library type">
+              <button aria-pressed={kind === 'all'} onClick={() => setKind('all')}>
+                All
+              </button>
+              <button aria-pressed={kind === 'ebook'} onClick={() => setKind('ebook')}>
+                <IconBookOpen size={15} /> Ebooks
+              </button>
+              <button aria-pressed={kind === 'audio'} onClick={() => setKind('audio')}>
+                <IconHeadphones size={15} /> Audiobooks
+              </button>
+            </div>
+            <label className="visually-hidden" htmlFor="lib-sort">
+              Sort by
+            </label>
+            <select
+              id="lib-sort"
+              className="input input--select"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as Sort)}
+            >
+              <option value="title">By title</option>
+              <option value="author">By author</option>
+              <option value="recent">
+                {showing.kind === 'user' ? 'Shelf order' : 'Recently active'}
+              </option>
+              <option value="added">Recently added</option>
+            </select>
           </div>
-          <div className="segmented segmented--inline" role="group" aria-label="Library type">
-            <button aria-pressed={kind === 'all'} onClick={() => setKind('all')}>
-              All
-            </button>
-            <button aria-pressed={kind === 'ebook'} onClick={() => setKind('ebook')}>
-              <IconBookOpen size={15} /> Ebooks
-            </button>
-            <button aria-pressed={kind === 'audio'} onClick={() => setKind('audio')}>
-              <IconHeadphones size={15} /> Audiobooks
-            </button>
-          </div>
-          <label className="visually-hidden" htmlFor="lib-sort">
-            Sort by
-          </label>
-          <select
-            id="lib-sort"
-            className="input input--select"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as Sort)}
-          >
-            <option value="title">By title</option>
-            <option value="author">By author</option>
-            <option value="recent">
-              {showing.kind === 'user' ? 'Shelf order' : 'Recently active'}
-            </option>
-            <option value="added">Recently added</option>
-          </select>
-        </div>
+        )}
 
         {data?.scanActive && (
           <div className="banner" role="status" style={{ marginBlockStart: 'var(--sp-4)' }}>
@@ -366,7 +386,7 @@ export function LibraryPage() {
             ))}
           </div>
         ) : books.length === 0 ? (
-          <ShelfEmpty showing={showing} filtered={!!query || kind !== 'all'} />
+          <ShelfEmpty showing={showing} filtered={!!query || kind !== 'all'} gone={gone} />
         ) : (
           <div className="book-grid">
             {books.map((b) => (
@@ -396,7 +416,31 @@ export function LibraryPage() {
   );
 }
 
-function ShelfEmpty({ showing, filtered }: { showing: Showing; filtered: boolean }) {
+function ShelfEmpty({
+  showing,
+  filtered,
+  gone,
+}: {
+  showing: Showing;
+  filtered: boolean;
+  gone: boolean;
+}) {
+  if (gone) {
+    return (
+      <EmptyState
+        icon={<IconShelf size={40} />}
+        title="That shelf is no longer here"
+        action={
+          <Link className="btn" to="/">
+            Back to the library
+          </Link>
+        }
+      >
+        It was removed — on this device or another one. The books that were on it are all still in
+        your library.
+      </EmptyState>
+    );
+  }
   if (filtered) {
     return (
       <EmptyState icon={<IconSearch size={40} />} title="No matches">
@@ -414,15 +458,23 @@ function ShelfEmpty({ showing, filtered }: { showing: Showing; filtered: boolean
   }
   if (showing.kind === 'user') {
     return (
-      <EmptyState icon={<IconShelf size={40} />} title="This shelf is empty">
-        Add books from the library — hover a cover and press the plus.
+      <EmptyState
+        icon={<IconShelf size={40} />}
+        title="This shelf is empty"
+        action={
+          <Link className="btn" to="/">
+            Browse the library
+          </Link>
+        }
+      >
+        Press the + on any cover in the library, then pick this shelf.
       </EmptyState>
     );
   }
   if (showing.kind === 'auto') {
     const copy: Record<AutoShelfId, string> = {
       'reading-now': 'Open anything and it appears here until you finish it.',
-      finished: 'Books you mark as finished collect here.',
+      finished: 'Books you read to the end collect here on their own.',
       'both-formats':
         'This fills up as ReadPort matches an ebook to its audiobook. The Pairing page shows what it is considering.',
       'recently-added': 'Nothing new has turned up in the last month.',

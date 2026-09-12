@@ -155,8 +155,8 @@ function Shell() {
     <div className={`app-shell${collapsed ? ' is-railhidden' : ''}`}>
       {!immersive && (
         <>
-          <a className="skip-link" href="#library-main">
-            Skip to the books
+          <a className="skip-link" href="#main-content">
+            Skip to the content
           </a>
           <header className="app-header">
             <Link to="/" className="brand" aria-label="ReadPort home">

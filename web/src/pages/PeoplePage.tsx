@@ -62,7 +62,7 @@ export function PeoplePage() {
 
   if (me?.role !== 'admin') {
     return (
-      <main className="app-main" style={{ maxWidth: 820 }}>
+      <main className="app-main" id="main-content" tabIndex={-1} style={{ maxWidth: 820 }}>
         <p>Only admins manage people.</p>
       </main>
     );
@@ -79,7 +79,12 @@ export function PeoplePage() {
   };
 
   return (
-    <main className="app-main settings-page" style={{ maxWidth: 820 }}>
+    <main
+      className="app-main settings-page"
+      id="main-content"
+      tabIndex={-1}
+      style={{ maxWidth: 820 }}
+    >
       <header className="page-head page-head--row">
         <div>
           <p className="crumb">

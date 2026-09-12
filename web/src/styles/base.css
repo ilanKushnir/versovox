@@ -2844,6 +2844,11 @@ select.input {
 .skip-link:focus-visible {
   transform: none;
 }
+/* The skip link's target takes focus so the next Tab continues from the
+   content, but a ring around the whole page is not what anyone meant. */
+.app-main[tabindex='-1']:focus {
+  outline: none;
+}
 
 .app-body {
   flex: 1;
@@ -3056,6 +3061,22 @@ select.input {
 .sidebar__editactions {
   display: flex;
   gap: var(--sp-2);
+}
+/* The pointer-free route to reordering a shelf. A 2×2 grid rather than a
+   wrapping row: the rail is 235px, so a row of four always breaks, and it
+   breaks with one button stretched across the bottom. */
+.sidebar__moves {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-1);
+}
+.sidebar__moves .btn {
+  min-width: 0;
+  padding-inline: var(--sp-2);
+  font-size: 12.5px;
+}
+.sidebar__moves .btn:disabled {
+  opacity: 0.4;
 }
 .sidebar__grip {
   display: inline-flex;
@@ -3320,7 +3341,9 @@ select.input {
 }
 
 /* ------------------------------------------------------------ reading list */
-.queue {
+/* `.readlist`, not `.queue`: the processing panel already owns `.queue`, and
+   a second definition down here silently stripped its padding. */
+.readlist {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -3477,5 +3500,40 @@ select.input {
   .queue-row.is-grabbed {
     box-shadow: none;
     border-color: var(--rp-primary);
+  }
+}
+
+/* --------------------------------------------------------- touch targets */
+/* A finger is not a mouse pointer. LAST in the file on purpose: a media
+   query adds no specificity, so an override placed above the rule it
+   overrides simply loses — which is how the plus on a cover stayed 30px on a
+   phone despite a `pointer: coarse` block earlier in this stylesheet.
+   These three are the controls this feature left under 44px on touch: the
+   chip row is the whole of shelf navigation on a phone, the plus on a cover
+   is the only way to shelve a book from the grid, and the × on a membership
+   chip is the only way to take it off again from the book page. */
+@media (pointer: coarse) {
+  .shelf-chips .chip {
+    min-height: 44px;
+    padding-inline: var(--sp-4);
+  }
+  .book-card__add {
+    width: 44px;
+    height: 44px;
+  }
+  .membership__chip {
+    padding: 0 0 0 12px;
+  }
+  .membership__x {
+    width: 44px;
+    height: 44px;
+  }
+  /* The header button is the ONLY way into the shelves on a phone, and the
+     two buttons below are the only way to make the first shelf and to move
+     one without a drag. */
+  .app-header__shelves,
+  .sidebar__newbtn,
+  .sidebar__moves .btn {
+    min-height: 44px;
   }
 }

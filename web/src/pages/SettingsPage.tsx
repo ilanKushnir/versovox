@@ -129,13 +129,18 @@ export function SettingsPage() {
   if (!data) {
     if (!loadFailed) {
       return (
-        <main className="app-main" aria-busy="true">
+        <main className="app-main" id="main-content" tabIndex={-1} aria-busy="true">
           <div className="skeleton" style={{ height: 200 }} />
         </main>
       );
     }
     return (
-      <main className="app-main settings-page" style={{ maxWidth: 900 }}>
+      <main
+        className="app-main settings-page"
+        id="main-content"
+        tabIndex={-1}
+        style={{ maxWidth: 900 }}
+      >
         <header className="page-head">
           <h1>Settings</h1>
         </header>
@@ -162,7 +167,12 @@ export function SettingsPage() {
   const dirty = Object.keys(draft).length > 0;
 
   return (
-    <main className="app-main settings-page" style={{ maxWidth: 900 }}>
+    <main
+      className="app-main settings-page"
+      id="main-content"
+      tabIndex={-1}
+      style={{ maxWidth: 900 }}
+    >
       <header className="page-head">
         <h1>Settings</h1>
         <p>Everything this server is doing, and everything you can change about it.</p>

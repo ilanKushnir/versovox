@@ -49,3 +49,14 @@ export function formatSpan(ms: number | null | undefined): string {
   const days = hours / 24;
   return days < 10 ? `about ${days.toFixed(1)} days` : `about ${Math.round(days)} days`;
 }
+
+/**
+ * "1st", "2nd", "13th". Used wherever a reading-list place is spoken back to
+ * the reader — the book page chip and the Add-to confirmation, which have to
+ * agree with each other.
+ */
+export function ordinal(n: number): string {
+  const rest = Math.abs(n) % 100;
+  if (rest >= 11 && rest <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][Math.abs(n) % 10] ?? 'th'}`;
+}

@@ -33,7 +33,8 @@ interface ShelvesCtx {
   createShelf: (name: string) => Promise<ShelfSummary>;
   renameShelf: (id: string, name: string) => Promise<void>;
   deleteShelf: (id: string) => Promise<void>;
-  moveShelf: (id: string, afterShelfId: string | null) => Promise<void>;
+  /** Resolves false when the server refused the move and the row snapped back. */
+  moveShelf: (id: string, afterShelfId: string | null) => Promise<boolean>;
 }
 
 const EMPTY: ShelvesCtx = {
@@ -47,7 +48,7 @@ const EMPTY: ShelvesCtx = {
   },
   renameShelf: async () => {},
   deleteShelf: async () => {},
-  moveShelf: async () => {},
+  moveShelf: async () => true,
 };
 
 const Ctx = createContext<ShelvesCtx>(EMPTY);
@@ -127,7 +128,7 @@ export function ShelvesProvider({ children }: { children: ReactNode }) {
   );
 
   const moveShelf = useCallback(
-    async (id: string, afterShelfId: string | null) => {
+    async (id: string, afterShelfId: string | null): Promise<boolean> => {
       // Optimistic: the row is already where the user dropped it. A failure
       // is corrected by the refresh below.
       setOverview((o) => {
@@ -139,9 +140,19 @@ export function ShelvesProvider({ children }: { children: ReactNode }) {
         rest.splice(at, 0, moving);
         return { ...o, shelves: rest };
       });
-      await api(`/api/shelves/${id}`, { method: 'PATCH', body: { afterShelfId } }).finally(
-        () => void refresh(),
-      );
+      // A rejected move used to escape as an unhandled rejection, so a drop
+      // the server refused looked like it had worked until the next reload.
+      // The caller gets a boolean and says something.
+      let ok = true;
+      try {
+        await api(`/api/shelves/${id}`, { method: 'PATCH', body: { afterShelfId } });
+      } catch (err) {
+        // A neighbour moved under us on another device: that is not a
+        // failure, it is a stale picture, and the refresh below fixes it.
+        ok = (err as Error).message.includes('stale-order');
+      }
+      await refresh();
+      return ok;
     },
     [refresh],
   );

@@ -20,7 +20,7 @@ import {
   IconSwitch,
   IconTrash,
 } from '../components/icons';
-import { formatBytes, formatDuration, formatPct } from '../lib/format';
+import { formatBytes, formatDuration, formatPct, ordinal } from '../lib/format';
 import {
   cachedSwitch,
   cancelDownload,
@@ -201,7 +201,7 @@ export function BookPage() {
 
   if (error) {
     return (
-      <main className="app-main">
+      <main className="app-main" id="main-content" tabIndex={-1}>
         <div className="banner banner--error" role="alert">
           <IconAlert size={18} /> {error}
         </div>
@@ -210,7 +210,7 @@ export function BookPage() {
   }
   if (!detail) {
     return (
-      <main className="app-main" aria-busy="true">
+      <main className="app-main" id="main-content" tabIndex={-1} aria-busy="true">
         <div className="book-hero">
           <div className="skeleton book-hero__cover" />
           <div style={{ flex: 1 }}>
@@ -293,6 +293,8 @@ export function BookPage() {
   return (
     <main
       className="app-main book-page"
+      id="main-content"
+      tabIndex={-1}
       style={ambient ? ({ '--pl-ambient': ambient } as React.CSSProperties) : undefined}
     >
       <div className="book-hero__backdrop" aria-hidden="true" />
@@ -610,12 +612,6 @@ function MembershipChips({
       })}
     </div>
   );
-}
-
-function ordinal(n: number): string {
-  const rest = n % 100;
-  if (rest >= 11 && rest <= 13) return `${n}th`;
-  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 }
 
 /**

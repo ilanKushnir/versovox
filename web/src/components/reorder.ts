@@ -123,7 +123,11 @@ export function useReorder(opts: {
       setOffset(0);
       setLive(null);
       const before = original.current;
-      if (before.join('\u0000') !== list.join('\u0000')) {
+      // A separator no id can contain, written as an ESCAPE. A literal NUL
+      // byte in the source makes the file count as binary, so diffs stop
+      // rendering and nobody reviews a change to it again.
+      const SEP = '\u0000';
+      if (before.join(SEP) !== list.join(SEP)) {
         onCommit(id, afterIdFor(list, id), list);
         say(id, 'Dropped at', list);
       } else {

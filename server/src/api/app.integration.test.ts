@@ -917,16 +917,33 @@ describe('ReadPort API', () => {
     };
     expect(queued.items.map((i) => i.book.id)).toEqual(ids);
 
-    // Queueing something already queued is a no-op that reports where it is,
-    // so the confirmation can be specific rather than vague.
+    // "Read next" on a book already sitting third has to MOVE it to the
+    // front. The button says "front of the queue"; leaving it third and
+    // reporting "third" is the button lying to a reader who cannot see the
+    // list from where they pressed it.
     const jump = (
       await authed({
         method: 'PUT',
         url: `/api/reading-list/${ids[2]}`,
         payload: { position: 'top' },
       })
-    ).json() as { added: boolean; position: number };
-    expect(jump).toMatchObject({ added: false, position: 3 });
+    ).json() as { added: boolean; moved: boolean; position: number };
+    expect(jump).toMatchObject({ added: false, moved: true, position: 1 });
+    expect(
+      (
+        (await authed({ url: '/api/reading-list' })).json() as { items: { book: { id: string } }[] }
+      ).items.map((i) => i.book.id),
+    ).toEqual([ids[2], ids[0], ids[1]]);
+    // Put it back, so the rest of this test reads in the order it queued.
+    await authed({
+      method: 'PUT',
+      url: `/api/reading-list/${ids[2]}`,
+      payload: { afterBookId: ids[1] },
+    });
+    // A bare re-add, with no placement asked for, still leaves it alone.
+    expect(
+      (await authed({ method: 'PUT', url: `/api/reading-list/${ids[2]}` })).json(),
+    ).toMatchObject({ added: false, moved: false, position: 3 });
 
     const fourth = lib.books[3]!.id;
     const next = (
@@ -978,6 +995,41 @@ describe('ReadPort API', () => {
       await authed({ method: 'DELETE', url: `/api/reading-list/${id}` });
     }
     expect((await authed({ url: '/api/reading-list' })).json()).toMatchObject({ items: [] });
+  });
+
+  it('a queued book on an unmounted drive does not shift the numbers on the ones you can see', async () => {
+    const lib = (await authed({ url: '/api/library' })).json() as { books: { id: string }[] };
+    const [first, second, third] = lib.books.map((b) => b.id);
+    for (const id of [first, second, third]) {
+      await authed({ method: 'PUT', url: `/api/reading-list/${id}` });
+    }
+    // The drive holding the first book is unplugged. It keeps its place in
+    // the queue but the reading list page stops listing it.
+    ctx.db.prepare("UPDATE books SET scan_state = 'missing' WHERE id = ?").run(first);
+    try {
+      const queue = (await authed({ url: '/api/reading-list' })).json() as {
+        items: { book: { id: string } }[];
+        missingCount: number;
+      };
+      expect(queue.items.map((i) => i.book.id)).toEqual([second, third]);
+      expect(queue.missingCount).toBe(1);
+
+      // The book page has to agree with that list. Counting the row nobody
+      // can see would make the second book call itself the third.
+      const member = (await authed({ url: `/api/books/${second}/shelves` })).json() as {
+        onReadingList: boolean;
+        readingListPosition: number | null;
+      };
+      expect(member).toMatchObject({ onReadingList: true, readingListPosition: 1 });
+      expect((await authed({ url: `/api/books/${third}/shelves` })).json()).toMatchObject({
+        readingListPosition: 2,
+      });
+    } finally {
+      ctx.db.prepare("UPDATE books SET scan_state = 'ready' WHERE id = ?").run(first);
+      for (const id of [first, second, third]) {
+        await authed({ method: 'DELETE', url: `/api/reading-list/${id}` });
+      }
+    }
   });
 
   it('automatic shelves count the same books the library lists', async () => {

@@ -36,6 +36,8 @@ export function ReadingListPage() {
   const [data, setData] = useState<QueueResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
+  /** The list never arrived, so an empty screen means nothing about the queue. */
+  const [stale, setStale] = useState(false);
   const readOnly = phase === 'offline';
   const lastGood = useRef<ReadingListItem[]>([]);
 
@@ -44,13 +46,21 @@ export function ReadingListPage() {
       const res = await api<QueueResponse>('/api/reading-list');
       setData(res);
       lastGood.current = res.items;
+      setStale(false);
       setError(null);
     } catch (err) {
+      const cached = lastGood.current.length > 0;
       setError(
         isOffline(err)
-          ? 'You appear to be offline. This is the queue as it last looked.'
+          ? cached
+            ? 'You appear to be offline. This is the queue as it last looked.'
+            : 'You appear to be offline, so your reading list could not be fetched.'
           : 'Could not load your reading list.',
       );
+      // An empty list because the fetch failed is NOT an empty list. Saying
+      // "nothing queued yet" to somebody with twenty books queued is worse
+      // than saying nothing.
+      setStale(!cached);
       setData((d) => d ?? { items: lastGood.current, missingCount: 0 });
     }
   }, []);
@@ -58,6 +68,31 @@ export function ReadingListPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A menu that only closes by pressing the same button again is a menu you
+  // have to remember you left open. Escape and a click elsewhere both shut
+  // it, and Escape returns focus to the button that opened it.
+  useEffect(() => {
+    if (!menu) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setMenu(null);
+      opener?.focus?.();
+    };
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest('.queue-menu, .queue-row__tools')) {
+        setMenu(null);
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('pointerdown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onDown);
+    };
+  }, [menu]);
 
   const items = data?.items ?? [];
   const ids = useMemo(() => items.map((i) => i.book.id), [items]);
@@ -122,7 +157,7 @@ export function ReadingListPage() {
   };
 
   return (
-    <main className="app-main" id="library-main">
+    <main className="app-main" id="main-content" tabIndex={-1}>
       <div className="page-head">
         <h1>Reading list</h1>
         <p>What you plan to read next, in the order you plan to read it.</p>
@@ -147,11 +182,23 @@ export function ReadingListPage() {
       )}
 
       {!data ? (
-        <div className="queue" aria-busy="true">
+        <div className="readlist" aria-busy="true">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="skeleton" style={{ height: 72, marginBlockEnd: 8 }} />
           ))}
         </div>
+      ) : items.length === 0 && stale ? (
+        <EmptyState
+          icon={<IconAlert size={40} />}
+          title="Your reading list could not be loaded"
+          action={
+            <button className="btn" onClick={() => void load()}>
+              Try again
+            </button>
+          }
+        >
+          Nothing is lost — the list is on the server and will be here when it answers.
+        </EmptyState>
       ) : items.length === 0 ? (
         <EmptyState
           icon={<IconList size={40} />}
@@ -162,10 +209,11 @@ export function ReadingListPage() {
             </Link>
           }
         >
-          Press Read next on any cover to put a book at the front of the line.
+          Press the + on any cover, then Read next to put a book at the front of the line, or Add to
+          reading list to put it at the end.
         </EmptyState>
       ) : (
-        <ol className="queue">
+        <ol className="readlist">
           {reorder.ids.map((id, index) => {
             const item = byId.get(id);
             if (!item) return null;

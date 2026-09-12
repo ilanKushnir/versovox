@@ -109,6 +109,28 @@ export function registerShelfRoutes(app: FastifyInstance, ctx: AppContext): void
       )
       .all(userId) as { id: string; sort_key: string }[];
 
+  /**
+   * Ranking uses every row — a book on an unplugged drive still holds its
+   * place in the queue — but a POSITION quoted back to the reader has to
+   * count what the reading list page actually shows them, or the book page
+   * says "3rd" above a list where the book is second.
+   */
+  const visibleReadingList = (userId: string): string[] =>
+    (
+      db
+        .prepare(
+          `SELECT r.book_id AS id FROM reading_list r JOIN books b ON b.id = r.book_id
+           WHERE r.user_id = ? AND b.scan_state != 'missing' ORDER BY r.sort_key`,
+        )
+        .all(userId) as { id: string }[]
+    ).map((r) => r.id);
+
+  /** 1-based place in the list the reader can see, or null if it is not in it. */
+  const visiblePosition = (userId: string, bookId: string): number | null => {
+    const at = visibleReadingList(userId).indexOf(bookId);
+    return at < 0 ? null : at + 1;
+  };
+
   const shelfCount = (shelfId: string): number =>
     Number(
       (
@@ -455,7 +477,12 @@ export function registerShelfRoutes(app: FastifyInstance, ctx: AppContext): void
     }
     const rows = readingListRows(userId);
     const existing = rows.findIndex((r) => r.id === bookId);
-    if (existing >= 0) {
+    // A placement was ASKED FOR: `position` or `afterBookId` was sent. An
+    // empty body means "just queue it", and for a book already queued that is
+    // rightly a no-op.
+    const placement = parsed.data.afterBookId !== undefined || parsed.data.position !== undefined;
+
+    if (existing >= 0 && !placement) {
       if (parsed.data.note !== undefined) {
         db.prepare('UPDATE reading_list SET note = ? WHERE user_id = ? AND book_id = ?').run(
           parsed.data.note,
@@ -463,26 +490,53 @@ export function registerShelfRoutes(app: FastifyInstance, ctx: AppContext): void
           bookId,
         );
       }
-      return { added: false, position: existing + 1, count: rows.length };
+      return {
+        added: false,
+        moved: false,
+        position: visiblePosition(userId, bookId),
+        count: rows.length,
+      };
     }
+
+    // Read next on a book that is already 7th has to MOVE it to the front.
+    // Reporting "it is 7th" while the button said "front of the queue" is the
+    // button lying, and the reader has no way to see which one is true
+    // without opening the list.
     let key: string;
     if (parsed.data.afterBookId !== undefined) {
       const moved = moveWithin({ rows, afterId: parsed.data.afterBookId, movingId: bookId });
       if (!moved.ok) return reply.code(409).send({ error: moved.error });
       key = moved.key;
-    } else if (parsed.data.position === 'top') {
-      key = between(null, rows[0]?.sort_key ?? null);
     } else {
-      key = between(rows[rows.length - 1]?.sort_key ?? null, null);
+      const others = rows.filter((r) => r.id !== bookId);
+      key =
+        parsed.data.position === 'top'
+          ? between(null, others[0]?.sort_key ?? null)
+          : between(others[others.length - 1]?.sort_key ?? null, null);
     }
-    db.prepare(
-      'INSERT INTO reading_list (user_id, book_id, sort_key, note, added_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(userId, bookId, key, parsed.data.note ?? null, nowIso());
-    const after = readingListRows(userId);
+    if (existing >= 0) {
+      db.prepare('UPDATE reading_list SET sort_key = ? WHERE user_id = ? AND book_id = ?').run(
+        key,
+        userId,
+        bookId,
+      );
+      if (parsed.data.note !== undefined) {
+        db.prepare('UPDATE reading_list SET note = ? WHERE user_id = ? AND book_id = ?').run(
+          parsed.data.note,
+          userId,
+          bookId,
+        );
+      }
+    } else {
+      db.prepare(
+        'INSERT INTO reading_list (user_id, book_id, sort_key, note, added_at) VALUES (?, ?, ?, ?, ?)',
+      ).run(userId, bookId, key, parsed.data.note ?? null, nowIso());
+    }
     return {
-      added: true,
-      position: after.findIndex((r) => r.id === bookId) + 1,
-      count: after.length,
+      added: existing < 0,
+      moved: existing >= 0,
+      position: visiblePosition(userId, bookId),
+      count: readingListRows(userId).length,
     };
   });
 
@@ -542,19 +596,12 @@ export function registerShelfRoutes(app: FastifyInstance, ctx: AppContext): void
       )
       .all(id, userId) as { id: string }[];
     const queued = db
-      .prepare('SELECT sort_key FROM reading_list WHERE user_id = ? AND book_id = ?')
-      .get(userId, id) as { sort_key: string } | undefined;
+      .prepare('SELECT 1 FROM reading_list WHERE user_id = ? AND book_id = ?')
+      .get(userId, id);
     // Where in the queue, so the book page can say "3rd" rather than merely
-    // "queued". Counted over the index, not by listing the queue.
-    const position = queued
-      ? Number(
-          (
-            db
-              .prepare('SELECT COUNT(*) AS c FROM reading_list WHERE user_id = ? AND sort_key <= ?')
-              .get(userId, queued.sort_key) as { c: number }
-          ).c,
-        )
-      : null;
+    // "queued" — and it must be the third row of the list the reader can
+    // open, so books on an unmounted drive are not counted past.
+    const position = queued ? visiblePosition(userId, id) : null;
     return {
       shelfIds: rows.map((r) => r.id),
       onReadingList: queued !== undefined,

@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { useShelves } from '../state/shelves';
 import { Sheet, useToast } from './ui';
 import { IconCheck, IconList, IconPlus, IconShelf } from './icons';
+import { ordinal } from '../lib/format';
 
 /**
  * "Add to…": two taps to shelve a book, two to queue it. The panel STAYS
@@ -95,15 +96,22 @@ export function AddToSheet({
         await after();
         toast.show('Taken off your reading list');
       } else {
-        const res = await api<{ position: number; count: number }>(`/api/reading-list/${bookId}`, {
-          method: 'PUT',
-          body: { position },
-        });
+        const res = await api<{ moved: boolean; position: number | null; count: number }>(
+          `/api/reading-list/${bookId}`,
+          { method: 'PUT', body: { position } },
+        );
         await after();
+        // The server reports where it actually landed, and the confirmation
+        // repeats that rather than the intent. A book that was already 7th
+        // and has now been moved to the front should say it moved.
         toast.show(
           position === 'top'
-            ? 'Next up on your reading list'
-            : `Queued ${ordinal(res.position)} on your reading list`,
+            ? res.moved
+              ? 'Moved to the front of your reading list'
+              : 'Next up on your reading list'
+            : res.position !== null
+              ? `Queued ${ordinal(res.position)} on your reading list`
+              : 'Added to your reading list',
         );
       }
     } catch {
@@ -221,10 +229,4 @@ export function AddToSheet({
       </div>
     </Sheet>
   );
-}
-
-function ordinal(n: number): string {
-  const rest = n % 100;
-  if (rest >= 11 && rest <= 13) return `${n}th`;
-  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 }

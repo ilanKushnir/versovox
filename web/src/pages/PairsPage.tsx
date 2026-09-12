@@ -120,7 +120,7 @@ export function PairsPage() {
 
   if (error) {
     return (
-      <main className="app-main">
+      <main className="app-main" id="main-content" tabIndex={-1}>
         <div className="banner banner--error" role="alert">
           <IconAlert size={18} /> {error}
         </div>
@@ -166,7 +166,7 @@ export function PairsPage() {
   };
 
   return (
-    <main className="app-main">
+    <main className="app-main" id="main-content" tabIndex={-1}>
       <header className="page-head page-head--row">
         <div>
           <h1>Pairing</h1>
