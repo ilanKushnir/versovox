@@ -914,10 +914,14 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     language = languageCode(audio.language as string | null);
     languageSource = 'audio-tags';
   }
-  if (!language && settings.transcribeProvider === 'whisper-cli' && trackPaths[0]) {
+  // Naming the language is not transcription, so it is not gated on the
+  // transcription provider: if a whisper binary and any speech model are on
+  // hand, use them; otherwise fall through to the default below. This only
+  // runs for a book whose own metadata says nothing, which is rare.
+  if (!language && trackPaths[0]) {
     const bin = settings.whisperBin || config.whisperBin;
     const detector = anyMultilingualModel(config.modelsDir);
-    if (bin && detector) {
+    if (bin && fs.existsSync(bin) && detector) {
       jobProgress(db, job.id, job.lease_token, 0.12, 'Detecting narration language');
       const det = await detectLanguage(
         bin,

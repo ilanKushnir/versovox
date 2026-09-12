@@ -37,13 +37,13 @@ acoustic model over the audio, greedy-decodes its emissions into a stream of
 romanized characters with 20 ms timestamps, and then finds where that stream
 and the book's own romanized characters agree.
 
-|                      | Transcribe then match (`whisper-cli`)          | Forced alignment (`forced-align`)        |
-| -------------------- | ---------------------------------------------- | ---------------------------------------- |
-| Model                | 1.6–3.1 GB, one per language                   | 317 MB, one for all ten                  |
-| Measured speed       | 0.61 seconds of audio per second of wall clock | wall clock 0.33–0.46× the audio duration |
-| A six-hour book      | ≈ 11 hours                                     | ≈ 2–3 hours                              |
-| Edition check        | separate two-clip probe                        | falls out of the alignment itself        |
-| Needs the ebook text | no                                             | **yes** — it is the point                |
+|                      | Transcribe then match (`whisper-cli`)          | Forced alignment (`forced-align`)                            |
+| -------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| Model                | 1.6–3.1 GB, one per language                   | 317 MB, one for all ten (whisper models optional, see below) |
+| Measured speed       | 0.61 seconds of audio per second of wall clock | wall clock 0.33–0.46× the audio duration                     |
+| A six-hour book      | ≈ 11 hours                                     | ≈ 2–3 hours                                                  |
+| Edition check        | separate two-clip probe                        | falls out of the alignment itself                            |
+| Needs the ebook text | no                                             | **yes** — it is the point                                    |
 
 Both figures were measured on the same target server (a 4-CPU LXC), the
 forced-alignment ones on a 67-minute human-narrated audiobook with 880

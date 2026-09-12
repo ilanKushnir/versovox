@@ -138,6 +138,13 @@ export interface ModelInfo {
    * server from before forced alignment only ever shipped whisper models.
    */
   kind?: 'whisper-ggml' | 'ctc-onnx';
+  /**
+   * What the model is FOR (server: ModelSpec.purpose). Since forced alignment
+   * became the default engine only the `aligner` is required, so the settings
+   * page groups by this rather than by language. Optional: a server from
+   * before 0.7.0 sends no purpose at all.
+   */
+  purpose?: 'aligner' | 'language-id' | 'transcription';
   /** Present when the licence is not permissive; shown BEFORE the download button. */
   licence?: string;
   languages: string[] | '*';
@@ -176,4 +183,24 @@ export function alignerModel(models: ModelsResponse | null): ModelInfo | null {
 /** Whisper models only — the aligner is presented on its own, not per language. */
 export function speechModels(models: ModelsResponse | null): ModelInfo[] {
   return (models?.models ?? []).filter((m) => m.kind !== 'ctc-onnx' && m.id !== ALIGNER_MODEL_ID);
+}
+
+/**
+ * What a model is for, with a sane answer for servers older than `purpose`:
+ * back then the aligner was the only non-whisper entry and every whisper
+ * model in the catalog was there to transcribe.
+ */
+export function modelPurpose(m: ModelInfo): 'aligner' | 'language-id' | 'transcription' {
+  if (m.purpose) return m.purpose;
+  return m.kind === 'ctc-onnx' || m.id === ALIGNER_MODEL_ID ? 'aligner' : 'transcription';
+}
+
+/** The small model whose only job is naming a book's language, if the catalog has one. */
+export function languageIdModel(models: ModelsResponse | null): ModelInfo | null {
+  return speechModels(models).find((m) => modelPurpose(m) === 'language-id') ?? null;
+}
+
+/** The big Whisper models — used by the transcribe-then-match engine, and nothing else. */
+export function transcriptionModels(models: ModelsResponse | null): ModelInfo[] {
+  return speechModels(models).filter((m) => modelPurpose(m) === 'transcription');
 }

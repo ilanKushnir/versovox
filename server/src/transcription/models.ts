@@ -35,6 +35,12 @@ export interface ModelSpec {
   licence?: string;
   /** Extra artefacts beyond `file` (vocabularies, configs). */
   extraFiles?: ModelFile[];
+  /**
+   * What this model is FOR, so the UI can be honest about what is required.
+   * Since 0.7.0 alignment needs only the `aligner`; everything else is
+   * optional and most installs never need one.
+   */
+  purpose?: 'aligner' | 'language-id' | 'transcription';
   /** BCP-47 base codes this model is meant for; '*' = multilingual. */
   languages: string[] | '*';
   url: string;
@@ -70,6 +76,25 @@ export const MODELS: ModelSpec[] = [
     ],
     note: 'Aligns the audiobook to the ebook text you already have. One download covers every language, and it is several times faster than transcribing.',
     cost: 0.3,
+    purpose: 'aligner',
+  },
+  {
+    // Identifying which language is being spoken is an easy job, and the only
+    // job left for speech recognition on a default install. It does not need
+    // a 1.5 GB model, and it only runs at all when a book carries no language
+    // metadata of its own.
+    id: 'base-q5',
+    label: 'Whisper base (language detection)',
+    family: 'openai',
+    kind: 'whisper-ggml',
+    licence: 'MIT',
+    languages: '*',
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin',
+    file: 'ggml-base-q5_1.bin',
+    sizeBytes: 59_707_625,
+    note: 'Small and quick. Only used to work out what language a book is in when its own metadata does not say.',
+    cost: 0.05,
+    purpose: 'language-id',
   },
   {
     id: 'large-v3-turbo',
@@ -81,6 +106,7 @@ export const MODELS: ModelSpec[] = [
     sizeBytes: 1_624_555_275,
     note: 'Best general model for the CPU: large-v3 accuracy within 1–2 points at ~5× the speed.',
     cost: 1,
+    purpose: 'transcription',
   },
   {
     id: 'large-v3',
@@ -92,6 +118,7 @@ export const MODELS: ModelSpec[] = [
     sizeBytes: 3_095_033_483,
     note: 'Most accurate general model; several times slower than turbo. Pick it for difficult narration.',
     cost: 5,
+    purpose: 'transcription',
   },
   {
     id: 'small',
@@ -103,6 +130,7 @@ export const MODELS: ModelSpec[] = [
     sizeBytes: 487_601_967,
     note: 'Fast preview quality; fine for clean English narration, weak on other languages.',
     cost: 0.3,
+    purpose: 'transcription',
   },
   {
     id: 'ivrit-large-v3-turbo',
@@ -114,6 +142,7 @@ export const MODELS: ModelSpec[] = [
     sizeBytes: 1_624_555_275,
     note: 'Hebrew fine-tune trained on ~390 h of transcribed Hebrew speech — far better than stock Whisper for Hebrew.',
     cost: 1,
+    purpose: 'transcription',
   },
   {
     id: 'ivrit-large-v3',
@@ -125,6 +154,7 @@ export const MODELS: ModelSpec[] = [
     sizeBytes: 3_095_033_483,
     note: 'Hebrew fine-tune of the full large-v3: most accurate Hebrew option, several times slower.',
     cost: 5,
+    purpose: 'transcription',
   },
 ];
 
@@ -174,11 +204,16 @@ export class ModelMissingError extends Error {
   ) {
     const lang = languageByCode(language);
     const model = modelById(modelId);
-    super(
-      `model-missing:${language}:${modelId}|The ${lang?.label ?? language} speech model (${
-        model?.label ?? modelId
-      }) is not installed — download it in Settings → Speech models.`,
-    );
+    // The aligner is one model for every language, so naming a language in its
+    // message would be actively misleading — it is not a per-language download.
+    const message =
+      model?.purpose === 'aligner'
+        ? `The alignment model (${model.label}) is not installed. It is a single ` +
+          `download that covers every language — get it in Settings → Models.`
+        : `The ${lang?.label ?? language} speech model (${
+            model?.label ?? modelId
+          }) is not installed — download it in Settings → Models.`;
+    super(`model-missing:${language}:${modelId}|${message}`);
     this.name = 'ModelMissingError';
   }
 }
@@ -231,7 +266,9 @@ export function resolveAligner(
 
 /** Any installed multilingual model (for language detection). */
 export function anyMultilingualModel(modelsDir: string): { spec: ModelSpec; path: string } | null {
-  for (const id of ['large-v3-turbo', 'large-v3', 'small']) {
+  // Smallest first: this is only ever used to name a language, and a 57 MB
+  // model does that as well as a 1.5 GB one for a fraction of the CPU.
+  for (const id of ['base-q5', 'small', 'large-v3-turbo', 'large-v3']) {
     const spec = modelById(id)!;
     if (isInstalled(modelsDir, spec)) return { spec, path: modelPath(modelsDir, spec) };
   }

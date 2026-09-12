@@ -252,7 +252,7 @@ export function SetupWizard({
   /**
    * Start the aligner download, now that a session exists. Deliberately
    * non-fatal: setup has already succeeded by the time this runs, and the
-   * model can always be fetched later from Settings → Speech models.
+   * model can always be fetched later from Settings → Models.
    */
   const startAlignerDownload = async () => {
     if (!wantAligner) return;
@@ -610,7 +610,7 @@ export function SetupWizard({
             {!wantAligner && !aligner?.installed && (
               <p className="hint" style={{ marginTop: 10 }}>
                 Fine — Versovox will still scan, pair and read. Sentence-exact switching stays off
-                until you fetch the model from Settings → Speech models.
+                until you fetch the model from Settings → Models.
               </p>
             )}
             {aligner?.lastError && !aligner.download && (
@@ -928,8 +928,8 @@ function InitStep({
       )}
       {alignerFailed && (
         <p className="hint" style={{ marginTop: 14, color: 'var(--vx-danger)' }}>
-          The aligner download could not be started. Fetch it under Settings → Speech models —
-          everything else is set up.
+          The aligner download could not be started. Fetch it under Settings → Models — everything
+          else is set up.
         </p>
       )}
       {watchAligner && aligner && !alignerFailed && (
@@ -958,8 +958,8 @@ function InitStep({
           ) : (
             <p className="hint">
               {aligner.lastError
-                ? `Download failed: ${aligner.lastError}. Retry under Settings → Speech models.`
-                : 'Queued — watch it under Settings → Speech models.'}
+                ? `Download failed: ${aligner.lastError}. Retry under Settings → Models.`
+                : 'Queued — watch it under Settings → Models.'}
             </p>
           )}
         </div>

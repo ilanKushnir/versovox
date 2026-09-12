@@ -59,11 +59,14 @@ sentence-exact switch possible needs two things, **in this order**:
    `/usr/local/bin/whisper-cli`, and nothing transcribes unless you also
    choose that engine.
 
-The order matters: on a start with `whisper-cli` set and no multilingual
-model on disk, Versovox fetches the 1.6 GB default whisper model as a
-first-run convenience. An installed aligner counts as a multilingual model
-and suppresses that, and so does turning off "download the default model" in
-Settings → Speech models.
+Speech recognition is OPTIONAL and most installs never need it. With the
+forced aligner selected, a whisper model is used for exactly one thing:
+naming a book's language when the EPUB, the audio tags and the per-pair
+override all say nothing. A 57 MB `base-q5` model does that as well as a
+1.5 GB one, and Versovox reaches for the smallest installed model. Whisper is
+otherwise only the rescue engine, which you have to select deliberately.
+A start with the forced aligner selected never downloads a whisper model on
+its own, whatever "download the default model" is set to.
 
 `POST /api/preflight` (and the setup wizard, which calls it) answers "can
 this container actually align a book?" in plain language: ffmpeg/ffprobe, the

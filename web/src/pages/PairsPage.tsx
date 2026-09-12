@@ -570,9 +570,15 @@ function PairCard({
         <div className="banner banner--action" role="alert">
           <IconDownload size={16} />
           <span className="grow">
-            <strong>{languageLabel(job.modelMissing.language)} speech model needed.</strong>{' '}
-            {job.modelMissing.message.replace(/ — download it in Settings.*$/, '')}. Download it and
-            this alignment runs by itself when it lands.
+            {/* The aligner is one model for every language, so naming a
+                language here would misdescribe the download. */}
+            <strong>
+              {job.modelMissing.modelId === 'mms-forced-aligner'
+                ? 'Alignment model needed.'
+                : `${languageLabel(job.modelMissing.language)} speech model needed.`}
+            </strong>{' '}
+            {job.modelMissing.message.replace(/[ —-]*(download|get) it in Settings.*$/i, '')}.
+            Download it and this alignment runs by itself when it lands.
           </span>
           <button
             className="btn"
