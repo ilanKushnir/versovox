@@ -1,3 +1,5 @@
+import { NgramIndex } from './ngram-index.js';
+
 /**
  * Character-anchor matcher for CTC forced alignment.
  *
@@ -12,7 +14,7 @@
  *
  *  1. Concatenate the sentences into one book string, remembering which span
  *     belongs to which sentence.
- *  2. Index every N-gram (N=14) of both strings and keep only the grams that
+ *  2. Take every N-gram (N=14) of both strings and keep only the grams that
  *     occur EXACTLY ONCE on each side. Those pairs are candidate anchors —
  *     unambiguous by construction, so no similarity threshold is needed.
  *  3. A longest increasing subsequence over the heard positions throws away the
@@ -87,8 +89,9 @@ export interface MatchStats {
    */
   implausible: boolean;
   /**
-   * The n-gram index hit `maxIndexChars` and only a prefix of each stream was
-   * indexed; everything past the cap can only ever be a gap.
+   * The decoded stream was longer than `maxIndexChars` and only a prefix of it
+   * was indexed. Reaching this means a whole-book decode of an audiobook
+   * longer than any that exists; the ebook side has no such limit.
    */
   indexTruncated: boolean;
 }
@@ -102,7 +105,7 @@ export interface MatchOptions {
   audioMs?: number;
   /** Below this anchor density the pairing is refused outright. */
   minAnchorsPerKiloChar?: number;
-  /** Memory guard: characters indexed per side. */
+  /** Memory guard on the decoded side, which is the only side that is indexed. */
   maxIndexChars?: number;
   /**
    * Fraction of the audio distance to the nearest anchor that a timing may be
@@ -139,15 +142,14 @@ const DEFAULT_MIN_ANCHORS_PER_KILOCHAR = 2;
 const DEFAULT_UNCERTAINTY_RATE = 0.15;
 const DEFAULT_UNCERTAINTY_BASE_MS = 2_000;
 /**
- * Each indexed position costs a Map entry plus a sliced-string key, roughly
- * 90 bytes in V8 — so ~110 MB per side at this cap. That is the ceiling we are
- * willing to pay on a 4-CPU home server; a 48,961-character book (67 minutes of
- * audio) uses ~4 MB, and this still covers a ~25 hour audiobook.
+ * Cap on the DECODED side only. Each indexed position costs sixteen bytes of
+ * typed array at a load factor of one half, so this ceiling is ~130 MB and is
+ * only ever approached by a whole-book decode of a book of about 180 hours.
+ * Sampling a six-hour audiobook indexes about 90,000 characters — under 3 MB.
+ * The ebook is streamed past the index rather than indexed, so its length is
+ * unbounded.
  */
-const DEFAULT_MAX_INDEX_CHARS = 1_200_000;
-
-/** Sentinel stored in the n-gram index for a gram seen more than once. */
-const NOT_UNIQUE = -1;
+const DEFAULT_MAX_INDEX_CHARS = 8_000_000;
 
 /**
  * Match the decoded character stream against the book's romanized characters.
@@ -197,20 +199,18 @@ export function matchChars(
   const durationMs = Math.max(0, opts.audioMs ?? lastMs);
 
   // --- 2. candidate anchors: grams unique on both sides ---
-  const indexTruncated = bookText.length > maxIndexChars || heardText.length > maxIndexChars;
-  const bookIndex = indexUniqueNgrams(bookText, ngram, maxIndexChars);
-  const heardIndex = indexUniqueNgrams(heardText, ngram, maxIndexChars);
-
-  const pairs: { b: number; h: number }[] = [];
-  for (const [gram, b] of bookIndex) {
-    if (b === NOT_UNIQUE) continue;
-    const h = heardIndex.get(gram);
-    if (h === undefined || h === NOT_UNIQUE) continue;
-    pairs.push({ b, h });
-  }
-  // Map iteration is insertion order, i.e. already ascending in b, but the sort
-  // makes the LIS precondition explicit rather than incidental.
-  pairs.sort((x, y) => x.b - y.b);
+  // Indexed on the heard side and streamed on the book side. Under sampling
+  // the heard stream is a few tens of thousands of characters against a book's
+  // million-plus, so this is both the small index and the one that bounds
+  // memory; the book is never truncated.
+  const indexTruncated = heardText.length > maxIndexChars;
+  const index = new NgramIndex(heardText, ngram, maxIndexChars);
+  const pairs = index
+    .matchAgainst(bookText)
+    .map((m) => ({ b: m.b, h: m.a }))
+    // The scan runs in book order already, but the sort makes the LIS
+    // precondition explicit rather than incidental.
+    .sort((x, y) => x.b - y.b);
 
   // --- 3. LIS over the heard positions enforces narration order ---
   const anchors = longestIncreasingByHeard(pairs);
@@ -290,19 +290,6 @@ export function matchChars(
   return { timings, stats, anchors: anchorList };
 }
 
-/**
- * Map gram -> its single position, or NOT_UNIQUE once it is seen twice.
- * Only the first `limit` characters are indexed (memory guard).
- */
-function indexUniqueNgrams(str: string, n: number, limit: number): Map<string, number> {
-  const index = new Map<string, number>();
-  const end = Math.min(str.length, limit) - n;
-  for (let i = 0; i <= end; i++) {
-    const gram = str.slice(i, i + n);
-    index.set(gram, index.has(gram) ? NOT_UNIQUE : i);
-  }
-  return index;
-}
 
 /**
  * Longest strictly increasing subsequence of heard positions, over pairs that

@@ -6,21 +6,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../config.js';
 import { type AppContext } from '../context.js';
 import { nowIso, openMemoryDatabase } from '../db/index.js';
-import { saveSettings } from '../domain/settings.js';
-import { ALIGNER_MODEL_ID, ModelMissingError, parseModelMissing } from '../transcription/models.js';
+import { ALIGNER_MODEL_ID, ModelMissingError, parseModelMissing } from '../alignment/model.js';
 import { claimNextJob, enqueueJob, makeLeaseGuard, type JobRow } from './queue.js';
 import { runAlign, runIndexEbook } from './handlers.js';
 
 /**
- * Wiring test for the forced-alignment branch of `runAlign`.
+ * Wiring test for `runAlign`.
  *
- * It deliberately does NOT install the aligner (317 MB) or run it. What has to
- * hold here is the routing and the failure shape: with `alignEngine` set to
- * `forced-align` the job asks for the MMS aligner and nobody else, and when
- * that model is absent it fails with the structured `model-missing:` error the
- * pairing page turns into a "download it" prompt. Get either wrong and the
- * only symptom is a job that quietly does the slow thing, or a prompt that
- * never appears.
+ * It deliberately does NOT install the 317 MB model or run it. What has to
+ * hold here is the failure shape: with no model on disk the job fails with the
+ * structured `model-missing:` error that the Pairing page turns into a
+ * "download it" prompt, and writes nothing. Get that wrong and the only
+ * symptom is a prompt that never appears and a job that just looks broken.
  *
  * The engine's own behaviour is covered in alignment/ctc/engine.test.ts.
  */
@@ -74,20 +71,6 @@ function makePair(): string {
   const dir = path.join(tmp, 'lib', `audio-${n}`);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'a.mp3'), Buffer.alloc(64, 7));
-  // Sidecar transcript: the one alignment input that costs nothing, so the
-  // legacy path can run in a test without whisper or ffmpeg.
-  fs.writeFileSync(
-    path.join(dir, 'transcript.versovox.json'),
-    JSON.stringify({
-      language: 'en',
-      model: 'fixture',
-      words: [
-        { w: 'hello', s: 0, e: 300 },
-        { w: 'world', s: 300, e: 600 },
-        { w: 'sentence', s: 600, e: 900 },
-      ],
-    }),
-  );
   ctx.db
     .prepare(
       `INSERT INTO books (id, kind, root_dir, rel_path, format, title, size_bytes, scan_state, added_at)
@@ -171,15 +154,8 @@ afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-const CUSTOM_WHISPER = (): string => path.join(tmp, 'models', 'custom-whisper.bin');
-
-describe('runAlign with alignEngine = forced-align', () => {
-  it('asks for the MMS aligner, by id, when it is not installed', async () => {
-    saveSettings(ctx.db, {
-      alignEngine: 'forced-align',
-      transcribeProvider: 'whisper-cli',
-      whisperModel: CUSTOM_WHISPER(),
-    });
+describe('runAlign without the alignment model installed', () => {
+  it('fails with the structured error the Pairing page turns into a download', async () => {
     const pairId = makePair();
 
     const err = await align(pairId);
@@ -187,16 +163,19 @@ describe('runAlign with alignEngine = forced-align', () => {
     expect(err).toBeInstanceOf(ModelMissingError);
     const missing = err as ModelMissingError;
     expect(missing.modelId).toBe(ALIGNER_MODEL_ID);
-    expect(missing.modelId).toBe('mms-forced-aligner');
-    // The pairing page parses this prefix to offer the download; if the shape
-    // drifts the prompt silently degrades to a raw error string.
+    // The Pairing page parses this prefix to offer the download; if the shape
+    // drifts, the prompt silently degrades to a raw error string.
     const parsed = parseModelMissing(missing.message);
     expect(parsed).not.toBeNull();
-    expect(parsed!.modelId).toBe('mms-forced-aligner');
-    expect(parsed!.language).toBe('en');
+    expect(parsed!.modelId).toBe(ALIGNER_MODEL_ID);
     expect(parsed!.message).toContain('Settings');
+  });
 
-    // A job that could not run wrote nothing.
+  it('writes nothing at all when it could not run', async () => {
+    const pairId = makePair();
+
+    await align(pairId);
+
     expect(alignmentCount(pairId)).toBe(0);
     const pair = ctx.db.prepare('SELECT compat_json FROM pairs WHERE id = ?').get(pairId) as {
       compat_json: string | null;
@@ -204,39 +183,17 @@ describe('runAlign with alignEngine = forced-align', () => {
     expect(pair.compat_json).toBeNull();
   });
 
-  it('takes the sidecar transcript instead: an exact transcript always wins', async () => {
-    saveSettings(ctx.db, { alignEngine: 'forced-align', transcribeProvider: 'fixture' });
+  it('has already settled the language before it asks for the model', async () => {
+    // Language resolution used to need a speech model of its own. It now reads
+    // the ebook, so it must complete even on a server with nothing installed —
+    // and the answer is recorded whether or not the alignment can proceed.
     const pairId = makePair();
 
-    const err = await align(pairId);
+    await align(pairId);
 
-    expect(err).toBeNull();
-    // Aligned without the aligner ever being demanded.
-    expect(alignmentCount(pairId)).toBe(1);
-    const row = ctx.db
-      .prepare('SELECT model, provenance_json FROM alignments WHERE pair_id = ?')
-      .get(pairId) as { model: string; provenance_json: string };
-    expect(row.model).toBe('fixture');
-    expect(JSON.parse(row.provenance_json).provider).toBe('fixture');
-  });
-
-  it('does not touch the forced aligner when another engine is selected', async () => {
-    saveSettings(ctx.db, {
-      alignEngine: 'whisper-cli',
-      transcribeProvider: 'whisper-cli',
-      whisperModel: CUSTOM_WHISPER(),
-      whisperBin: '',
-    });
-    const pairId = makePair();
-
-    const err = await align(pairId);
-
-    // It fails — there is no whisper binary here — but on the LEGACY path, so
-    // the failure never mentions the aligner. That contrast is what shows
-    // `alignEngine` is doing the selecting.
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).not.toContain(ALIGNER_MODEL_ID);
-    expect((err as Error).message).toContain('VX_WHISPER_BIN');
-    expect(alignmentCount(pairId)).toBe(0);
+    const row = ctx.db.prepare('SELECT detected_language FROM pairs WHERE id = ?').get(pairId) as {
+      detected_language: string | null;
+    };
+    expect(row.detected_language).toBe('en');
   });
 });

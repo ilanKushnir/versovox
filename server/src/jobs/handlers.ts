@@ -6,38 +6,37 @@ import {
   coversDir,
   derivedRoot,
   derivedVersionDir,
-  transcriptsDir,
 } from '../context.js';
 import { nowIso } from '../db/index.js';
-import { newId, sha256hex, stableId } from '../util/ids.js';
+import { stableId } from '../util/ids.js';
 import { realResolveWithin } from '../util/paths.js';
 import { applyScan, scanRoots } from '../scanner/scan.js';
 import { extractEpub, loadManifest, loadSentences, loadSentencesText } from '../epub/extract.js';
 import { extractCover, probeAudio } from '../audio/probe.js';
 import { CANDIDATE_THRESHOLD, scorePair } from '../pairing/score.js';
-import { alignBook, type EbookSentenceInput, type TranscriptWord } from '../alignment/align.js';
 import { storeAlignment } from '../alignment/service.js';
-import { detectLanguage, getProvider, transcribeClip } from '../transcription/providers.js';
+import { detectLanguageFromText } from '../alignment/detect-language.js';
 import {
-  anyMultilingualModel,
-  DEFAULT_MODEL_ID,
   isInstalled,
   languageByCode,
   modelById,
   modelPath,
   ModelMissingError,
   MODELS,
-  resolveModelForLanguage,
   resolveAligner,
-  ALIGNER_MODEL_ID,
-} from '../transcription/models.js';
+} from '../alignment/model.js';
+import { type EbookSentenceInput } from '../alignment/timings.js';
 import { languageCode } from '../pairing/score.js';
-import { libraryRoots, recordTranscribeSpeed, resolveSettings } from '../domain/settings.js';
+import {
+  AUTO_PAIR_THRESHOLD,
+  libraryRoots,
+  recordAlignSpeed,
+  resolveSettings,
+} from '../domain/settings.js';
 import { alignWithCtc, AlignmentRefusedError } from '../alignment/ctc/engine.js';
 import { planFor } from '../alignment/ctc/sparse.js';
 import {
   enqueueJob,
-  jobCheckpoint,
   jobProgress,
   LeaseLostError,
   retryJob,
@@ -177,25 +176,18 @@ export async function runModelDownload(
 }
 
 /**
- * Alignments that failed only because a speech model was missing go again
- * once that model is installed — whether it arrived through the in-app
- * download, the CLI, or a file dropped into the models volume.
+ * Alignments that stopped only because the model was not here yet go again as
+ * soon as it lands — whether it arrived through the in-app download, the CLI,
+ * or a file dropped into the models volume.
  */
 export function requeueAlignmentsWaitingFor(ctx: AppContext, modelIds?: string[]): number {
   const { db, config } = ctx;
   const ids = modelIds ?? MODELS.filter((m) => isInstalled(config.modelsDir, m)).map((m) => m.id);
   let n = 0;
   for (const id of ids) {
-    const spec = MODELS.find((m) => m.id === id);
     const waiting = db
-      .prepare(
-        `SELECT id FROM jobs WHERE type = 'align' AND state = 'failed'
-           AND (error LIKE ? OR error LIKE ?)`,
-      )
-      // Current format, plus the pre-0.3 "Whisper model not found: <path>" wording.
-      .all(`model-missing:%:${id}|%`, `Whisper model not found: %${spec?.file ?? id}`) as {
-      id: string;
-    }[];
+      .prepare(`SELECT id FROM jobs WHERE type = 'align' AND state = 'failed' AND error LIKE ?`)
+      .all(`model-missing:${id}|%`) as { id: string }[];
     for (const w of waiting) {
       try {
         if (retryJob(db, w.id)) n += 1;
@@ -204,30 +196,8 @@ export function requeueAlignmentsWaitingFor(ctx: AppContext, modelIds?: string[]
       }
     }
   }
-  if (n) ctx.log.info(`Re-queued ${n} alignment(s) whose speech model is now installed`);
+  if (n) ctx.log.info(`Re-queued ${n} alignment(s) now that the model is installed`);
   return n;
-}
-
-/**
- * First-start convenience: fetch ONLY the multilingual default model when
- * transcription is on and nothing is installed yet. Every other language is
- * a deliberate click in Settings → Speech models.
- */
-export function ensureDefaultModel(ctx: AppContext): void {
-  const { db, config } = ctx;
-  const { values } = resolveSettings(db, config);
-  // The forced aligner is the default engine and needs no whisper model, so a
-  // stock install must not quietly pull 1.6 GB it will never open.
-  if (values.alignEngine === 'forced-align') return;
-  if (values.transcribeProvider !== 'whisper-cli' || !values.autoDownloadDefaultModel) return;
-  if (MODELS.some((m) => m.languages === '*' && isInstalled(config.modelsDir, m))) return;
-  const id = enqueueJob(
-    db,
-    'model-download',
-    { modelId: DEFAULT_MODEL_ID },
-    { dedupeKey: `model:${DEFAULT_MODEL_ID}` },
-  );
-  if (id) ctx.log.info(`No speech model installed — fetching the default (${DEFAULT_MODEL_ID})`);
 }
 
 export async function runScan(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {
@@ -823,32 +793,20 @@ export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuar
         },
       });
       if (score < CANDIDATE_THRESHOLD) continue;
-      // Metadata alone NEVER links editions automatically. A high-scoring
-      // metadata match stays a candidate; if transcription is available, an
-      // alignment probe runs and only passing multi-region content
-      // compatibility promotes it to 'auto' (see runAlign). With
-      // transcription disabled, linking always waits for the user.
-      const autoEligible = score >= settings.autoPairThreshold;
+      // Metadata alone NEVER links two editions. A high-scoring match stays a
+      // candidate until the narration itself has been checked against the
+      // text, which happens in runAlign.
+      const autoEligible = score >= AUTO_PAIR_THRESHOLD;
       const pairId = stableId('pair', String(e.id), String(a.id));
       guard.assertHeld();
       if (autoEligible) {
-        evidence.notes.push(
-          settings.alignEngine !== 'none' || settings.transcribeProvider !== 'none'
-            ? 'Strong metadata match — automatic linking awaits content verification.'
-            : 'Strong metadata match — enable transcription or confirm manually to link.',
-        );
+        evidence.notes.push('Strong metadata match — waiting to be checked against the narration.');
       }
       db.prepare(
         `INSERT INTO pairs (id, ebook_id, audio_id, status, score, evidence_json, created_at)
          VALUES (?, ?, ?, 'candidate', ?, ?, ?)`,
       ).run(pairId, String(e.id), String(a.id), score, JSON.stringify(evidence), nowIso());
-      // `manual` starts nothing on its own; the other modes run the cheap
-      // two-clip verification and differ only in what happens after it passes.
-      if (
-        autoEligible &&
-        (settings.alignEngine !== 'none' || settings.transcribeProvider !== 'none') &&
-        settings.processingMode !== 'manual'
-      ) {
+      if (autoEligible && settings.autoAlign) {
         enqueueJob(db, 'align', { pairId }, { dedupeKey: `align:${pairId}`, priority: -2 });
       }
     }
@@ -857,8 +815,6 @@ export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuar
 
 export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {
   const { db, config } = ctx;
-  // `force` is set when a person pressed Start on this pair: it means "run the
-  // long transcription too", whatever the server-wide processing mode says.
   const payload = JSON.parse(job.payload_json) as { pairId: string; force?: boolean };
   const { pairId } = payload;
   const { values: settings } = resolveSettings(db, config);
@@ -879,67 +835,39 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     throw new Error('Ebook derived index missing; re-run the library scan first.');
   }
 
-  // Forced alignment needs no transcription provider — it never guesses words,
-  // it only times the ones the ebook already has. Only the legacy engine and
-  // the sidecar path need a provider, so the check lives with them below.
-  const usingForcedAlign =
-    settings.alignEngine === 'forced-align' && settings.transcribeProvider !== 'fixture';
-  const provider = getProvider(settings.transcribeProvider);
-  if (!provider && !usingForcedAlign) {
-    throw new Error(
-      settings.alignEngine === 'none'
-        ? 'Alignment is switched off (Settings → Processing → Alignment engine).'
-        : 'Transcription is disabled (VX_TRANSCRIBE_PROVIDER=none). Choose the forced-alignment engine, or configure "fixture" or "whisper-cli" to align this pair.',
-    );
-  }
-
   const trackRows = db
     .prepare('SELECT * FROM audio_tracks WHERE book_id = ? ORDER BY idx')
     .all(String(audio.id)) as Record<string, unknown>[];
   const trackPaths = trackRows.map((t) =>
     realResolveWithin(String(audio.root_dir), String(t.rel_path)),
   );
-  const trackStartMs = trackRows.map((t) => Number(t.start_ms_absolute));
 
-  // Narration language: user override on the pair → ebook metadata → audio
-  // tags → whisper's own detector on a short clip (needs any multilingual
-  // model installed) → the instance default. The chosen language selects
-  // the speech model (Hebrew → ivrit.ai fine-tune, etc.).
+  // Which language this is: the pair's override, then what the ebook says,
+  // then the audio tags, then the ebook's own prose, then the instance
+  // default. The language decides only how numbers and abbreviations are
+  // spelled out for matching — script transliteration is keyed on the
+  // characters themselves — so a wrong answer costs anchors around numbers
+  // and nothing else.
   let language = languageCode(pair.language as string | null);
-  let languageSource = 'override';
+  let languageSource = 'set by you';
   if (!language) {
     language = languageCode(ebook.language as string | null);
-    languageSource = 'ebook-metadata';
+    languageSource = 'from the ebook';
   }
   if (!language) {
     language = languageCode(audio.language as string | null);
-    languageSource = 'audio-tags';
+    languageSource = 'from the audio tags';
   }
-  // Naming the language is not transcription, so it is not gated on the
-  // transcription provider: if a whisper binary and any speech model are on
-  // hand, use them; otherwise fall through to the default below. This only
-  // runs for a book whose own metadata says nothing, which is rare.
-  if (!language && trackPaths[0]) {
-    const bin = settings.whisperBin || config.whisperBin;
-    const detector = anyMultilingualModel(config.modelsDir);
-    if (bin && fs.existsSync(bin) && detector) {
-      jobProgress(db, job.id, job.lease_token, 0.12, 'Detecting narration language');
-      const det = await detectLanguage(
-        bin,
-        detector.path,
-        trackPaths[0],
-        path.join(config.cacheDir, 'whisper-work'),
-      );
-      guard.assertHeld();
-      if (det && det.probability >= 0.5) {
-        language = languageCode(det.language);
-        languageSource = `detected (${Math.round(det.probability * 100)}%)`;
-      }
+  if (!language) {
+    const guess = detectLanguageFromText(sentencesText.flat().join(' '));
+    if (guess) {
+      language = languageCode(guess.language);
+      languageSource = 'read from the text';
     }
   }
   if (!language) {
     language = languageCode(settings.defaultLanguage) ?? 'en';
-    languageSource = 'default';
+    languageSource = 'the server default';
   }
   guard.assertHeld();
   db.prepare('UPDATE pairs SET detected_language = ? WHERE id = ?').run(language, pairId);
@@ -951,22 +879,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     `Language: ${languageByCode(language)?.label ?? language} (${languageSource})`,
   );
 
-  // Speech model for that language — a missing one fails the job with a
-  // structured error the pairing page turns into a "download it" prompt.
-  let whisperModel = settings.whisperModel || config.whisperModel;
-  if (!usingForcedAlign && settings.transcribeProvider === 'whisper-cli') {
-    try {
-      const chosen = resolveModelForLanguage(config.modelsDir, language, settings.languageModels);
-      whisperModel = chosen.path;
-    } catch (err) {
-      if (err instanceof ModelMissingError && !(whisperModel && fs.existsSync(whisperModel))) {
-        throw err;
-      }
-      // A custom VX_WHISPER_MODEL path outside the catalog still works.
-    }
-  }
-
-  // Sentences in reading order, shared by every engine.
+  // Sentences in reading order.
   const input: EbookSentenceInput[] = [];
   const inputText: string[] = [];
   sentences.forEach((chapter, spineIdx) => {
@@ -982,17 +895,13 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     });
   });
 
-  // ── FORCED ALIGNMENT ──────────────────────────────────────────────────
-  // The default engine. One pass of a CTC acoustic model over the audio, then
-  // the narration is matched to the text we already have. Several times faster
-  // than transcribing, one model for every language, and the density of the
-  // match doubles as the edition check: a different book simply produces no
-  // anchors, so no separate content probe is needed.
-  // A sidecar transcript is exact and free, so it always wins; otherwise the
-  // forced aligner is the default.
-  if (usingForcedAlign) {
+  // The acoustic model listens to the narration and the result is matched
+  // against the text above. How well it matches is also the edition check: a
+  // different edition produces almost no matches and the pair is handed back
+  // undecided rather than aligned wrongly.
+  {
     const aligner = resolveAligner(config.modelsDir);
-    if (!aligner) throw new ModelMissingError(language, ALIGNER_MODEL_ID);
+    if (!aligner) throw new ModelMissingError();
 
     jobProgress(db, job.id, job.lease_token, 0.18, 'Listening to the narration');
     const alignStartedAt = Date.now();
@@ -1007,6 +916,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
         vocabPath: aligner.vocabPath,
         trackPaths,
         trackStartMs: trackRows.map((t) => Number(t.start_ms_absolute ?? 0)),
+        trackDurationMs: trackRows.map((t) => Number(t.duration_ms ?? 0) || undefined),
         language,
         sentences: input,
         sentenceText: inputText,
@@ -1047,13 +957,13 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     // What this machine can actually do, so the Pairing page's estimate comes
     // from measurement rather than a guess.
     try {
-      recordTranscribeSpeed(db, ctc.audioMs, Date.now() - alignStartedAt);
+      recordAlignSpeed(db, ctc.audioMs, Date.now() - alignStartedAt);
     } catch {
       /* estimates are a nicety; never fail a finished alignment for them */
     }
 
     const ev = JSON.parse(String(pair.evidence_json ?? '{}'));
-    ev.contentScore = Math.min(1, Math.round(ctc.stats.charRatio * 1000) / 1000);
+    ev.contentScore = Math.min(1, Math.round(ctc.narrationRatio * 1000) / 1000);
     ev.notes = (ev.notes ?? []).filter(
       (n: string) => !n.startsWith('Narration') && !n.startsWith('Strong metadata match'),
     );
@@ -1065,7 +975,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
       coverage: ctc.result.coverage,
       meanConfidence: ctc.result.meanConfidence,
       warning:
-        ctc.stats.charRatio < 0.7
+        ctc.narrationRatio < 0.7
           ? 'The narration covers noticeably less text than the ebook — it may be abridged, or the ebook may carry a lot of unnarrated matter.'
           : null,
     };
@@ -1082,11 +992,10 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     }
     guard.assertHeld();
     storeAlignment(db, pairId, language, ctc.model, ctc.result, {
-      provider: 'forced-align',
       precision: settings.alignPrecision,
       sentenceCount: input.length,
       anchors: ctc.stats.monotoneAnchors,
-      charRatio: ctc.stats.charRatio,
+      narrationRatio: ctc.narrationRatio,
       probes: ctc.probes,
       decodedMs: ctc.decodedMs,
     });
@@ -1097,277 +1006,5 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
       1,
       `Aligned ${ctc.result.segments.length.toLocaleString()} sentences (${Math.round(ctc.result.coverage * 100)}% coverage)`,
     );
-    return;
   }
-
-  // ── Fast content probe for CANDIDATES ─────────────────────────────────
-  // A full transcription takes hours per book. Before spending them on a
-  // metadata match that might be a different edition, transcribe two short
-  // clips (90 s at ~25 % and ~60 % of the book) and check that their words
-  // actually occur in the ebook. Pass → the pair is linked ('auto') and the
-  // full alignment continues below; fail → stays a candidate with a note and
-  // the operator decides. Sidecar-transcript setups skip the probe.
-  if (
-    String(pair.status) === 'candidate' &&
-    settings.transcribeProvider === 'whisper-cli' &&
-    trackPaths.length > 0
-  ) {
-    const bin = settings.whisperBin || config.whisperBin;
-    const ebookTokens = new Set<string>();
-    for (const chapter of sentencesText)
-      for (const s of chapter) for (const w of s.split(' ')) if (w.length > 3) ebookTokens.add(w);
-    const totalMs = trackRows.reduce((a, t) => a + Number(t.duration_ms ?? 0), 0);
-    const clipAt = (frac: number) => {
-      const abs = Math.max(0, Math.floor(totalMs * frac));
-      let idx = 0;
-      for (let i = 0; i < trackRows.length; i++)
-        if (abs >= Number(trackRows[i]!.start_ms_absolute)) idx = i;
-      return { path: trackPaths[idx]!, startMs: abs - Number(trackRows[idx]!.start_ms_absolute) };
-    };
-    const scores: number[] = [];
-    const probeStartedAt = Date.now();
-    const PROBE_CLIP_SECONDS = 90;
-    for (const [i, frac] of [0.25, 0.6].entries()) {
-      jobProgress(
-        db,
-        job.id,
-        job.lease_token,
-        0.16 + i * 0.02,
-        `Checking the narration matches the text (sample ${i + 1} of 2)`,
-      );
-      const clip = clipAt(frac);
-      const words = await transcribeClip(
-        bin,
-        whisperModel,
-        language,
-        clip.path,
-        clip.startMs,
-        PROBE_CLIP_SECONDS,
-        path.join(config.cacheDir, 'whisper-work'),
-      );
-      guard.assertHeld();
-      const candidates = words.map((w) => w.w).filter((w) => w.length > 3);
-      const hits = candidates.filter((w) => ebookTokens.has(w)).length;
-      scores.push(candidates.length >= 20 ? hits / candidates.length : 0);
-    }
-    // Two known-length clips are the first real measurement of this machine's
-    // transcription speed, available long before any full run finishes.
-    try {
-      recordTranscribeSpeed(
-        db,
-        scores.length * PROBE_CLIP_SECONDS * 1000,
-        Date.now() - probeStartedAt,
-      );
-    } catch {
-      /* ignore */
-    }
-    const probeScore = scores.reduce((a, b) => a + b, 0) / Math.max(1, scores.length);
-    const evidence = JSON.parse(String(pair.evidence_json ?? '{}'));
-    evidence.contentScore = Math.round(probeScore * 1000) / 1000;
-    evidence.notes = (evidence.notes ?? []).filter(
-      (n: string) => !n.startsWith('Narration sample'),
-    );
-    const pass = probeScore >= PROBE_COMPAT_MIN && Number(pair.score) >= settings.autoPairThreshold;
-    evidence.notes.push(
-      pass
-        ? `Narration sample matched the text (${Math.round(probeScore * 100)}% of sampled words found) — linked automatically; full alignment follows.`
-        : `Narration sample matched only ${Math.round(probeScore * 100)}% of sampled words — not linked automatically. Confirm manually if this really is the same edition.`,
-    );
-    guard.assertHeld();
-    db.prepare('UPDATE pairs SET evidence_json = ? WHERE id = ?').run(
-      JSON.stringify(evidence),
-      pairId,
-    );
-    if (pass) {
-      db.prepare(
-        `UPDATE pairs SET status = 'auto', decided_at = ? WHERE id = ? AND status = 'candidate'`,
-      ).run(nowIso(), pairId);
-      pair.status = 'auto';
-      // Verified and linked. The hours-long part is opt-in unless this server
-      // was told to run unattended — the job that starts it is the same one,
-      // requested per pair from the Pairing page.
-      if (settings.processingMode !== 'auto' && !payload.force) {
-        jobProgress(
-          db,
-          job.id,
-          job.lease_token,
-          1,
-          'Verified and linked — start the transcription when you want it',
-        );
-        return;
-      }
-    } else {
-      jobProgress(db, job.id, job.lease_token, 1, 'Probe did not pass — waiting for your decision');
-      return;
-    }
-  }
-
-  // Past this point every path transcribes, so a provider is mandatory.
-  if (!provider) {
-    throw new Error(
-      'Transcription is disabled (VX_TRANSCRIBE_PROVIDER=none) and forced alignment is not selected.',
-    );
-  }
-
-  // Transcript cache: keyed by source content hash + provider + language.
-  const sourceHash = String(audio.content_hash ?? sha256hex(trackPaths.join('|')));
-  const cached = db
-    .prepare('SELECT * FROM transcripts WHERE book_id = ? AND source_hash = ? AND language = ?')
-    .get(String(audio.id), sourceHash, language) as Record<string, unknown> | undefined;
-
-  let words: TranscriptWord[];
-  let model: string;
-  if (cached && fs.existsSync(String(cached.file_path))) {
-    jobProgress(db, job.id, job.lease_token, 0.3, 'Using cached transcript');
-    const data = JSON.parse(fs.readFileSync(String(cached.file_path), 'utf8'));
-    words = data.words;
-    model = String(cached.model);
-  } else {
-    jobProgress(db, job.id, job.lease_token, 0.2, `Transcribing via ${provider.name}`);
-    const transcribeStartedAt = Date.now();
-    const checkpoint = job.checkpoint_json ? JSON.parse(job.checkpoint_json) : undefined;
-    const result = await provider.transcribe({
-      trackPaths,
-      trackStartMs,
-      language,
-      workDir: path.join(config.cacheDir, 'whisper-work'),
-      whisperBin: settings.whisperBin || config.whisperBin,
-      whisperModel,
-      checkpoint,
-      onProgress: (info) => {
-        const done = (info.track + info.trackPct / 100) / Math.max(1, info.trackCount);
-        jobProgress(
-          db,
-          job.id,
-          job.lease_token,
-          0.2 + 0.4 * done,
-          [
-            info.trackCount > 1
-              ? `Transcribing part ${info.track + 1} of ${info.trackCount}`
-              : 'Transcribing narration',
-            // whisper.cpp only prints a percentage once it has processed a
-            // chunk; "0%" for the first minutes reads as stuck.
-            info.trackPct > 0 ? `${info.trackPct}% of this part` : 'listening…',
-            whisperModel ? path.basename(whisperModel).replace(/^ggml-|\.bin$/g, '') : null,
-          ]
-            .filter(Boolean)
-            .join(' · '),
-        );
-      },
-      onCheckpoint: (cp) => jobCheckpoint(db, job.id, job.lease_token, cp),
-    });
-    words = result.words;
-    model = result.model;
-    // What this machine can actually do, for honest time estimates.
-    try {
-      const audioMs = trackRows.reduce((a, t) => a + Number(t.duration_ms ?? 0), 0);
-      recordTranscribeSpeed(db, audioMs, Date.now() - transcribeStartedAt);
-    } catch {
-      /* estimates are a nicety; never fail a finished transcription for them */
-    }
-    guard.assertHeld();
-    fs.mkdirSync(transcriptsDir(ctx), { recursive: true });
-    const filePath = path.join(transcriptsDir(ctx), `${newId('tr')}.json`);
-    fs.writeFileSync(filePath, JSON.stringify({ words }));
-    db.prepare(
-      `INSERT OR REPLACE INTO transcripts (id, book_id, source_hash, model, language, provider, file_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      newId('tr'),
-      String(audio.id),
-      sourceHash,
-      model,
-      language,
-      provider.name,
-      filePath,
-      nowIso(),
-    );
-  }
-
-  jobProgress(
-    db,
-    job.id,
-    job.lease_token,
-    0.6,
-    `Aligning ${words.length.toLocaleString()} words to ${sentences.reduce((a, c) => a + c.length, 0).toLocaleString()} sentences`,
-  );
-  const result = alignBook(input, words);
-
-  // Edition-compatibility content check: token overlap sampled from three
-  // regions of the book vs transcript windows (docs: pairing gate 2).
-  const contentScore = sampleContentScore(input, words);
-  const evidence = JSON.parse(String(pair.evidence_json ?? '{}'));
-  evidence.contentScore = contentScore;
-  const compat = {
-    contentScore,
-    coverage: result.coverage,
-    meanConfidence: result.meanConfidence,
-    warning:
-      contentScore < 0.5
-        ? 'Content overlap is low — this audio may be a different edition (abridged, translated, or dramatized).'
-        : null,
-  };
-  // alignBook + sampleContentScore are synchronous CPU stages that can
-  // outlive a blocked heartbeat: revalidate the lease before every write.
-  guard.assertHeld();
-  db.prepare('UPDATE pairs SET evidence_json = ?, compat_json = ? WHERE id = ?').run(
-    JSON.stringify(evidence),
-    JSON.stringify(compat),
-    pairId,
-  );
-
-  guard.assertHeld();
-  storeAlignment(db, pairId, language, model, result, {
-    provider: provider.name,
-    sourceHash,
-    sentenceCount: input.length,
-    wordCount: words.length,
-  });
-
-  // Content-verified promotion: a candidate that scored above the metadata
-  // auto threshold becomes 'auto' only now, after multi-region content
-  // compatibility passed. Metadata alone never links editions.
-  if (
-    String(pair.status) === 'candidate' &&
-    Number(pair.score) >= settings.autoPairThreshold &&
-    contentScore >= CONTENT_COMPAT_MIN &&
-    result.coverage >= 0.5
-  ) {
-    guard.assertHeld();
-    db.prepare(
-      `UPDATE pairs SET status = 'auto', decided_at = ? WHERE id = ? AND status = 'candidate'`,
-    ).run(nowIso(), pairId);
-  }
-  jobProgress(db, job.id, job.lease_token, 0.95, `Aligned ${result.segments.length} sentences`);
-}
-
-/** Minimum sampled content overlap before auto-linking is allowed. */
-export const CONTENT_COMPAT_MIN = 0.5;
-/** Minimum share of sampled narration words that must occur in the ebook (probe). */
-export const PROBE_COMPAT_MIN = 0.55;
-
-function sampleContentScore(sentences: EbookSentenceInput[], words: TranscriptWord[]): number {
-  if (sentences.length === 0 || words.length === 0) return 0;
-  const wordTokens = words.map((w) => w.w);
-  const positions = [0.15, 0.5, 0.85];
-  let total = 0;
-  for (const p of positions) {
-    const sIdx = Math.min(sentences.length - 1, Math.floor(p * sentences.length));
-    const sample: string[] = [];
-    for (let i = sIdx; i < Math.min(sentences.length, sIdx + 5); i++) {
-      sample.push(...sentences[i]!.tokens);
-    }
-    const wIdx = Math.floor(p * wordTokens.length);
-    const windowRadius = Math.max(400, sample.length * 4);
-    const window = new Set(wordTokens.slice(Math.max(0, wIdx - windowRadius), wIdx + windowRadius));
-    // Containment: what fraction of the sampled ebook text the narration
-    // window contains. (Symmetric similarity would be diluted by the
-    // deliberately larger transcript window.)
-    const uniq = new Set(sample);
-    let hit = 0;
-    for (const t of uniq) if (window.has(t)) hit++;
-    total += uniq.size > 0 ? hit / uniq.size : 0;
-  }
-  const raw = total / positions.length;
-  return Math.round(raw * 1000) / 1000;
 }

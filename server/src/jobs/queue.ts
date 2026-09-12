@@ -66,7 +66,7 @@ export function enqueueJob(
   }
 }
 
-/** Job types that run for hours on the CPU (whisper). */
+/** Job types that hold a CPU for minutes or more. */
 export const HEAVY_JOB_TYPES = ['align'] as const;
 /** Long network transfers (gigabyte model files) — cheap on CPU, slow on the clock. */
 export const DOWNLOAD_JOB_TYPES = ['model-download'] as const;
@@ -181,7 +181,7 @@ export function cancelJob(db: DB, id: string): boolean {
 /**
  * Hand a running job back to the queue without burning its attempt as a
  * failure — used when the process is shutting down under a job (a container
- * restart mid-transcription is not the job's fault). Only the lease holder
+ * restart mid-alignment is not the job's fault). Only the lease holder
  * may do this.
  */
 export function requeueJob(db: DB, id: string, leaseToken: string | null): boolean {

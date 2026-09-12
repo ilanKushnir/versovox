@@ -300,7 +300,7 @@ function JobRow({
  * same alphabet → passages unique on both sides pin the two together →
  * a sentence↔second map used for switching.
  *
- * Deliberately does NOT promise a transcript: the engine never decides which
+ * Deliberately does NOT promise a transcript: nothing here decides which
  * words were said, which is exactly why it is fast and language-agnostic.
  */
 export function PipelineDiagram() {

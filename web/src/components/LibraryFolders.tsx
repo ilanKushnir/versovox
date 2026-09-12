@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { type PathCheck } from '@versovox/shared';
+import { type FolderKind, type PathCheck } from '@versovox/shared';
 import { api } from '../api/client';
 import { IconAlert, IconBack, IconCheck, IconClose, IconTrash } from './icons';
 
@@ -11,7 +11,7 @@ import { IconAlert, IconBack, IconCheck, IconClose, IconTrash } from './icons';
  */
 
 export interface FolderCheckApi {
-  test: (paths: string[], kind: 'ebook' | 'audio') => Promise<PathCheck[]>;
+  test: (paths: string[], kind: FolderKind) => Promise<PathCheck[]>;
   browse: (path?: string) => Promise<BrowseResponse>;
 }
 
@@ -56,7 +56,7 @@ export function LibraryFolders({
   disabled,
   pinnedNote,
 }: {
-  kind: 'ebook' | 'audio';
+  kind: FolderKind;
   value: string[];
   onChange: (next: string[]) => void;
   folders: FolderCheckApi;
@@ -95,7 +95,7 @@ export function LibraryFolders({
     void test([clean]);
   };
 
-  const label = kind === 'ebook' ? 'ebook' : 'audiobook';
+  const label = kind === 'ebook' ? 'ebook' : kind === 'audio' ? 'audiobook' : 'alignment';
   return (
     <div className="folders">
       {pinnedNote && <p className="folders__pinned">{pinnedNote}</p>}
@@ -120,7 +120,11 @@ export function LibraryFolders({
                     : c.ok
                       ? c.matches === 0
                         ? c.problem
-                        : `${c.matches}${c.sampled ? '+' : ''} ${label === 'ebook' ? 'EPUB' : 'audio'} file${c.matches === 1 ? '' : 's'} found`
+                        : kind === 'alignment'
+                          ? c.matches === 0
+                            ? 'Empty — new alignments will be saved here'
+                            : `${c.matches} saved alignment${c.matches === 1 ? '' : 's'} here`
+                          : `${c.matches}${c.sampled ? '+' : ''} ${kind === 'ebook' ? 'EPUB' : 'audio'} file${c.matches === 1 ? '' : 's'} found`
                       : c.problem}
                 </span>
               </span>
@@ -143,7 +147,13 @@ export function LibraryFolders({
         <div className="folders__add">
           <input
             className="input"
-            placeholder={kind === 'ebook' ? '/library/ebooks' : '/library/audiobooks'}
+            placeholder={
+              kind === 'ebook'
+                ? '/library/ebooks'
+                : kind === 'audio'
+                  ? '/library/audiobooks'
+                  : '/library/alignments'
+            }
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {

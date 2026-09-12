@@ -43,12 +43,13 @@ describe('gridWindows', () => {
 });
 
 describe('planFor', () => {
-  it('maps the thorough setting to no schedule at all', () => {
-    expect(planFor('thorough')).toBeNull();
+  it('gives the exact setting no schedule at all, so every sample is decoded', () => {
+    expect(planFor('exact')).toBeNull();
   });
 
-  it('makes careful listen more often than fast', () => {
-    expect(planFor('careful')!.everyMs).toBeLessThan(planFor('fast')!.everyMs);
+  it('gives the standard setting a schedule that samples a small share', () => {
+    const plan = planFor('standard')!;
+    expect(plan.windowMs / plan.everyMs).toBeLessThan(0.1);
   });
 });
 

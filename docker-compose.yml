@@ -32,11 +32,10 @@ services:
       VX_TRUST_PROXY: ${VX_TRUST_PROXY:-0}
       VX_EBOOK_DIRS: /library/ebooks
       VX_AUDIOBOOK_DIRS: /library/audiobooks
-      # Alignment: the image bundles whisper.cpp; download a model once with
-      #   docker compose exec versovox versovox-model large-v3-turbo
-      # then set VX_TRANSCRIBE_PROVIDER=whisper-cli in .env.
-      VX_TRANSCRIBE_PROVIDER: ${VX_TRANSCRIBE_PROVIDER:-none}
-      VX_WHISPER_MODEL: ${VX_WHISPER_MODEL:-/models/ggml-large-v3-turbo.bin}
+      # Where finished alignments are saved. THE ONE FOLDER VERSOVOX WRITES TO,
+      # which is why it has no :ro below — keep it and a rebuilt container
+      # offers to import everything it already worked out.
+      VX_ALIGNMENT_DIRS: /library/alignments
       VX_DEFAULT_LANGUAGE: ${VX_DEFAULT_LANGUAGE:-en}
       VX_SCAN_INTERVAL_MINUTES: ${VX_SCAN_INTERVAL_MINUTES:-60}
       # Optional reverse-proxy SSO (Authentik etc.) — see docs/security.md.
@@ -57,6 +56,9 @@ services:
       # Calibre/CWA, Kavita, Audiobookshelf, or plain folders.
       - ./fixtures/library/ebooks:/library/ebooks:ro
       - ./fixtures/library/audiobooks:/library/audiobooks:ro
+      # Read-write ON PURPOSE: alignments are saved here so they survive a
+      # rebuild. Do not add :ro to this one.
+      - ./alignments:/library/alignments
     deploy:
       resources:
         limits:
@@ -64,7 +66,7 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # Optional dedicated worker for scans/transcription/alignment. Enable with:
+  # Optional dedicated worker for scans and alignment. Enable with:
   #   docker compose --profile worker up -d
   # and set VX_INLINE_WORKER=0 on the versovox service.
   worker:
@@ -79,10 +81,8 @@ services:
       TZ: ${TZ:-Etc/UTC}
       VX_EBOOK_DIRS: /library/ebooks
       VX_AUDIOBOOK_DIRS: /library/audiobooks
-      VX_TRANSCRIBE_PROVIDER: ${VX_TRANSCRIBE_PROVIDER:-none}
+      VX_ALIGNMENT_DIRS: /library/alignments
       VX_JOB_CONCURRENCY: ${VX_JOB_CONCURRENCY:-2}
-      VX_WHISPER_BIN: ${VX_WHISPER_BIN:-}
-      VX_WHISPER_MODEL: ${VX_WHISPER_MODEL:-}
     healthcheck:
       test: ['CMD', 'pgrep', '-f', 'worker-entry']
       interval: 30s
@@ -94,6 +94,8 @@ services:
       - vx-models:/models
       - ./fixtures/library/ebooks:/library/ebooks:ro
       - ./fixtures/library/audiobooks:/library/audiobooks:ro
+      # The worker is what writes them when VX_INLINE_WORKER=0.
+      - ./alignments:/library/alignments
     deploy:
       resources:
         limits:

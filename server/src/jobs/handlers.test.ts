@@ -7,7 +7,7 @@ import { loadConfig } from '../config.js';
 import { openMemoryDatabase, nowIso } from '../db/index.js';
 import { type AppContext, activeDerivedDir, derivedRoot, derivedVersionDir } from '../context.js';
 import { extractEpub, loadManifest } from '../epub/extract.js';
-import { saveSettings } from '../domain/settings.js';
+import { ModelMissingError } from '../alignment/model.js';
 import { claimNextJob, enqueueJob, LeaseLostError, makeLeaseGuard, type JobRow } from './queue.js';
 import {
   copyFallbackCover,
@@ -26,6 +26,9 @@ beforeAll(() => {
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
+    // Pinned inside the sandbox: otherwise a developer who has the real
+    // aligner in ./models would run these tests against a 317 MB model.
+    modelsDir: path.join(tmp, 'models'),
     sessionSecret: 'handlers-test-secret-0123456789',
     logLevel: 'error',
   });
@@ -570,8 +573,7 @@ describe('lease ownership gates handler side effects', () => {
     expect(chapters.c).toBe(oldChapters.c);
   });
 
-  it('a reclaimed align attempt cannot write transcripts, pair evidence, or alignments', async () => {
-    // Ebook with a real derived index.
+  it('a reclaimed align attempt leaves the pair exactly as it found it', async () => {
     const root = path.join(tmp, 'lib-align');
     fs.mkdirSync(path.join(root, 'audio'), { recursive: true });
     fs.writeFileSync(
@@ -582,19 +584,7 @@ describe('lease ownership gates handler side effects', () => {
     enqueueJob(ctx.db, 'index-ebook', { bookId: 'bk_al_e' });
     const idx = claimWithGuard();
     await runIndexEbook(ctx, idx.job, idx.guard);
-    // Audio book with one track and a fixture sidecar transcript.
     fs.writeFileSync(path.join(root, 'audio', 'a.mp3'), Buffer.alloc(64, 7));
-    fs.writeFileSync(
-      path.join(root, 'audio', 'transcript.versovox.json'),
-      JSON.stringify({
-        language: 'en',
-        model: 'fixture',
-        words: [
-          { w: 'hello', s: 0, e: 400 },
-          { w: 'world', s: 400, e: 800 },
-        ],
-      }),
-    );
     ctx.db
       .prepare(
         `INSERT INTO books (id, kind, root_dir, rel_path, format, title, size_bytes, scan_state, added_at)
@@ -613,30 +603,40 @@ describe('lease ownership gates handler side effects', () => {
          VALUES ('pair_al', 'bk_al_e', 'bk_al_a', 'confirmed', 0.9, ?)`,
       )
       .run(nowIso());
-    saveSettings(ctx.db, { transcribeProvider: 'fixture' });
 
     enqueueJob(ctx.db, 'align', { pairId: 'pair_al' });
     const { job, guard } = claimWithGuard();
-    const p = runAlign(ctx, job, guard);
-    stealLease(job.id); // reclaim during transcription
-    await expect(p).rejects.toThrow(LeaseLostError);
+    stealLease(job.id); // another worker owns this pair now
+    await expect(runAlign(ctx, job, guard)).rejects.toThrow(LeaseLostError);
 
-    // No transcript rows/files, no pair evidence/compat, no alignment rows.
-    const t = ctx.db.prepare('SELECT COUNT(*) AS c FROM transcripts').get() as { c: number };
-    expect(t.c).toBe(0);
-    const transcriptsDirPath = path.join(ctx.config.cacheDir, 'transcripts');
-    expect(
-      !fs.existsSync(transcriptsDirPath) || fs.readdirSync(transcriptsDirPath).length === 0,
-    ).toBe(true);
     const pair = ctx.db
-      .prepare('SELECT compat_json, status FROM pairs WHERE id = ?')
+      .prepare(
+        'SELECT detected_language, evidence_json, compat_json, status FROM pairs WHERE id = ?',
+      )
       .get('pair_al') as {
+      detected_language: string | null;
+      evidence_json: string;
       compat_json: string | null;
       status: string;
     };
+    expect(pair.detected_language).toBeNull();
+    expect(pair.evidence_json).toBe('{}');
     expect(pair.compat_json).toBeNull();
     expect(pair.status).toBe('confirmed');
-    const a = ctx.db.prepare('SELECT COUNT(*) AS c FROM alignments').get() as { c: number };
+    const a = ctx.db
+      .prepare('SELECT COUNT(*) AS c FROM alignments WHERE pair_id = ?')
+      .get('pair_al') as { c: number };
     expect(a.c).toBe(0);
+
+    // Retried by the worker that does hold the lease, the same job writes the
+    // detected language before the missing model stops it — so the emptiness
+    // above is the ownership check, not runAlign giving up first.
+    enqueueJob(ctx.db, 'align', { pairId: 'pair_al' });
+    const held = claimWithGuard();
+    await expect(runAlign(ctx, held.job, held.guard)).rejects.toThrow(ModelMissingError);
+    const written = ctx.db
+      .prepare('SELECT detected_language FROM pairs WHERE id = ?')
+      .get('pair_al') as { detected_language: string | null };
+    expect(written.detected_language).toBe('en');
   });
 });

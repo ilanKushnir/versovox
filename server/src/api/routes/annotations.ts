@@ -21,6 +21,40 @@ function rowToAnnotation(r: Record<string, unknown>): Annotation {
 export function registerAnnotationRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
 
+  /**
+   * Everything this reader has marked, across every book.
+   *
+   * Separate from the per-book list because it answers a different question:
+   * not "what did I mark in this book" but "where was that thing I wrote
+   * down". So it carries enough of the book with it to be readable on its own,
+   * and it is ordered newest first — the note you are looking for is almost
+   * always a recent one.
+   */
+  app.get('/api/annotations', async (req) => {
+    const q = (req.query ?? {}) as { q?: string; kind?: string };
+    const term = typeof q.q === 'string' ? q.q.trim().slice(0, 200) : '';
+    const kind = ['highlight', 'note', 'bookmark'].includes(String(q.kind)) ? String(q.kind) : null;
+    const rows = db
+      .prepare(
+        `SELECT a.*, b.title AS book_title, b.author AS book_author, b.kind AS book_kind
+           FROM annotations a JOIN books b ON b.id = a.book_id
+          WHERE a.user_id = ? AND a.deleted_at IS NULL
+            AND (? IS NULL OR a.kind = ?)
+            AND (? = '' OR a.note LIKE '%' || ? || '%' OR a.selected_text LIKE '%' || ? || '%'
+                 OR b.title LIKE '%' || ? || '%')
+          ORDER BY a.created_at DESC
+          LIMIT 500`,
+      )
+      .all(req.user!.id, kind, kind, term, term, term, term) as Record<string, unknown>[];
+    return {
+      annotations: rows.map((r) => ({
+        ...rowToAnnotation(r),
+        bookTitle: String(r.book_title ?? ''),
+        bookAuthor: (r.book_author as string) ?? null,
+      })),
+    };
+  });
+
   app.get('/api/books/:id/annotations', async (req) => {
     const { id } = req.params as { id: string };
     const rows = db

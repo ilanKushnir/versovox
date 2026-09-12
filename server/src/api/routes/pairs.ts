@@ -16,7 +16,7 @@ import {
 } from '../../alignment/service.js';
 import { loadManifest, loadSentences } from '../../epub/extract.js';
 import { languageCode } from '../../pairing/score.js';
-import { LANGUAGES, parseModelMissing } from '../../transcription/models.js';
+import { LANGUAGES, parseModelMissing } from '../../alignment/model.js';
 
 export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
@@ -151,7 +151,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
     const waiting = db
       .prepare(`SELECT COUNT(*) AS c FROM pairs WHERE status = 'candidate'`)
       .get() as { c: number };
-    const ratio = settings.transcribeSpeedRatio;
+    const ratio = settings.alignSpeedRatio;
     return {
       /** Linked pairs with no alignment yet: the work "Start all" would queue. */
       pendingPairs: Number(row.pairs),
@@ -161,7 +161,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
       /** Seconds of audio per second of wall clock, measured. 0 = not yet known. */
       speedRatio: ratio,
       estimatedMs: ratio > 0 ? Math.round(Number(row.audio_ms) / ratio) : null,
-      processingMode: settings.processingMode,
+      autoAlign: settings.autoAlign,
     };
   };
 

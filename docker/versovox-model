@@ -1,42 +1,52 @@
 #!/bin/sh
-# versovox-model — fetch a speech model into the models volume from the CLI.
-# The same catalog is available with progress bars in Settings → Speech models.
+# versovox-model — fetch the alignment model into the models volume from the
+# command line. The same download is available with a progress bar in
+# Settings → Alignment; this exists for a server with no browser attached.
 #
-#   docker compose exec versovox versovox-model large-v3-turbo
-#   docker compose exec versovox versovox-model he          # Hebrew (ivrit.ai fine-tune)
-#   docker compose exec versovox versovox-model list
+#   docker compose exec versovox versovox-model install
+#   docker compose exec versovox versovox-model status
 set -eu
 MODELS_DIR="${VX_MODELS_DIR:-/models}"
-HF="https://huggingface.co"
+BASE="https://huggingface.co/onnx-community/mms-300m-1130-forced-aligner-ONNX/resolve/main"
 
-# id | filename | url
-CATALOG="large-v3-turbo|ggml-large-v3-turbo.bin|$HF/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
-large-v3|ggml-large-v3.bin|$HF/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
-small|ggml-small.bin|$HF/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
-ivrit-large-v3-turbo|ggml-ivrit-large-v3-turbo.bin|$HF/ivrit-ai/whisper-large-v3-turbo-ggml/resolve/main/ggml-model.bin
-ivrit-large-v3|ggml-ivrit-large-v3.bin|$HF/ivrit-ai/whisper-large-v3-ggml/resolve/main/ggml-model.bin"
+# path inside the models volume | url
+FILES="mms-fa/model_int8.onnx|$BASE/onnx/model_int8.onnx
+mms-fa/vocab.json|$BASE/vocab.json
+mms-fa/config.json|$BASE/config.json"
 
-name="${1:-}"
-case "$name" in
-  he|hebrew) name=ivrit-large-v3-turbo ;;
-  en|de|fr|es|it|pt|ru|nl) name=large-v3-turbo ;;
-  ar) name=large-v3 ;;
+case "${1:-install}" in
+  status)
+    missing=0
+    echo "$FILES" | while IFS='|' read -r rel _url; do
+      if [ -s "$MODELS_DIR/$rel" ]; then
+        echo "present  $rel  ($(wc -c <"$MODELS_DIR/$rel") bytes)"
+      else
+        echo "MISSING  $rel"
+        missing=1
+      fi
+    done
+    exit $missing
+    ;;
+  install)
+    echo "Alignment model → $MODELS_DIR"
+    echo "Licence: CC-BY-NC-4.0 — free for your own library, not for a paid service."
+    echo "$FILES" | while IFS='|' read -r rel url; do
+      dest="$MODELS_DIR/$rel"
+      if [ -s "$dest" ]; then
+        echo "already here: $rel"
+        continue
+      fi
+      mkdir -p "$(dirname "$dest")"
+      echo "downloading:  $rel"
+      # To a temporary name first, so an interrupted download is never mistaken
+      # for a complete one by the server's size check.
+      wget -q --show-progress -O "$dest.part" "$url"
+      mv "$dest.part" "$dest"
+    done
+    echo "Done. Alignment jobs that were waiting for it start on their own."
+    ;;
+  *)
+    echo "usage: versovox-model [install|status]" >&2
+    exit 2
+    ;;
 esac
-case "$name" in
-  ""|-h|--help)
-    echo "usage: versovox-model <model-id | language-code> | list"
-    echo "$CATALOG" | cut -d'|' -f1 | sed 's/^/  /'; exit 1 ;;
-  list)
-    echo "catalog:"; echo "$CATALOG" | cut -d'|' -f1 | sed 's/^/  /'
-    echo "installed in $MODELS_DIR:"; ls -1 "$MODELS_DIR"/ggml-*.bin 2>/dev/null || echo "  (none)"; exit 0 ;;
-esac
-line=$(echo "$CATALOG" | grep "^$name|" || true)
-[ -n "$line" ] || { echo "unknown model: $name"; exit 1; }
-file=$(echo "$line" | cut -d'|' -f2); url=$(echo "$line" | cut -d'|' -f3)
-dest="$MODELS_DIR/$file"
-if [ -s "$dest" ]; then echo "already present: $dest"; exit 0; fi
-mkdir -p "$MODELS_DIR"
-echo "downloading $file → $dest"
-wget -q --show-progress -c -O "$dest.part" "$url"
-mv "$dest.part" "$dest"
-echo "done: $dest"

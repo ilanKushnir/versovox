@@ -15,7 +15,7 @@ import {
 } from '@versovox/shared';
 import { type DB, nowIso } from '../db/index.js';
 import { newId } from '../util/ids.js';
-import { type AlignerResult } from './align.js';
+import { type AlignerResult } from './timings.js';
 
 /** Persist an aligner run as a new alignment version for the pair. */
 export function storeAlignment(

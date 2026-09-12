@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { type PathCheck } from '@versovox/shared';
+import { type FolderKind, type PathCheck } from '@versovox/shared';
 import { AUDIO_EXTS, EBOOK_EXTS } from '../scanner/scan.js';
 
 /**
@@ -13,7 +13,7 @@ import { AUDIO_EXTS, EBOOK_EXTS } from '../scanner/scan.js';
 const WALK_CAP = 4000;
 const WALK_DEPTH = 4;
 
-export function checkLibraryPath(p: string, kind?: 'ebook' | 'audio'): PathCheck {
+export function checkLibraryPath(p: string, kind?: FolderKind): PathCheck {
   const abs = path.resolve(p);
   const base: PathCheck = {
     path: abs,
@@ -21,6 +21,7 @@ export function checkLibraryPath(p: string, kind?: 'ebook' | 'audio'): PathCheck
     exists: false,
     isDirectory: false,
     readable: false,
+    writable: null,
     matches: null,
     sampled: false,
     problem: null,
@@ -40,6 +41,32 @@ export function checkLibraryPath(p: string, kind?: 'ebook' | 'audio'): PathCheck
     return { ...base, problem: 'Not readable by the server process' };
   }
   base.readable = true;
+
+  // An alignment folder is the one place Versovox writes, and a read-only bind
+  // mount is the likeliest mistake in the whole setup — every other library
+  // line in the stock compose file ends in `:ro` and people copy the pattern.
+  // Permission bits are not enough to tell: the only honest test is to write.
+  if (kind === 'alignment') {
+    let writable = false;
+    const probe = path.join(abs, `.versovox-write-test-${process.pid}`);
+    try {
+      fs.writeFileSync(probe, '');
+      fs.unlinkSync(probe);
+      writable = true;
+    } catch {
+      writable = false;
+    }
+    const files = countAlignmentFiles(abs);
+    return {
+      ...base,
+      ok: writable,
+      writable,
+      matches: files,
+      sampled: false,
+      problem: writable ? null : 'Readable, but Versovox cannot save alignments here',
+    };
+  }
+
   const exts = kind === 'ebook' ? EBOOK_EXTS : kind === 'audio' ? AUDIO_EXTS : null;
   let matches = 0;
   let seen = 0;
@@ -76,6 +103,15 @@ export function checkLibraryPath(p: string, kind?: 'ebook' | 'audio'): PathCheck
           : 'Readable, but no books found in the first few levels'
       : null;
   return { ...base, ok: true, matches, sampled, problem };
+}
+
+/** Saved alignments already sitting in a folder, for "found N of these". */
+function countAlignmentFiles(dir: string): number {
+  try {
+    return fs.readdirSync(dir).filter((n) => !n.startsWith('.') && n.endsWith('.vxalign')).length;
+  } catch {
+    return 0;
+  }
 }
 
 export interface BrowseEntry {

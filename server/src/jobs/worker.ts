@@ -19,7 +19,7 @@ import { JOB_HANDLERS } from './handlers.js';
  * (compose `worker` service). Both modes share the queue safely because
  * claims are atomic lease grants.
  *
- * While a handler runs — including long external processes (whisper) that
+ * While a handler runs — including long external processes that
  * produce no database writes of their own — the worker renews the job lease
  * on a timer, independent of handler code. If renewal ever fails the job
  * was reclaimed elsewhere; the handler's subsequent conditional writes
@@ -31,10 +31,10 @@ export interface WorkerHandle {
 }
 
 /**
- * Three lanes: `concurrency` slots for heavy jobs (multi-hour whisper runs),
+ * Three lanes: `concurrency` slots for heavy jobs (aligning a book),
  * one slot for model downloads (gigabytes over the network), and one slot for
- * everything light (scans, indexing, pairing), so neither a transcription nor
- * a download can hold the library hostage.
+ * everything light (scans, indexing, pairing), so neither an alignment nor a
+ * download can hold the library hostage.
  */
 export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle {
   const running: Record<Lane, number> = { heavy: 0, download: 0, light: 0 };
@@ -96,7 +96,7 @@ export function startWorker(ctx: AppContext, concurrency: number): WorkerHandle 
       const done = (error?: string, skipFinish = false) => {
         clearInterval(heartbeat);
         try {
-          // A job that dies while we are shutting down (whisper killed by the
+          // A job that dies while we are shutting down (ffmpeg killed by the
           // container stop) goes back to the queue instead of counting as
           // failed; the next start resumes it.
           if (error && stopped && !guard.isLost() && requeueJob(ctx.db, job.id, job.lease_token)) {

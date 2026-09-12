@@ -193,17 +193,6 @@ CREATE TABLE jobs (
 CREATE INDEX idx_jobs_state ON jobs(state, priority DESC, created_at);
 CREATE UNIQUE INDEX idx_jobs_dedupe ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL AND state IN ('queued','running');
 
-CREATE TABLE transcripts (
-  id TEXT PRIMARY KEY,
-  book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-  source_hash TEXT NOT NULL,
-  model TEXT NOT NULL,
-  language TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  file_path TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE (book_id, source_hash, model, language)
-);
 `,
   },
   {
@@ -284,6 +273,38 @@ CREATE TABLE invites (
 -- read-to-listen handoff subtracts this so it lands on narration already
 -- read instead of ahead of the reader. 0 = the engine offered no estimate.
 ALTER TABLE alignment_segments ADD COLUMN uncertainty_ms INTEGER NOT NULL DEFAULT 0;
+`,
+  },
+  {
+    version: 7,
+    sql: `
+-- Speech recognition is gone: one model aligns every book, so the settings
+-- that chose between engines, providers and per-language models have nothing
+-- left to choose. Fold the survivors forward rather than silently resetting an
+-- existing server to the defaults.
+INSERT OR REPLACE INTO settings (key, value_json, updated_at)
+  SELECT 'autoAlign', CASE WHEN value_json = '"manual"' THEN 'false' ELSE 'true' END,
+         updated_at FROM settings WHERE key = 'processingMode';
+UPDATE settings SET value_json = '"exact"'
+  WHERE key = 'alignPrecision' AND value_json = '"thorough"';
+UPDATE settings SET value_json = '"standard"'
+  WHERE key = 'alignPrecision' AND value_json IN ('"fast"', '"careful"');
+DELETE FROM settings WHERE key IN (
+  'processingMode', 'transcribeProvider', 'whisperBin', 'whisperModel',
+  'languageModels', 'autoDownloadDefaultModel', 'alignEngine', 'storageBudgetMb',
+  'autoPairThreshold',
+  -- Measured against a different method; the next alignment measures again.
+  'transcribeSpeedRatio'
+);
+DROP TABLE IF EXISTS transcripts;
+
+-- Portable alignments. A book's identity has to survive a rebuild, a move to
+-- another host and a retagging pass, so it is derived from content rather than
+-- from a path: the ebook from its own sentence ids (which are already content
+-- hashes), the audiobook from the shape of its timeline. Both are filled in by
+-- the indexing jobs; NULL means the book has not been re-indexed yet.
+ALTER TABLE books ADD COLUMN text_fingerprint TEXT;
+ALTER TABLE books ADD COLUMN audio_timeline_fingerprint TEXT;
 `,
   },
 ];

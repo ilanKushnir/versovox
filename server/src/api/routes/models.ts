@@ -12,9 +12,9 @@ import {
   modelPath,
   modelFiles,
   MODELS,
-} from '../../transcription/models.js';
+} from '../../alignment/model.js';
 
-/** Speech-model catalog + download management (admin for mutations). */
+/** The alignment model: is it here, fetch it, remove it (admin for mutations). */
 export function registerModelRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db, config } = ctx;
 
@@ -54,10 +54,9 @@ export function registerModelRoutes(app: FastifyInstance, ctx: AppContext): void
     }
     return {
       modelsDir: config.modelsDir,
-      whisperAvailable: Boolean(config.whisperBin) && fs.existsSync(config.whisperBin),
-      // Whether the ONNX runtime actually loaded. A model on disk is not enough:
-      // the settings page needs to distinguish "not downloaded" from "downloaded
-      // but this build cannot run it".
+      // Whether the runtime actually loaded. A file on disk is not enough: the
+      // settings page has to tell "not downloaded" from "downloaded but this
+      // build cannot run it".
       alignerRuntime: await checkCtcEngine(),
       models: MODELS.map((m) => {
         const installed = isInstalled(config.modelsDir, m);

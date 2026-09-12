@@ -234,17 +234,26 @@ export const setupSchema = z.object({
   ebookDirs: dirListSchema.optional(),
   audiobookDirs: dirListSchema.optional(),
   defaultLanguage: z.string().min(2).max(16).optional(),
-  /** How much the server may start on its own; see settingsSchema. */
-  processingMode: z.enum(['auto', 'verify', 'manual']).optional(),
+  /** Folder where alignments are saved as files, chosen in the wizard. */
+  alignmentDirs: dirListSchema.optional(),
+  /** Align new matches without being asked; see settingsSchema. */
+  autoAlign: z.boolean().optional(),
 });
 export const alignManySchema = z.object({
   pairIds: z.array(z.string().min(1).max(64)).min(1).max(500),
 });
 
+/**
+ * What a folder is for. Not `bookKindSchema`: that one also types `books.kind`,
+ * and an alignment folder holds no books.
+ */
+export const folderKindSchema = z.enum(['ebook', 'audio', 'alignment']);
+export type FolderKind = z.infer<typeof folderKindSchema>;
+
 export const testPathsSchema = z.object({
   paths: dirListSchema,
   /** What the folder is expected to hold; drives the file-count hint. */
-  kind: bookKindSchema.optional(),
+  kind: folderKindSchema.optional(),
 });
 export const pathCheckSchema = z.object({
   path: z.string(),
@@ -252,6 +261,12 @@ export const pathCheckSchema = z.object({
   exists: z.boolean(),
   isDirectory: z.boolean(),
   readable: z.boolean(),
+  /**
+   * Whether the server can create a file here. Only asked of an alignment
+   * folder, and asked by writing rather than by permission bits — a bind mount
+   * can report the bits and still refuse.
+   */
+  writable: z.boolean().nullable().default(null),
   /** Matching files found in a shallow, capped walk (null when unreadable). */
   matches: z.number().int().nullable(),
   sampled: z.boolean(),
@@ -260,58 +275,33 @@ export const pathCheckSchema = z.object({
 export type PathCheck = z.infer<typeof pathCheckSchema>;
 
 export const settingsSchema = z.object({
+  /** Used when a book's own metadata does not say what language it is in. */
   defaultLanguage: z.string().min(2).max(16),
-  transcribeProvider: z.enum(['none', 'fixture', 'whisper-cli']),
-  whisperBin: z.string().max(512),
-  whisperModel: z.string().max(128),
+  /** How many books may be aligned at the same time. */
   jobConcurrency: z.number().int().min(1).max(8),
-  autoPairThreshold: z.number().min(0.5).max(1),
-  storageBudgetMb: z.number().int().min(0),
-  /** Per-language speech model preference (language code → catalog model id). */
-  languageModels: z.record(z.string().max(8), z.string().max(64)).default({}),
-  /** Fetch the multilingual default (large-v3-turbo) on first start; other languages are always manual. */
-  autoDownloadDefaultModel: z.boolean().default(true),
-  /** Library roots (read-only). Env vars VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS pin these. */
+  /** Folders scanned for books. Read-only; pinned by VX_EBOOK_DIRS / VX_AUDIOBOOK_DIRS. */
   ebookDirs: dirListSchema.default([]),
   audiobookDirs: dirListSchema.default([]),
   /**
-   * Which engine computes the ebook-to-audio timings.
-   *  - `forced-align` (default) aligns the narration to the text you already
-   *    have. One model, every language, several times faster than recognition.
-   *  - `whisper-cli` transcribes the audiobook from scratch and fuzzy-matches
-   *    the result. Slower and needs a model per language; kept as a rescue
-   *    path and for the two-clip edition check.
-   *  - `fixture` reads sidecar transcripts; `none` disables alignment.
+   * Where finished alignments are saved as files, so they outlive the
+   * container. The only folders this app writes to. Empty means the app's own
+   * data directory, which a rebuild can take with it.
    */
-  alignEngine: z.enum(['none', 'fixture', 'forced-align', 'whisper-cli']).default('forced-align'),
+  alignmentDirs: dirListSchema.default([]),
   /**
-   * How much of the narration the forced aligner actually listens to.
-   *  - `fast` (default) samples a few seconds every couple of minutes and
-   *    interpolates between the matches, then spends a second pass on the
-   *    stretches where the reading rate says something happened. A six-hour
-   *    audiobook takes minutes instead of an hour, and switching still lands
-   *    on the right paragraph.
-   *  - `careful` samples twice as often. Worth it for heavily broken-up books
-   *    (dense chapter breaks, interviews, verse).
-   *  - `thorough` listens to every second. Sentence-perfect timings at roughly
-   *    fifteen times the cost; for a book you intend to read along with
-   *    word by word.
-   * Ignored by every engine except `forced-align`.
+   * How much of the narration is listened to.
+   *  - `standard` samples it and interpolates between the matches: minutes per
+   *    book, and switching lands on the right paragraph.
+   *  - `exact` listens to every second for sentence-perfect timings, at
+   *    roughly fifteen times the cost.
    */
-  alignPrecision: z.enum(['fast', 'careful', 'thorough']).default('fast'),
+  alignPrecision: z.enum(['standard', 'exact']).default('standard'),
+  /** Align a book as soon as its two halves are matched, without being asked. */
+  autoAlign: z.boolean().default(true),
   /**
-   * How much work a library scan may start on its own.
-   *  - `auto`   verify a strong match, then transcribe it in full, unattended
-   *  - `verify` verify and link, then wait for you before the long transcription
-   *  - `manual` touch nothing automatically; every pair is started by hand
-   * Verification is two 90-second clips; full transcription is hours per book.
+   * Measured throughput: seconds of audio aligned per second of wall clock.
+   * Written by the worker from real runs, never guessed; 0 = not yet known.
    */
-  processingMode: z.enum(['auto', 'verify', 'manual']).default('verify'),
-  /**
-   * Measured transcription throughput: seconds of audio handled per second of
-   * wall clock (0.4 means a 1-hour book takes ~2.5 hours). Written by the
-   * worker from real runs, never guessed; 0 means "not measured yet".
-   */
-  transcribeSpeedRatio: z.number().min(0).max(500).default(0),
+  alignSpeedRatio: z.number().min(0).max(500).default(0),
 });
 export type Settings = z.infer<typeof settingsSchema>;

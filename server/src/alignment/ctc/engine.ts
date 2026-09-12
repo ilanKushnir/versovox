@@ -8,6 +8,7 @@ import {
   type EmissionOptions,
   type ProbeDecoder,
   type ProbeDecoderOptions,
+  type ProbeWindow,
 } from './emissions.js';
 import { romanize } from './romanize.js';
 import {
@@ -69,6 +70,8 @@ export interface CtcAlignRequest {
   /** Audio files in playback order, with each one's offset on the book timeline. */
   trackPaths: string[];
   trackStartMs: number[];
+  /** Each track's length as the library scan measured it, to save an ffprobe. */
+  trackDurationMs?: (number | undefined)[];
   /** BCP-47 code; selects the romanization conventions, not a model. */
   language: string;
   /** Sentences in reading order, as the rest of the pipeline knows them. */
@@ -107,6 +110,16 @@ export interface CtcAlignResult {
   decodedMs: number;
   /** Probes decoded, or 0 for a whole-book decode. */
   probes: number;
+  /**
+   * How much of the ebook's text the narration appears to cover: ~1 for a
+   * complete reading, well under 1 for an abridgement.
+   *
+   * NOT the raw heard/book character ratio, which under sampling is the
+   * fraction of the audio that was decoded and says nothing about the
+   * narration. Dividing that fraction back out is what makes the number mean
+   * the same thing at every precision.
+   */
+  narrationRatio: number;
 }
 
 /**
@@ -172,6 +185,7 @@ export async function alignWithCtc(req: CtcAlignRequest): Promise<CtcAlignResult
     { audioMs: heard.audioMs },
   );
 
+  const decodedFraction = heard.audioMs > 0 ? heard.decodedMs / heard.audioMs : 1;
   return {
     result,
     stats: heard.match.stats,
@@ -179,6 +193,7 @@ export async function alignWithCtc(req: CtcAlignRequest): Promise<CtcAlignResult
     audioMs: heard.audioMs,
     decodedMs: heard.decodedMs,
     probes: heard.probes,
+    narrationRatio: decodedFraction > 0 ? heard.match.stats.charRatio / decodedFraction : 0,
   };
 }
 
@@ -237,6 +252,7 @@ async function listenSparsely(
     vocabPath: req.vocabPath,
     trackPaths: req.trackPaths,
     trackStartMs: req.trackStartMs,
+    trackDurationMs: req.trackDurationMs,
     threads: req.threads,
     signal: req.signal,
   });
@@ -244,20 +260,36 @@ async function listenSparsely(
     const audioMs = decoder.audioMs;
     const grid = gridWindows(audioMs, plan);
     const budget = Math.floor(grid.length * Math.max(0, plan.refineBudget));
-    // The grid is the bulk of the work; the refinement rounds share what is
-    // left so the bar never goes backwards when a round turns out to be empty.
-    const gridShare = budget > 0 ? 0.8 : 0.95;
 
-    const runs: ProbeRun[] = [];
-    const decodeRound = async (windows: (typeof grid)[number][], from: number, to: number) => {
-      const chunks = await decoder.decode(windows, (done, total) => {
-        const f = from + ((to - from) * done) / Math.max(1, total);
-        req.onProgress?.(f, `Listening to the narration · ${Math.round(f * 100)}%`);
-      });
-      windows.forEach((window, i) => runs.push({ window, chars: chunks[i] ?? [] }));
+    // The bar counts probes, not rounds. Every probe costs about the same, so
+    // a bar that is linear in probes is linear in time — and a linear bar is
+    // the difference between an honest "twelve minutes left" and a number that
+    // reads eight when the answer is thirteen. `planned` grows when a
+    // refinement round is scheduled, which slows the bar down but never sends
+    // it backwards.
+    let planned = grid.length;
+    let finished = 0;
+    const report = () => {
+      const f = planned > 0 ? Math.min(1, finished / planned) : 0;
+      req.onProgress?.(
+        f * 0.97,
+        `Listening to the narration · ${finished.toLocaleString()} of ${planned.toLocaleString()} samples`,
+      );
     };
 
-    await decodeRound(grid, 0, gridShare);
+    const runs: ProbeRun[] = [];
+    const decodeRound = async (windows: ProbeWindow[]) => {
+      const chunks = await decoder.decode(windows, (done) => {
+        finished = runs.length + done;
+        report();
+      });
+      windows.forEach((window, i) => runs.push({ window, chars: chunks[i] ?? [] }));
+      finished = runs.length;
+      report();
+    };
+
+    report();
+    await decodeRound(grid);
     let match = matchChars(book, assembleProbes(runs), { audioMs });
 
     let spent = 0;
@@ -265,9 +297,8 @@ async function listenSparsely(
       const covered = runs.map((r) => r.window);
       const extra = refineWindows(match.anchors, covered, audioMs, plan, budget - spent);
       if (extra.length === 0) break;
-      const from = gridShare + ((0.97 - gridShare) * round) / plan.refineRounds;
-      const to = gridShare + ((0.97 - gridShare) * (round + 1)) / plan.refineRounds;
-      await decodeRound(extra, from, to);
+      planned += extra.length;
+      await decodeRound(extra);
       spent += extra.length;
       match = matchChars(book, assembleProbes(runs), { audioMs });
     }

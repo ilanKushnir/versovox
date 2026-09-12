@@ -94,41 +94,59 @@ export const IconPause = (p: P) => (
     <rect x="13.9" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none" />
   </I>
 );
+/**
+ * Skip back / skip forward, with the number of seconds inside the ring.
+ *
+ * Geometry, so it can be adjusted without guessing: the ring is r=9 about
+ * (12,12) with a 72-degree gap centred on twelve o'clock, which puts its ends
+ * at 36 degrees either side — (6.71, 4.72) and (17.29, 4.72). The arrowhead
+ * sits on the end the arc travels towards, pointing along the tangent there,
+ * so back turns anticlockwise and forward clockwise and the two are exact
+ * mirrors. The digits are centred in the ring rather than sharing space with
+ * a stroke: the previous version ran the tail of the arrow straight through
+ * them, which is what made the number hard to read at 36px.
+ */
+const SKIP_RING_BACK = 'M6.71 4.72A9 9 0 1 0 17.29 4.72';
+const SKIP_HEAD_BACK = 'M14.13 2.43 19.8 2.96 16.39 7.65Z';
+const SKIP_RING_FWD = 'M17.29 4.72A9 9 0 1 1 6.71 4.72';
+const SKIP_HEAD_FWD = 'M9.87 2.43 7.61 7.65 4.2 2.96Z';
+
+/** Digits shrink only when there are three of them; the app offers 10-60. */
+function skipFontSize(label: string): number {
+  if (label.length >= 3) return 7.6;
+  if (label.length <= 1) return 10;
+  return 9.5;
+}
+
+function SkipIcon({ label, ring, head, ...p }: P & { label: string; ring: string; head: string }) {
+  const size = skipFontSize(label);
+  return (
+    <I {...p}>
+      <path d={ring} />
+      <path d={head} fill="currentColor" stroke="none" />
+      <text
+        x="12"
+        // Baseline, not a centred dominant-baseline: 0.355em below the middle
+        // puts the cap height of a digit on the ring's centre in every browser.
+        y={12 + 0.355 * size}
+        fontSize={size}
+        fontFamily="inherit"
+        fontWeight="650"
+        textAnchor="middle"
+        fill="currentColor"
+        stroke="none"
+      >
+        {label}
+      </text>
+    </I>
+  );
+}
+
 export const IconSkipBack = ({ label = '15', ...p }: P & { label?: string }) => (
-  <I {...p}>
-    <path d="M12 4.5a7.5 7.5 0 1 1-7.3 5.8" />
-    <path d="M4.5 4.5v6h6" fill="none" />
-    <text
-      x="12.4"
-      y="15.6"
-      fontSize="7.5"
-      fontFamily="inherit"
-      fontWeight="700"
-      textAnchor="middle"
-      fill="currentColor"
-      stroke="none"
-    >
-      {label}
-    </text>
-  </I>
+  <SkipIcon {...p} label={label} ring={SKIP_RING_BACK} head={SKIP_HEAD_BACK} />
 );
 export const IconSkipFwd = ({ label = '30', ...p }: P & { label?: string }) => (
-  <I {...p}>
-    <path d="M12 4.5a7.5 7.5 0 1 0 7.3 5.8" />
-    <path d="M19.5 4.5v6h-6" fill="none" />
-    <text
-      x="11.6"
-      y="15.6"
-      fontSize="7.5"
-      fontFamily="inherit"
-      fontWeight="700"
-      textAnchor="middle"
-      fill="currentColor"
-      stroke="none"
-    >
-      {label}
-    </text>
-  </I>
+  <SkipIcon {...p} label={label} ring={SKIP_RING_FWD} head={SKIP_HEAD_FWD} />
 );
 export const IconBookmark = ({ filled = false, ...p }: P & { filled?: boolean }) => (
   <I {...p}>
@@ -187,6 +205,11 @@ export const IconCheck = (p: P) => (
 export const IconChevronRight = (p: P) => (
   <I {...p}>
     <path d="m9.5 5.5 6.5 6.5-6.5 6.5" />
+  </I>
+);
+export const IconChevronDown = (p: P) => (
+  <I {...p}>
+    <path d="m5.5 9.5 6.5 6.5 6.5-6.5" />
   </I>
 );
 export const IconChapterPrev = (p: P) => (

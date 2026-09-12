@@ -11,6 +11,12 @@ import { type AppContext } from '../context.js';
 import { claimNextJob, finishJob, makeLeaseGuard } from '../jobs/queue.js';
 import { JOB_HANDLERS } from '../jobs/handlers.js';
 import { ensureSetupToken } from '../auth/setupToken.js';
+import { storeAlignment } from '../alignment/service.js';
+import {
+  segmentsFromTimings,
+  type EbookSentenceInput,
+  type RawTiming,
+} from '../alignment/timings.js';
 import { type EbookLocator, type AudioLocator } from '@versovox/shared';
 
 const SETUP_TOKEN = 'integration-setup-token';
@@ -18,7 +24,7 @@ const SETUP_TOKEN = 'integration-setup-token';
 /**
  * End-to-end API test against the committed sample library: first-run setup,
  * scan + index jobs, reader content, audio streaming with Range, pairing,
- * alignment from the fixture transcript, and exact two-way switch.
+ * a stored alignment, and the exact two-way switch.
  */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +34,9 @@ let app: FastifyInstance;
 let ctx: AppContext;
 let tmp: string;
 let cookie = '';
+let lanternEbookId = '';
+let lanternAudioId = '';
+let pairId = '';
 
 async function drainJobs(maxJobs = 50): Promise<void> {
   for (let i = 0; i < maxJobs; i++) {
@@ -64,11 +73,73 @@ function authed(opts: {
   });
 }
 
+/**
+ * Store a finished alignment for the fixture pair.
+ *
+ * The acoustic aligner needs a 317 MB model this suite deliberately never
+ * installs, so the switch, resolve and handoff assertions below would have
+ * nothing to run against. Sentence ids come from the derived index the reader
+ * routes actually serve — invented ones would leave resolve() with nothing to
+ * find — and each chapter is laid over the track that narrates it, which is
+ * the shape a real run produces for this book.
+ *
+ * The last sentence of every chapter is left merely fuzzy: narration really
+ * does trail off into a chapter break, and it keeps exact-sentence coverage
+ * honestly below 1 so the handoff numbers mean something.
+ */
+async function seedAlignment(): Promise<void> {
+  const { chapters } = (await authed({ url: `/api/books/${lanternEbookId}/manifest` })).json() as {
+    chapters: { idx: number }[];
+  };
+  const { tracks } = (await authed({ url: `/api/books/${lanternAudioId}` })).json() as {
+    tracks: { startMsAbsolute: number; durationMs: number }[];
+  };
+  const sentences: EbookSentenceInput[] = [];
+  const timings: RawTiming[] = [];
+  for (const chapter of chapters) {
+    const chapterSentences = (
+      (await authed({ url: `/api/books/${lanternEbookId}/sentences/${chapter.idx}` })).json() as {
+        sentences: { id: string; ord: number }[];
+      }
+    ).sentences;
+    const track = tracks[chapter.idx]!;
+    const perSentenceMs = track.durationMs / chapterSentences.length;
+    chapterSentences.forEach((s, i) => {
+      const trailing = i === chapterSentences.length - 1;
+      sentences.push({
+        sentenceId: s.id,
+        spineIdx: chapter.idx,
+        sentenceOrd: s.ord,
+        // Token counts only weight interpolation, and nothing here is left
+        // unplaced for the timing layer to interpolate.
+        tokens: [],
+      });
+      timings.push({
+        startMs: Math.round(track.startMsAbsolute + i * perSentenceMs),
+        endMs: Math.round(track.startMsAbsolute + (i + 1) * perSentenceMs),
+        score: trailing ? 0.55 : 0.92,
+        exact: !trailing,
+        uncertaintyMs: trailing ? 2000 : 250,
+      });
+    });
+  }
+  storeAlignment(
+    ctx.db,
+    pairId,
+    'en',
+    'mms-fa/model_int8.onnx',
+    segmentsFromTimings(sentences, (i) => timings[i]!, {
+      audioMs: tracks.reduce((a, t) => a + t.durationMs, 0),
+    }),
+    { sentenceCount: sentences.length },
+  );
+}
+
 beforeAll(async () => {
   expect(fs.existsSync(fixtures)).toBe(true);
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vx-int-'));
   // Exercise the real env-var path (including settings env-pinning).
-  process.env.VX_TRANSCRIBE_PROVIDER = 'fixture';
+  process.env.VX_DEFAULT_LANGUAGE = 'en';
   const config = loadConfig({
     dataDir: path.join(tmp, 'data'),
     cacheDir: path.join(tmp, 'cache'),
@@ -93,13 +164,10 @@ afterAll(async () => {
   await app.close();
   ctx.db.close();
   fs.rmSync(tmp, { recursive: true, force: true });
+  delete process.env.VX_DEFAULT_LANGUAGE;
 });
 
 describe('Versovox API', () => {
-  let lanternEbookId = '';
-  let lanternAudioId = '';
-  let pairId = '';
-
   it('requires setup on first run, gates it on the bootstrap token, creates admin', async () => {
     const status = await app.inject({ url: '/api/setup/status' });
     expect(status.json()).toMatchObject({ needsSetup: true, setupTokenSource: 'env' });
@@ -165,6 +233,10 @@ describe('Versovox API', () => {
     expect(weak.statusCode).toBe(400);
 
     // RACE: two setup requests with the valid token — exactly one wins.
+    const wizardFolders = {
+      ebookDirs: [path.join(fixtures, 'ebooks')],
+      audiobookDirs: [path.join(fixtures, 'audiobooks')],
+    };
     const [a, b] = await Promise.all([
       app.inject({
         method: 'POST',
@@ -174,7 +246,7 @@ describe('Versovox API', () => {
           username: 'astra',
           password: 'correct-horse-battery-staple',
           setupToken: SETUP_TOKEN,
-          processingMode: 'auto',
+          ...wizardFolders,
         },
       }),
       app.inject({
@@ -185,7 +257,7 @@ describe('Versovox API', () => {
           username: 'mallory',
           password: 'mallory-password-123',
           setupToken: SETUP_TOKEN,
-          processingMode: 'auto',
+          ...wizardFolders,
         },
       }),
     ]);
@@ -418,86 +490,69 @@ describe('Versovox API', () => {
     expect(fieldDetail.tracks[2]!.startMsAbsolute).toBeGreaterThan(0);
   });
 
-  it('auto-links the Lantern editions only after content verification passes', async () => {
+  it('leaves a strong metadata match a suggestion until the narration is checked', async () => {
     const pairs = (await authed({ url: '/api/pairs' })).json() as {
       pairs: {
         id: string;
         status: string;
         score: number;
-        evidence: { titleScore: number; contentScore?: number };
+        evidence: { titleScore: number; contentScore?: number; notes: string[] };
         ebook: { id: string };
         audio: { id: string };
-        alignment: {
-          coverage: number;
-          exactSentenceCoverage: number;
-          meanConfidence: number;
-        } | null;
+        alignment: unknown;
         switchable: boolean;
-        handoff: { available: boolean; exactSentenceCoverage: number } | null;
       }[];
     };
     expect(pairs.pairs.length).toBeGreaterThanOrEqual(1);
     const p = pairs.pairs.find((x) => x.ebook.id === lanternEbookId)!;
-    // Status is 'auto' only because the alignment probe ran and the sampled
-    // content overlap passed — metadata alone would have left a candidate.
-    expect(p.status).toBe('auto');
-    expect(p.score).toBeGreaterThan(0.9);
-    expect(p.evidence.contentScore).toBeGreaterThan(0.5);
-    expect(p.audio.id).toBe(lanternAudioId);
     pairId = p.id;
-    expect(p.alignment).not.toBeNull();
-    expect(p.alignment!.coverage).toBeGreaterThan(0.8);
+    expect(p.audio.id).toBe(lanternAudioId);
+    // Title, author and duration all agree, which is as far as metadata can
+    // ever get: only listening to the narration links two editions, so the
+    // pair waits and says so.
+    expect(p.score).toBeGreaterThan(0.9);
+    expect(p.status).toBe('candidate');
+    expect(p.evidence.notes.join(' ')).toContain('waiting to be checked against the narration');
+    expect(p.alignment).toBeNull();
+    expect(p.switchable).toBe(false);
+  });
+
+  it('reports honest handoff coverage once an alignment is stored', async () => {
+    const confirm = (
+      await authed({ method: 'POST', url: `/api/pairs/${pairId}/confirm` })
+    ).json() as { pair: { status: string } };
+    expect(confirm.pair.status).toBe('confirmed');
+    // Confirming queues an alignment, which cannot run here (no model).
+    await drainJobs();
+    await seedAlignment();
+
+    const p = (
+      (await authed({ url: `/api/pairs/${pairId}` })).json() as {
+        pair: {
+          alignment: {
+            coverage: number;
+            exactSentenceCoverage: number;
+            meanConfidence: number;
+          } | null;
+          switchable: boolean;
+          handoff: { available: boolean; exactSentenceCoverage: number } | null;
+        };
+      }
+    ).pair;
+    // Every sentence in the book was placed, so coverage short of 1 means the
+    // store/read path lost segments on the way — a loose `> 0.8` here would
+    // wave that through.
+    expect(p.alignment!.coverage).toBe(1);
     expect(p.alignment!.meanConfidence).toBeGreaterThan(0.6);
-    // The honest handoff status is exposed alongside the boolean.
+    // `switchable` is the blunt yes/no the reader's button uses; `handoff`
+    // carries the number that stops the UI promising sentence-exactness it
+    // does not have. The chapter-final sentences are only fuzzy, so exact
+    // coverage must land short of the full book.
     expect(p.switchable).toBe(true);
     expect(p.handoff!.available).toBe(true);
     expect(p.handoff!.exactSentenceCoverage).toBeGreaterThan(0.5);
-    expect(p.handoff!.exactSentenceCoverage).toBeLessThanOrEqual(1);
+    expect(p.handoff!.exactSentenceCoverage).toBeLessThan(1);
     expect(p.alignment!.exactSentenceCoverage).toBe(p.handoff!.exactSentenceCoverage);
-  });
-
-  it('FALSE EDITION: high metadata score with failing content check never auto-links', async () => {
-    // Force a candidate pair between the Hebrew ebook and the ENGLISH
-    // Lantern narration with an artificially high metadata score. The
-    // alignment probe runs, the sampled content overlap fails, and the pair
-    // must stay a candidate with an honest warning — never 'auto'.
-    const lib = (await authed({ url: '/api/library' })).json() as {
-      books: { id: string; title: string }[];
-    };
-    const heb = lib.books.find((b) => b.title === 'אורות לאורך השדרה')!;
-    const { stableId } = await import('../util/ids.js');
-    const falsePairId = stableId('pair', String(heb.id), lanternAudioId);
-    ctx.db
-      .prepare(
-        `INSERT INTO pairs (id, ebook_id, audio_id, status, score, evidence_json, created_at)
-         VALUES (?, ?, ?, 'candidate', 0.95, '{"notes":[]}', ?)`,
-      )
-      .run(falsePairId, heb.id, lanternAudioId, new Date().toISOString());
-    const { enqueueJob } = await import('../jobs/queue.js');
-    enqueueJob(ctx.db, 'align', { pairId: falsePairId }, {});
-    await drainJobs();
-    const res = (await authed({ url: `/api/pairs/${falsePairId}` })).json() as {
-      pair: { status: string; compat: { contentScore?: number; warning?: string | null } | null };
-    };
-    expect(res.pair.status).toBe('candidate');
-    expect(res.pair.compat?.contentScore ?? 0).toBeLessThan(0.5);
-    expect(res.pair.compat?.warning).toBeTruthy();
-    // Clean up so later pair assertions stay focused.
-    ctx.db.prepare('DELETE FROM pairs WHERE id = ?').run(falsePairId);
-  });
-
-  it('a strong metadata match with no content verification stays a candidate', async () => {
-    // Fresh pair between the Lantern ebook and a DIFFERENT audiobook cannot
-    // exist automatically; verify by checking every 'auto' pair carries a
-    // passing content score.
-    const pairs = (await authed({ url: '/api/pairs' })).json() as {
-      pairs: { status: string; evidence: { contentScore?: number | null } }[];
-    };
-    for (const p of pairs.pairs) {
-      if (p.status === 'auto') {
-        expect(p.evidence.contentScore ?? 0).toBeGreaterThan(0.5);
-      }
-    }
   });
 
   it('resolves ebook -> audio (sentence-exact where confident)', async () => {
@@ -517,13 +572,58 @@ describe('Versovox API', () => {
       await authed({ method: 'POST', url: `/api/pairs/${pairId}/resolve`, payload: { from } })
     ).json() as {
       to: AudioLocator | null;
-      resolution: { granularity: string; confidence: number };
+      resolution: {
+        granularity: string;
+        confidence: number;
+        source?: string;
+        approximate?: boolean;
+        rewindMs?: number;
+      };
     };
     expect(res.to).not.toBeNull();
     expect(res.to!.medium).toBe('audio');
     expect(res.resolution.granularity).toBe('sentence');
+    expect(res.resolution.source).toBe('exact');
     // Chapter 2 audio starts after track 0; bookMs must be inside track 1.
     expect(res.to!.trackIdx).toBe(1);
+    // The switch steps back by exactly the doubt the aligner recorded for this
+    // sentence — the only end-to-end proof that uncertaintyMs survives the
+    // store/read round-trip rather than being dropped to zero on the way.
+    expect(res.resolution.rewindMs).toBe(250);
+
+    // The same route, one sentence later in the same chapter: the aligner was
+    // only fuzzy about it, so the reader must be offered a paragraph-level
+    // approximation rather than a sentence-exact promise. This is the gating
+    // that `exactSentenceCoverage < 1` above only reports on.
+    const fuzzyTarget = sentences.sentences[sentences.sentences.length - 1]!;
+    const fuzzy = (
+      await authed({
+        method: 'POST',
+        url: `/api/pairs/${pairId}/resolve`,
+        payload: {
+          from: {
+            medium: 'ebook',
+            spineIdx: 1,
+            sentenceId: fuzzyTarget.id,
+            charOffset: fuzzyTarget.start,
+            pct: 0.9,
+          } satisfies EbookLocator,
+        },
+      })
+    ).json() as {
+      to: AudioLocator | null;
+      resolution: {
+        granularity: string;
+        source?: string;
+        approximate?: boolean;
+        rewindMs?: number;
+      };
+    };
+    expect(fuzzy.to).not.toBeNull();
+    expect(fuzzy.resolution.source).toBe('fuzzy');
+    expect(fuzzy.resolution.granularity).toBe('paragraph');
+    expect(fuzzy.resolution.approximate).toBe(true);
+    expect(fuzzy.resolution.rewindMs).toBe(2000);
   });
 
   it('resolves audio -> ebook and round-trips near the original position', async () => {
@@ -558,94 +658,53 @@ describe('Versovox API', () => {
     expect(Math.abs(back.to!.bookMs! - originalBookMs)).toBeLessThan(20000);
   });
 
-  it('alignment without an installed speech model fails with a structured, actionable error', async () => {
-    const pairsRes = await authed({ url: '/api/pairs' });
-    const pair = (pairsRes.json() as { pairs: { id: string; status: string }[] }).pairs.find(
-      (p) => p.status === 'auto' || p.status === 'confirmed',
-    )!;
-    expect(pair).toBeDefined();
-    // The test env pins the provider to 'fixture'; lift the pin for this case.
-    const pinned = ctx.config.envPinned;
-    ctx.config.envPinned = pinned.filter((k) => k !== 'transcribeProvider');
-    ctx.config.transcribeProvider = 'whisper-cli';
-    ctx.config.whisperBin = '/usr/bin/true';
-    try {
-      const put = await authed({
-        method: 'PUT',
-        url: '/api/settings',
-        // This case is about the WHISPER path's structured error, so select that
-        // engine explicitly; the default engine is forced alignment, which
-        // demands a different model (asserted separately below).
-        payload: { transcribeProvider: 'whisper-cli', alignEngine: 'whisper-cli' },
-      });
-      expect(put.statusCode).toBe(200);
-      // Narration language override drives the model choice (Hebrew → ivrit.ai).
-      const lang = await authed({
-        method: 'POST',
-        url: `/api/pairs/${pair.id}/language`,
-        payload: { language: 'he' },
-      });
-      expect(lang.json()).toMatchObject({ pair: { language: { override: 'he' } } });
-      const bad = await authed({
-        method: 'POST',
-        url: `/api/pairs/${pair.id}/language`,
-        payload: { language: 'xx' },
-      });
-      expect(bad.statusCode).toBe(400);
+  it('accepts a narration language override and refuses an unknown one', async () => {
+    const lang = await authed({
+      method: 'POST',
+      url: `/api/pairs/${pairId}/language`,
+      payload: { language: 'he' },
+    });
+    expect(lang.json()).toMatchObject({
+      pair: { language: { override: 'he', source: 'override' } },
+    });
+    const bad = await authed({
+      method: 'POST',
+      url: `/api/pairs/${pairId}/language`,
+      payload: { language: 'xx' },
+    });
+    expect(bad.statusCode).toBe(400);
+    // A rejected code must leave the previous choice alone: the route writes
+    // the column before it validates if that check is ever moved.
+    expect((await authed({ url: `/api/pairs/${pairId}` })).json()).toMatchObject({
+      pair: { language: { override: 'he' } },
+    });
+    const cleared = await authed({
+      method: 'POST',
+      url: `/api/pairs/${pairId}/language`,
+      payload: { language: null },
+    });
+    expect(cleared.json()).toMatchObject({ pair: { language: { override: null } } });
+  });
 
-      const align = await authed({ method: 'POST', url: `/api/pairs/${pair.id}/align` });
-      expect(align.statusCode).toBe(200);
-      await drainJobs();
-      const after = await authed({ url: `/api/pairs/${pair.id}` });
-      const dto = (
-        after.json() as { pair: { lastAlignJob: { state: string; modelMissing: unknown } } }
-      ).pair;
-      expect(dto.lastAlignJob.state).toBe('failed');
-      expect(dto.lastAlignJob.modelMissing).toMatchObject({
-        language: 'he',
-        modelId: 'ivrit-large-v3-turbo',
-      });
+  it('alignment without the installed model fails with a structured, actionable error', async () => {
+    const align = await authed({ method: 'POST', url: `/api/pairs/${pairId}/align` });
+    expect(align.statusCode).toBe(200);
+    await drainJobs();
 
-      // The DEFAULT engine asks for the forced aligner instead — one model for
-      // every language — and says so through the same structured error, so the
-      // "download it" prompt works for either engine.
-      await authed({
-        method: 'PUT',
-        url: '/api/settings',
-        payload: { alignEngine: 'forced-align' },
-      });
-      const align2 = await authed({ method: 'POST', url: `/api/pairs/${pair.id}/align` });
-      expect(align2.statusCode).toBe(200);
-      await drainJobs();
-      const afterFa = await authed({ url: `/api/pairs/${pair.id}` });
-      expect(
-        (afterFa.json() as { pair: { lastAlignJob: { modelMissing: unknown } } }).pair.lastAlignJob
-          .modelMissing,
-      ).toMatchObject({ modelId: 'mms-forced-aligner' });
-      await authed({
-        method: 'PUT',
-        url: '/api/settings',
-        payload: { alignEngine: 'whisper-cli' },
-      });
+    const dto = (
+      (await authed({ url: `/api/pairs/${pairId}` })).json() as {
+        pair: { lastAlignJob: { state: string; modelMissing: { modelId: string } | null } };
+      }
+    ).pair;
+    expect(dto.lastAlignJob.state).toBe('failed');
+    // The Pairing page turns this into a download button rather than a red
+    // error; there is one model for every language, so the id never varies.
+    expect(dto.lastAlignJob.modelMissing).toMatchObject({ modelId: 'alignment-model' });
 
-      // Catalog endpoint reports the gap; a fake install re-queues the alignment.
-      const models = await authed({ url: '/api/models' });
-      const list = (models.json() as { models: { id: string; installed: boolean }[] }).models;
-      expect(list.find((m) => m.id === 'ivrit-large-v3-turbo')?.installed).toBe(false);
-    } finally {
-      ctx.config.envPinned = pinned;
-      ctx.config.transcribeProvider = 'fixture';
-      await authed({
-        method: 'POST',
-        url: `/api/pairs/${pair.id}/language`,
-        payload: { language: null },
-      });
-      await authed({
-        method: 'PUT',
-        url: '/api/settings',
-        payload: { transcribeProvider: 'fixture' },
-      });
-    }
+    const models = (await authed({ url: '/api/models' })).json() as {
+      models: { id: string; installed: boolean }[];
+    };
+    expect(models.models.find((m) => m.id === 'alignment-model')!.installed).toBe(false);
   });
 
   it('progress round-trip with reconciliation over the API', async () => {
@@ -704,16 +763,20 @@ describe('Versovox API', () => {
   });
 
   it('settings respect env pinning and persist', async () => {
-    const before = (await authed({ url: '/api/settings' })).json() as {
-      settings: { autoPairThreshold: number };
-      envPinned: string[];
-    };
-    // transcribeProvider was set via env override in this test config.
-    expect(before.envPinned).toContain('transcribeProvider');
+    const before = (await authed({ url: '/api/settings' })).json() as { envPinned: string[] };
+    // VX_DEFAULT_LANGUAGE is set for this test config.
+    expect(before.envPinned).toContain('defaultLanguage');
     const updated = (
-      await authed({ method: 'PUT', url: '/api/settings', payload: { autoPairThreshold: 0.95 } })
-    ).json() as { settings: { autoPairThreshold: number } };
-    expect(updated.settings.autoPairThreshold).toBe(0.95);
+      await authed({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { jobConcurrency: 4, defaultLanguage: 'he' },
+      })
+    ).json() as { settings: { jobConcurrency: number; defaultLanguage: string } };
+    expect(updated.settings.jobConcurrency).toBe(4);
+    // An operator pinned the language in Compose; the UI may offer the field,
+    // but a save must not quietly win over the environment.
+    expect(updated.settings.defaultLanguage).toBe('en');
   });
 
   it('offline manifest carries real sizes, hashes, and every referenced asset', async () => {
@@ -808,32 +871,36 @@ describe('Versovox API', () => {
     const read = async () =>
       ((await authed({ url: '/api/settings' })).json() as { settings: Record<string, unknown> })
         .settings;
+    // Something stored and away from the schema default, so a reset is visible.
+    await authed({ method: 'PUT', url: '/api/settings', payload: { alignPrecision: 'exact' } });
     const before = await read();
-    expect(before.ebookDirs).toBeDefined();
+    expect(before.ebookDirs).toHaveLength(1);
     const put = await authed({
       method: 'PUT',
       url: '/api/settings',
-      payload: { autoPairThreshold: 0.97 },
+      payload: { autoAlign: false },
     });
     expect(put.statusCode).toBe(200);
     const after = await read();
-    expect(after.autoPairThreshold).toBe(0.97);
+    expect(after.autoAlign).toBe(false);
     // Everything the caller did NOT send must survive untouched. This used to
     // wipe the library folders on every save.
-    for (const key of ['ebookDirs', 'audiobookDirs', 'processingMode', 'languageModels']) {
+    for (const key of ['ebookDirs', 'audiobookDirs', 'alignPrecision', 'jobConcurrency']) {
       expect(after[key]).toEqual(before[key]);
     }
-    await authed({ method: 'PUT', url: '/api/settings', payload: { autoPairThreshold: 0.92 } });
+    await authed({ method: 'PUT', url: '/api/settings', payload: { autoAlign: true } });
   });
 
   it('keeps the choices the setup wizard made', async () => {
     const res = (await authed({ url: '/api/settings' })).json() as {
-      settings: { processingMode: string };
+      settings: { ebookDirs: string[]; audiobookDirs: string[] };
       stats: { ebooks: number; audiobooks: number };
     };
-    // Both racing setup requests asked for unattended processing; the winner's
-    // choice must survive (it used to be dropped by the schema).
-    expect(res.settings.processingMode).toBe('auto');
+    // Both racing setup requests named the same library folders; the winner's
+    // choice must survive (it used to be dropped by the schema) and be what
+    // the first scan actually walked.
+    expect(res.settings.ebookDirs).toEqual([path.join(fixtures, 'ebooks')]);
+    expect(res.settings.audiobookDirs).toEqual([path.join(fixtures, 'audiobooks')]);
     expect(res.stats.ebooks).toBeGreaterThan(0);
     expect(res.stats.audiobooks).toBeGreaterThan(0);
   });

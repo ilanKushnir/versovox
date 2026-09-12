@@ -149,6 +149,36 @@
 .icon-btn.is-marked {
   color: var(--rd-bookmark, var(--vx-primary));
 }
+/* Bookmark toggle + list opener, joined into one pill so they read as one
+   control. Logical radii, so it flips with an RTL book. */
+.bm-split {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.bm-split > .icon-btn {
+  width: 36px;
+  border-radius: 6px;
+}
+.bm-split > .icon-btn:first-child {
+  border-start-start-radius: var(--radius-pill);
+  border-end-start-radius: var(--radius-pill);
+}
+.bm-split > .icon-btn:last-child {
+  border-start-end-radius: var(--radius-pill);
+  border-end-end-radius: var(--radius-pill);
+}
+.bm-split > .icon-btn:only-child {
+  width: 44px;
+  border-radius: var(--radius-pill);
+}
+.bm-split__more {
+  width: 26px;
+  color: var(--rd-soft);
+}
+.bm-split__more:hover {
+  color: inherit;
+}
 .bm-row {
   display: flex;
   gap: var(--sp-3);
@@ -395,8 +425,121 @@
   border: none;
 }
 
-::highlight(vx-h) {
-  background-color: var(--rd-highlight, rgb(214 160 52 / 0.35));
+/* Marks. Five tints from the same warm family as the rest of the app, all
+   muted enough to read through — a highlight has to leave the text legible,
+   which rules out the saturated yellows every other reader uses. A note is
+   underlined rather than filled: it marks a place to return to, not a passage
+   worth re-reading, and the two must be tellable apart at a glance. */
+::highlight(vx-hl-amber) {
+  background-color: rgb(214 160 52 / 0.34);
+}
+::highlight(vx-hl-rose) {
+  background-color: rgb(180 83 42 / 0.28);
+}
+::highlight(vx-hl-plum) {
+  background-color: rgb(94 74 138 / 0.26);
+}
+::highlight(vx-hl-sky) {
+  background-color: rgb(70 110 150 / 0.28);
+}
+::highlight(vx-hl-sand) {
+  background-color: rgb(140 120 96 / 0.28);
+}
+::highlight(vx-note) {
+  text-decoration: underline dashed 1.5px;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--vx-primary);
+}
+[data-reader-theme='night'] ::highlight(vx-hl-amber),
+[data-reader-theme='dark'] ::highlight(vx-hl-amber) {
+  background-color: rgb(214 160 52 / 0.26);
+}
+[data-reader-theme='night'] ::highlight(vx-hl-plum),
+[data-reader-theme='dark'] ::highlight(vx-hl-plum) {
+  background-color: rgb(130 108 180 / 0.3);
+}
+[data-reader-theme='night'] ::highlight(vx-hl-sky),
+[data-reader-theme='dark'] ::highlight(vx-hl-sky) {
+  background-color: rgb(100 145 190 / 0.28);
+}
+
+/* The swatch row in the selection menu and in a mark's popover. */
+.swatches {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 4px;
+}
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+.swatch:hover {
+  transform: scale(1.12);
+}
+.swatch[aria-pressed='true'] {
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 2px var(--rd-bg, #fff);
+}
+.swatch--amber {
+  background: rgb(214 160 52 / 0.85);
+}
+.swatch--rose {
+  background: rgb(180 83 42 / 0.8);
+}
+.swatch--plum {
+  background: rgb(94 74 138 / 0.8);
+}
+.swatch--sky {
+  background: rgb(70 110 150 / 0.8);
+}
+.swatch--sand {
+  background: rgb(140 120 96 / 0.8);
+}
+
+/* A mark the reader tapped: the note it carries, and what can be done to it. */
+.mark-pop {
+  position: absolute;
+  z-index: 30;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: var(--sp-3);
+  border-radius: var(--radius-card);
+  background: var(--vx-surface-raised);
+  color: var(--vx-text);
+  border: 1px solid var(--vx-border);
+  box-shadow: var(--vx-shadow-2);
+  font-family: var(--vx-font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.mark-pop__quote {
+  color: var(--vx-text-soft);
+  font-size: 12.5px;
+  margin: 0 0 var(--sp-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mark-pop__note {
+  margin: 0 0 var(--sp-3);
+  white-space: pre-wrap;
+}
+.mark-pop__row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.mark-pop__row .btn {
+  min-height: 34px;
 }
 ::highlight(vx-handoff) {
   background-color: var(--rd-handoff, rgb(180 83 42 / 0.2));

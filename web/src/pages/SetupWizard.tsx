@@ -8,6 +8,7 @@ import {
   IconCheck,
   IconDownload,
   IconHeadphones,
+  IconLink,
   VersoMark,
 } from '../components/icons';
 import { folderApi, LibraryFolders } from '../components/LibraryFolders';
@@ -17,45 +18,39 @@ import { formatBytes } from '../lib/format';
  * Setup wizard, in two modes.
  *
  * `first-run` — nobody exists yet: Welcome (bootstrap token) → Admin account
- * → Libraries → Language → Alignment → Processing → Review → Ready.
+ * → Books → Ready.
  *
  * `libraries` — an admin already exists but no library folders are set. This
  * is the normal path behind reverse-proxy SSO, where the first user is
  * provisioned automatically and never sees a first-run screen: the same
- * wizard resumes at Libraries, authenticated by the session instead of the
- * token. Nothing is written until the last step in either mode.
+ * wizard resumes at Books, authenticated by the session instead of the token.
+ * Nothing is written until "Finish setup" in either mode.
  *
- * That last rule is why the 317 MB aligner download is a CHOICE here and a
- * POST in `finish()`: during first run there is no session yet, and
- * `/api/models/:id/download` is admin-only. The Ready step then watches the
- * download it started, so the operator sees it running before they leave.
+ * That last rule is why the model download is a CHOICE here and a POST inside
+ * `finish()`: during first run there is no session yet, and
+ * `/api/models/:id/download` is admin-only. Finishing keeps the operator on
+ * the Ready screen — it turns into the live scan and download progress rather
+ * than advancing to a step of its own.
  */
 
 export type WizardMode = 'first-run' | 'libraries';
 
-type StepId =
-  'welcome' | 'admin' | 'libraries' | 'language' | 'alignment' | 'processing' | 'review' | 'init';
+type StepId = 'welcome' | 'admin' | 'books' | 'ready';
 
 const ALL_STEPS: { id: StepId; label: string }[] = [
   { id: 'welcome', label: 'Welcome' },
   { id: 'admin', label: 'Admin' },
-  { id: 'libraries', label: 'Libraries' },
-  { id: 'language', label: 'Language' },
-  { id: 'alignment', label: 'Alignment' },
-  { id: 'processing', label: 'Processing' },
-  { id: 'review', label: 'Review' },
-  { id: 'init', label: 'Ready' },
+  { id: 'books', label: 'Books' },
+  { id: 'ready', label: 'Ready' },
 ];
-
-type ProcessingMode = 'auto' | 'verify' | 'manual';
 
 /** Remembered when an admin chooses "Skip for now", so it stops asking. */
 const SKIP_KEY = 'vx-setup-libraries-skipped';
 
-/** One model, every language (server/src/transcription/models.ts). */
-const ALIGNER_ID = 'mms-forced-aligner';
+/** server/src/alignment/model.ts */
+const ALIGNER_ID = 'alignment-model';
 /** Catalog size, used only until the server's own report arrives. */
-const ALIGNER_BYTES = 317_344_156;
+const ALIGNER_BYTES = 317_341_664;
 
 interface SetupStatus {
   needsSetup: boolean;
@@ -63,7 +58,9 @@ interface SetupStatus {
   libraries: {
     ebookDirs: string[];
     audiobookDirs: string[];
-    envPinned: { ebookDirs: boolean; audiobookDirs: boolean };
+    /** Absent on servers whose setup status predates the alignment folder. */
+    alignmentDirs?: string[];
+    envPinned: { ebookDirs: boolean; audiobookDirs: boolean; alignmentDirs?: boolean };
   } | null;
   languages: { code: string; label: string }[] | null;
   defaultLanguage: string | null;
@@ -108,7 +105,9 @@ export function SetupWizard({
     ? ALL_STEPS
     : ALL_STEPS.filter((s) => s.id !== 'welcome' && s.id !== 'admin');
   const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [step, setStep] = useState<StepId>(firstRun ? 'welcome' : 'libraries');
+  const [step, setStep] = useState<StepId>(firstRun ? 'welcome' : 'books');
+  /** Ready screen, after Finish: same step, now showing what is running. */
+  const [initializing, setInitializing] = useState(false);
   const [token, setToken] = useState('');
   const [tokenOk, setTokenOk] = useState(false);
   const [displayName, setDisplayName] = useState('');
@@ -117,8 +116,9 @@ export function SetupWizard({
   const [confirm, setConfirm] = useState('');
   const [ebookDirs, setEbookDirs] = useState<string[]>([]);
   const [audioDirs, setAudioDirs] = useState<string[]>([]);
+  const [alignDirs, setAlignDirs] = useState<string[]>([]);
   const [language, setLanguage] = useState('en');
-  const [processingMode, setProcessingMode] = useState<ProcessingMode>('verify');
+  const [autoAlign, setAutoAlign] = useState(true);
   const [wantAligner, setWantAligner] = useState(true);
   const [preflight, setPreflight] = useState<PreflightReport | null>(null);
   const [checking, setChecking] = useState(false);
@@ -134,15 +134,17 @@ export function SetupWizard({
           setStatus(s);
           setEbookDirs(s.libraries?.ebookDirs ?? []);
           setAudioDirs(s.libraries?.audiobookDirs ?? []);
+          setAlignDirs(s.libraries?.alignmentDirs ?? []);
           setLanguage(s.defaultLanguage ?? 'en');
         })
         .catch(() => setError('Could not reach the server.'));
       return;
     }
-    // Already signed in: the settings endpoint knows the roots and which of
-    // them the environment pins.
+    // Already signed in: the settings endpoint knows the folders and which of
+    // them the environment pins. The stored `alignmentDirs` is read rather
+    // than the resolved path, so "unset" stays unset.
     void api<{
-      settings: { defaultLanguage: string };
+      settings: { defaultLanguage: string; alignmentDirs: string[]; autoAlign: boolean };
       envPinned: string[];
       paths: { ebookDirs: string[]; audiobookDirs: string[] };
     }>('/api/settings')
@@ -153,9 +155,11 @@ export function SetupWizard({
           libraries: {
             ebookDirs: s.paths.ebookDirs,
             audiobookDirs: s.paths.audiobookDirs,
+            alignmentDirs: s.settings.alignmentDirs,
             envPinned: {
               ebookDirs: s.envPinned.includes('ebookDirs'),
               audiobookDirs: s.envPinned.includes('audiobookDirs'),
+              alignmentDirs: s.envPinned.includes('alignmentDirs'),
             },
           },
           languages: LANGUAGES.map((l) => ({ code: l.code, label: l.label })),
@@ -163,7 +167,9 @@ export function SetupWizard({
         });
         setEbookDirs(s.paths.ebookDirs);
         setAudioDirs(s.paths.audiobookDirs);
+        setAlignDirs(s.settings.alignmentDirs ?? []);
         setLanguage(s.settings.defaultLanguage);
+        setAutoAlign(s.settings.autoAlign ?? true);
       })
       .catch(() => setError('Could not reach the server.'));
   }, [firstRun]);
@@ -176,6 +182,14 @@ export function SetupWizard({
   );
   const folders = useMemo(() => folderApi(firstRun ? token.trim() : undefined), [firstRun, token]);
   const stepIdx = STEPS.findIndex((s) => s.id === step);
+  const pinned = {
+    ebookDirs: status?.libraries?.envPinned.ebookDirs ?? false,
+    audiobookDirs: status?.libraries?.envPinned.audiobookDirs ?? false,
+    alignmentDirs: status?.libraries?.envPinned.alignmentDirs ?? false,
+  };
+  const languages = status?.languages ?? [{ code: 'en', label: 'English' }];
+  const languageLabel = languages.find((l) => l.code === language)?.label ?? language;
+  const aligner = preflight?.aligner ?? null;
 
   /**
    * Server self-check. The folders are sent with it because on first run they
@@ -199,12 +213,12 @@ export function SetupWizard({
     }
   }, [ebookDirs, audioDirs, setupHeaders]);
 
-  // Re-check on entering either screen that shows a result. `runPreflight`
+  // Re-check on entering the screen that shows the result. `runPreflight`
   // only changes identity when the chosen folders do, and those cannot change
-  // from these two steps, so this does not re-fire while the operator types.
+  // from here, so this does not re-fire while the operator reads.
   useEffect(() => {
-    if (step === 'alignment' || step === 'review') void runPreflight();
-  }, [step, runPreflight]);
+    if (step === 'ready' && !initializing) void runPreflight();
+  }, [step, initializing, runPreflight]);
 
   // Move focus to the new step's heading so a screen reader announces it and
   // the keyboard lands in the right place. Not on the very first render: the
@@ -216,7 +230,7 @@ export function SetupWizard({
       return;
     }
     document.querySelector<HTMLElement>('.wizard__body h1')?.focus();
-  }, [step]);
+  }, [step, initializing]);
 
   const verifyToken = async (e: FormEvent) => {
     e.preventDefault();
@@ -229,7 +243,7 @@ export function SetupWizard({
     } catch (err) {
       setError(
         err instanceof ApiError && err.code === 'bad-setup-token'
-          ? 'That token does not match. It is printed in the server log on first start (or set with VX_SETUP_TOKEN).'
+          ? 'That token does not match the one in the server log.'
           : err instanceof ApiError && err.status === 429
             ? 'Too many attempts — wait a few minutes.'
             : 'Could not verify the token. Is the server reachable?',
@@ -246,19 +260,19 @@ export function SetupWizard({
       return;
     }
     setError(null);
-    setStep('libraries');
+    setStep('books');
   };
 
   /**
-   * Start the aligner download, now that a session exists. Deliberately
+   * Start the model download, now that a session exists. Deliberately
    * non-fatal: setup has already succeeded by the time this runs, and the
-   * model can always be fetched later from Settings → Models.
+   * model can always be fetched later from Settings → Alignment.
    */
   const startAlignerDownload = async () => {
     if (!wantAligner) return;
     if (preflight?.aligner.installed || preflight?.aligner.download) return;
     try {
-      await api(`/api/models/${ALIGNER_ID}/download`, { method: 'POST' });
+      await api(`/api/models/${preflight?.aligner.id ?? ALIGNER_ID}/download`, { method: 'POST' });
     } catch {
       setAlignerFailed(true);
     }
@@ -269,22 +283,19 @@ export function SetupWizard({
     setError(null);
     try {
       if (!firstRun) {
-        const pinned = status?.libraries?.envPinned ?? {
-          ebookDirs: false,
-          audiobookDirs: false,
-        };
         await api('/api/settings', {
           method: 'PUT',
           body: {
             ...(pinned.ebookDirs ? {} : { ebookDirs }),
             ...(pinned.audiobookDirs ? {} : { audiobookDirs: audioDirs }),
+            ...(pinned.alignmentDirs ? {} : { alignmentDirs: alignDirs }),
             defaultLanguage: language,
-            processingMode,
+            autoAlign,
           },
         });
         await startAlignerDownload();
         await api('/api/library/rescan', { method: 'POST' }).catch(() => {});
-        setStep('init');
+        setInitializing(true);
         return;
       }
       const res = await api<{ user: User }>('/api/setup', {
@@ -296,15 +307,16 @@ export function SetupWizard({
           setupToken: token.trim(),
           ebookDirs,
           audiobookDirs: audioDirs,
+          ...(alignDirs.length ? { alignmentDirs: alignDirs } : {}),
           defaultLanguage: language,
-          processingMode,
+          autoAlign,
         },
       });
       // The session cookie is set by /api/setup, so the admin-only download
       // endpoint is reachable from here on.
       await startAlignerDownload();
       setCreatedUser(res.user);
-      setStep('init');
+      setInitializing(true);
     } catch (err) {
       setError(
         err instanceof ApiError && err.code === 'invalid'
@@ -317,11 +329,6 @@ export function SetupWizard({
       setBusy(false);
     }
   };
-
-  const pinned = status?.libraries?.envPinned ?? { ebookDirs: false, audiobookDirs: false };
-  const aligner = preflight?.aligner ?? null;
-  const alignerReady = Boolean(aligner?.installed) || Boolean(aligner?.download);
-  const blocking = (preflight?.checks ?? []).filter((c) => c.state === 'fail');
 
   return (
     <main className="auth-page wizard-page">
@@ -373,9 +380,8 @@ export function SetupWizard({
                 spellCheck={false}
               />
               <span className="hint">
-                Proves you control this server. Printed in the server log on first start
-                {status?.setupTokenSource === 'file' ? ' and saved at data/setup-token' : ''}; or
-                set VX_SETUP_TOKEN yourself.
+                Printed in the server log on first start
+                {status?.setupTokenSource === 'file' ? ', and saved at data/setup-token' : ''}.
               </span>
             </div>
             <div className="wizard__actions">
@@ -390,8 +396,8 @@ export function SetupWizard({
           <form className="wizard__body" onSubmit={adminNext}>
             <h1 tabIndex={-1}>Your admin account</h1>
             <p className="lede">
-              The first account runs the server: it adds people, chooses libraries and manages the
-              alignment model. You can add readers and curators later.
+              The first account runs the server: it adds people and chooses the folders. You can add
+              readers and curators later.
             </p>
             <div className="field">
               <label htmlFor="wz-name">Display name</label>
@@ -456,13 +462,13 @@ export function SetupWizard({
           </form>
         )}
 
-        {step === 'libraries' && (tokenOk || !firstRun) && (
+        {step === 'books' && (tokenOk || !firstRun) && (
           <div className="wizard__body">
             <h1 tabIndex={-1}>Where are your books?</h1>
             <p className="lede">
               Point Versovox at the folders that hold your EPUBs and audiobooks, as the server sees
-              them. Folders are only ever read; Calibre, Audiobookshelf and plain folders all work.
-              Test each one before moving on.
+              them. Calibre, Audiobookshelf and plain folders all work. Test each one before moving
+              on.
             </p>
             <h2 className="wizard__h2">
               <IconBookOpen size={16} /> Ebook folders
@@ -492,6 +498,42 @@ export function SetupWizard({
                   : null
               }
             />
+            <h2 className="wizard__h2">
+              <IconLink size={16} /> Alignment folder
+            </h2>
+            <p className="hint" style={{ marginBlockEnd: 10 }}>
+              Finished alignments are saved here, and this is the only folder Versovox writes to.
+              Leave it empty to keep them inside the app&rsquo;s data volume, where rebuilding the
+              container loses them.
+            </p>
+            <LibraryFolders
+              kind="alignment"
+              value={alignDirs}
+              onChange={setAlignDirs}
+              folders={folders}
+              disabled={pinned.alignmentDirs}
+              pinnedNote={
+                pinned.alignmentDirs
+                  ? 'Set by VX_ALIGNMENT_DIRS on the server; change it there.'
+                  : null
+              }
+            />
+            <div className="field" style={{ maxWidth: 340, marginBlockStart: 'var(--sp-5)' }}>
+              <label htmlFor="wz-lang">Most of my books are in</label>
+              <select
+                id="wz-lang"
+                className="input"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+              >
+                {languages.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <span className="hint">Only used when a book doesn&rsquo;t say.</span>
+            </div>
             <div className="wizard__actions">
               {firstRun ? (
                 <button type="button" className="btn btn--ghost" onClick={() => setStep('admin')}>
@@ -512,7 +554,7 @@ export function SetupWizard({
               <button
                 type="button"
                 className="btn"
-                onClick={() => setStep('language')}
+                onClick={() => setStep('ready')}
                 disabled={!firstRun && ebookDirs.length + audioDirs.length === 0}
               >
                 {firstRun && ebookDirs.length + audioDirs.length === 0
@@ -523,186 +565,7 @@ export function SetupWizard({
           </div>
         )}
 
-        {step === 'language' && (
-          <div className="wizard__body">
-            <h1 tabIndex={-1}>Which language are most books in?</h1>
-            <p className="lede">
-              One alignment model covers all {LANGUAGES.length} supported languages, so this is not
-              a download choice — it only tells Versovox how to read the letters of a book whose own
-              language tag is missing or wrong.
-            </p>
-            <div className="lang-grid" role="radiogroup" aria-label="Default language">
-              {(status?.languages ?? [{ code: 'en', label: 'English' }]).map((l) => (
-                <button
-                  key={l.code}
-                  type="button"
-                  role="radio"
-                  aria-checked={language === l.code}
-                  className={`lang-chip ${language === l.code ? 'is-on' : ''}`}
-                  onClick={() => setLanguage(l.code)}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
-            <p className="hint" style={{ marginTop: 12 }}>
-              Each book's own language wins when it is known; this is only the fallback. Hebrew and
-              Arabic work unvocalized, and mixed-language shelves need nothing special.
-            </p>
-            <div className="wizard__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => setStep('libraries')}>
-                Back
-              </button>
-              <button type="button" className="btn" onClick={() => setStep('alignment')}>
-                Continue
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 'alignment' && (
-          <div className="wizard__body">
-            <h1 tabIndex={-1}>How Versovox lines the two editions up</h1>
-            <p className="lede">
-              To hand you back the <em>same sentence</em> when you switch, Versovox listens to the
-              narration and matches what it hears against the ebook text you already have. It does
-              not transcribe your books and nothing is ever uploaded. That needs one model —
-              {` ${formatBytes(aligner?.sizeBytes ?? ALIGNER_BYTES)}`}, downloaded once from Hugging
-              Face, covering every supported language.
-            </p>
-
-            <div className={`folders__row ${alignerReady ? 'is-ok' : ''}`} style={{ marginTop: 4 }}>
-              <span className="folders__icon" aria-hidden="true">
-                {aligner?.installed ? <IconCheck size={15} /> : <IconDownload size={15} />}
-              </span>
-              <span className="folders__body">
-                <strong style={{ fontSize: 14 }}>
-                  {aligner?.label ?? 'MMS forced aligner (all languages)'}
-                </strong>
-                <span className="folders__meta">
-                  {aligner?.installed
-                    ? `Already installed · ${formatBytes(aligner.installedBytes || aligner.sizeBytes)}`
-                    : aligner?.download
-                      ? `Downloading — ${Math.round(aligner.download.progress * 100)}%`
-                      : `${formatBytes(aligner?.sizeBytes ?? ALIGNER_BYTES)} · one download, all ${LANGUAGES.length} languages`}
-                </span>
-              </span>
-            </div>
-
-            <p className="hint" style={{ marginTop: 10 }}>
-              Licence: <strong>{aligner?.licence ?? 'CC-BY-NC-4.0 (non-commercial)'}</strong>. This
-              model is Meta's MMS forced aligner, and it is the one non-commercial piece in Versovox
-              — fine for your own library, not for a paid service. Everything else is AGPL-3.0.
-              Nothing else is downloaded unless you ask for it.
-            </p>
-
-            {!aligner?.installed && !aligner?.download && (
-              <label className="rs-toggle" style={{ maxWidth: 560, marginTop: 14 }}>
-                <span>Download it when I finish setup</span>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={wantAligner}
-                  onChange={(e) => setWantAligner(e.target.checked)}
-                />
-              </label>
-            )}
-            {!wantAligner && !aligner?.installed && (
-              <p className="hint" style={{ marginTop: 10 }}>
-                Fine — Versovox will still scan, pair and read. Sentence-exact switching stays off
-                until you fetch the model from Settings → Models.
-              </p>
-            )}
-            {aligner?.lastError && !aligner.download && (
-              <p className="hint" style={{ marginTop: 10, color: 'var(--vx-danger)' }}>
-                The last download attempt failed: {aligner.lastError}
-              </p>
-            )}
-
-            <p className="hint" style={{ marginTop: 14 }}>
-              How long: roughly <strong>a minute of computing per hour of audio</strong>, once per
-              book, measured on a four-core home server. A six-hour audiobook is done in about six
-              minutes and never needs doing again. It gets there by sampling the narration rather
-              than listening to every second — Settings can turn that down if you want
-              sentence-perfect timings and have the hours to spare.
-            </p>
-
-            {blocking.some((c) => c.id === 'onnx-runtime' || c.id === 'audio-tools') && (
-              <div className="banner banner--error" role="alert" style={{ margin: '14px 0 0' }}>
-                <IconAlert size={16} /> This server cannot run the aligner yet —{' '}
-                {blocking.find((c) => c.id === 'onnx-runtime' || c.id === 'audio-tools')!.detail}.
-                The next screen explains it.
-              </div>
-            )}
-
-            <div className="wizard__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => setStep('language')}>
-                Back
-              </button>
-              <button type="button" className="btn" onClick={() => setStep('processing')}>
-                Continue
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 'processing' && (
-          <div className="wizard__body">
-            <h1 tabIndex={-1}>How much should run on its own?</h1>
-            <p className="lede">
-              Aligning a book costs roughly <strong>a minute of computing per hour of audio</strong>
-              , once. Versovox does it one book at a time, in the background, and a pairing that is
-              really a different edition produces no match and is dropped rather than guessed. What
-              you choose here is how much of that starts without you.
-            </p>
-            <div className="role-picker" role="radiogroup" aria-label="Processing">
-              {(
-                [
-                  [
-                    'verify',
-                    'Align strong matches, ask before anything slower',
-                    'Books that clearly belong together are aligned on their own. If a pair can only be settled by the old transcription route — hours per book — it waits for you. Recommended.',
-                  ],
-                  [
-                    'auto',
-                    'Do everything automatically',
-                    'The same, plus the slow transcription fallback runs unattended too, one book at a time. Good for a small library or a server that is idle at night.',
-                  ],
-                  [
-                    'manual',
-                    'Do nothing without me',
-                    'Nothing is aligned until you press Start on a pair. The quietest option, and the one that uses no CPU by surprise.',
-                  ],
-                ] as [ProcessingMode, string, string][]
-              ).map(([value, label, blurb]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={processingMode === value}
-                  className={`role-picker__opt ${processingMode === value ? 'is-on' : ''}`}
-                  onClick={() => setProcessingMode(value)}
-                >
-                  <strong>{label}</strong>
-                  <span>{blurb}</span>
-                </button>
-              ))}
-            </div>
-            <p className="hint" style={{ marginTop: 12 }}>
-              You can change this later, and start, queue or stop any book from the Pairing page.
-            </p>
-            <div className="wizard__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => setStep('alignment')}>
-                Back
-              </button>
-              <button type="button" className="btn" onClick={() => setStep('review')}>
-                Continue
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 'review' && (
+        {step === 'ready' && !initializing && (
           <div className="wizard__body">
             <h1 tabIndex={-1}>Ready to go</h1>
             <p className="lede">Here is what will be set up. Nothing has been written yet.</p>
@@ -729,32 +592,64 @@ export function SetupWizard({
                 </dd>
               </div>
               <div>
-                <dt>Default language</dt>
-                <dd>{status?.languages?.find((l) => l.code === language)?.label ?? language}</dd>
-              </div>
-              <div>
-                <dt>Aligner model</dt>
+                <dt>Alignment folder</dt>
                 <dd>
-                  {aligner?.installed
-                    ? 'Already installed'
-                    : aligner?.download
-                      ? 'Downloading now'
-                      : wantAligner
-                        ? `Downloads when you finish (${formatBytes(aligner?.sizeBytes ?? ALIGNER_BYTES)})`
-                        : 'Skipped — add it later in Settings'}
+                  {alignDirs.length
+                    ? alignDirs.map((p) => <code key={p}>{p}</code>)
+                    : 'Inside the app data volume'}
                 </dd>
               </div>
               <div>
-                <dt>Processing</dt>
-                <dd>
-                  {processingMode === 'auto'
-                    ? 'Align and transcribe automatically'
-                    : processingMode === 'manual'
-                      ? 'Nothing without me'
-                      : 'Align strong matches, ask before anything slower'}
-                </dd>
+                <dt>Language</dt>
+                <dd>{languageLabel}</dd>
               </div>
             </dl>
+
+            {aligner?.installed ? (
+              <p className="hint" style={{ marginBlockStart: 'var(--sp-4)' }}>
+                The alignment model is already on this server.
+              </p>
+            ) : aligner?.download ? (
+              <p className="hint" style={{ marginBlockStart: 'var(--sp-4)' }}>
+                The alignment model is downloading — {Math.round(aligner.download.progress * 100)}%.
+              </p>
+            ) : (
+              <label className="rs-toggle" style={{ maxWidth: 620 }}>
+                <span>
+                  Download the alignment model when I finish (
+                  {formatBytes(aligner?.sizeBytes ?? ALIGNER_BYTES)})
+                  <span className="hint" style={{ display: 'block' }}>
+                    Licensed for personal use, not for a paid service.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={wantAligner}
+                  onChange={(e) => setWantAligner(e.target.checked)}
+                />
+              </label>
+            )}
+            {aligner?.lastError && !aligner.download && !aligner.installed && (
+              <p className="hint" style={{ marginBlockStart: 8, color: 'var(--vx-danger)' }}>
+                The last download attempt failed: {aligner.lastError}
+              </p>
+            )}
+
+            <label className="rs-toggle" style={{ maxWidth: 620 }}>
+              <span>
+                Align new matches automatically
+                <span className="hint" style={{ display: 'block' }}>
+                  Off means nothing runs until you press Start on a book.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={autoAlign}
+                onChange={(e) => setAutoAlign(e.target.checked)}
+              />
+            </label>
 
             <h2 className="wizard__h2" style={{ justifyContent: 'space-between' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -776,7 +671,7 @@ export function SetupWizard({
               <button
                 type="button"
                 className="btn btn--ghost"
-                onClick={() => setStep('processing')}
+                onClick={() => setStep('books')}
                 disabled={busy}
               >
                 Back
@@ -788,7 +683,7 @@ export function SetupWizard({
           </div>
         )}
 
-        {step === 'init' && (createdUser || !firstRun) && (
+        {step === 'ready' && initializing && (createdUser || !firstRun) && (
           <InitStep
             hasRoots={ebookDirs.length + audioDirs.length > 0}
             watchAligner={wantAligner && !alignerFailed && !aligner?.installed}
@@ -848,8 +743,8 @@ function CheckList({ report, checking }: { report: PreflightReport | null; check
 }
 
 /**
- * Live first-scan progress, plus the aligner download this wizard just
- * started; the session cookie is already set by /api/setup.
+ * Live first-scan progress, plus the model download this wizard just started;
+ * the session cookie is already set by /api/setup.
  */
 function InitStep({
   hasRoots,
@@ -901,10 +796,7 @@ function InitStep({
     <div className="wizard__body">
       <h1 tabIndex={-1}>{done ? 'All set' : hasRoots ? 'Reading your shelves' : 'All set'}</h1>
       {!hasRoots ? (
-        <p className="lede">
-          No folders yet — add them any time under Settings → Libraries. You can already invite
-          people and manage the alignment model.
-        </p>
+        <p className="lede">No folders yet — add them any time under Settings → Libraries.</p>
       ) : (
         <>
           <p className="lede">
@@ -929,7 +821,7 @@ function InitStep({
       )}
       {alignerFailed && (
         <p className="hint" style={{ marginTop: 14, color: 'var(--vx-danger)' }}>
-          The aligner download could not be started. Fetch it under Settings → Models — everything
+          The download could not be started. Fetch the model under Settings → Alignment — everything
           else is set up.
         </p>
       )}
@@ -939,7 +831,7 @@ function InitStep({
             <IconDownload size={16} /> Alignment model
           </h2>
           {aligner.installed ? (
-            <p className="hint">Installed — sentence-exact switching is available.</p>
+            <p className="hint">Installed — your books can be aligned now.</p>
           ) : aligner.download ? (
             <>
               <div className="progressbar" style={{ height: 6 }}>
@@ -959,8 +851,8 @@ function InitStep({
           ) : (
             <p className="hint">
               {aligner.lastError
-                ? `Download failed: ${aligner.lastError}. Retry under Settings → Models.`
-                : 'Queued — watch it under Settings → Models.'}
+                ? `Download failed: ${aligner.lastError}. Retry under Settings → Alignment.`
+                : 'Queued — watch it under Settings → Alignment.'}
             </p>
           )}
         </div>

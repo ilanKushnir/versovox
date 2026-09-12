@@ -684,6 +684,13 @@ export interface ProbeDecoderOptions {
   vocabPath: string;
   trackPaths: string[];
   trackStartMs: number[];
+  /**
+   * Each track's length, if the caller already knows it. The library scan
+   * measured these when it indexed the book, and asking ffprobe again costs a
+   * process per file — thirty-one of them on a long audiobook, over whatever
+   * mount the library lives on. Omit an entry and it is measured.
+   */
+  trackDurationMs?: (number | undefined)[];
   threads: number;
   signal?: AbortSignal;
 }
@@ -744,8 +751,9 @@ export async function openProbeDecoder(opts: ProbeDecoderOptions): Promise<Probe
   const tracks: Track[] = [];
   for (let i = 0; i < opts.trackPaths.length; i++) {
     const filePath = opts.trackPaths[i]!;
-    const probe = await probeAudio(filePath);
-    tracks.push({ path: filePath, startMs: opts.trackStartMs[i]!, durationMs: probe.durationMs });
+    const known = opts.trackDurationMs?.[i];
+    const durationMs = known && known > 0 ? known : (await probeAudio(filePath)).durationMs;
+    tracks.push({ path: filePath, startMs: opts.trackStartMs[i]!, durationMs });
   }
   const audioMs = tracks.reduce((a, t) => Math.max(a, t.startMs + t.durationMs), 0);
   const { session, close } = await createOrtSession(opts.modelPath, opts.threads);
@@ -755,13 +763,24 @@ export async function openProbeDecoder(opts: ProbeDecoderOptions): Promise<Probe
     audioMs,
     async decode(windows, onWindow) {
       const runs: DecodedChar[][] = [];
+      // ffmpeg and the model take turns on different resources — one seeks and
+      // decodes an mp3, the other saturates the CPU — so reading the next
+      // probe while the model works on this one is free. Exactly one read runs
+      // ahead: two would double the memory for no further gain, since the
+      // model is always the slower of the pair.
+      let ahead = readProbe(tracks, windows[0], opts.signal);
       for (let i = 0; i < windows.length; i++) {
         throwIfAborted(opts.signal);
+        const pcm = await ahead;
+        ahead = readProbe(tracks, windows[i + 1], opts.signal);
         const out: DecodedChar[] = [];
-        await decodeProbe(session, idToToken, tracks, windows[i]!, out, opts.signal);
+        if (pcm) await decodeProbe(session, idToToken, pcm, out);
         runs.push(out);
         onWindow?.(i + 1, windows.length);
       }
+      // A read started for a window we never reached (an abort, or the loop
+      // ending) must still be awaited, or its ffmpeg outlives the decode.
+      await ahead?.catch(() => null);
       return runs;
     },
     close,
@@ -776,56 +795,76 @@ function trackAt(tracks: Track[], ms: number): Track | null {
   return null;
 }
 
+/** A probe's audio, with the offsets needed to stamp its frames. */
+interface ProbePcm {
+  samples: Float32Array;
+  /** Absolute ms of samples[0], context included. */
+  segStartMs: number;
+  /** The part that is not context and whose characters are kept. */
+  coreLoMs: number;
+  coreHiMs: number;
+}
+
 /**
- * Decode one probe.
+ * Read one probe's audio.
  *
- * A little more audio than asked for is read on each side and then thrown
- * away, because the model decodes badly across a hard cut and a probe is
- * nothing but two hard cuts.
+ * A little more than asked for is read on each side and later thrown away,
+ * because the model decodes badly across a hard cut and a probe is nothing but
+ * two hard cuts.
  *
  * A probe that lands past the end of every track, or that yields too little
- * audio to carry a frame, contributes nothing rather than failing the
- * alignment: the schedule comes from a duration estimate and has to tolerate
- * being slightly wrong at the seams.
+ * audio to carry a frame, returns null rather than failing the alignment: the
+ * schedule comes from a duration estimate and has to tolerate being slightly
+ * wrong at the seams.
  */
-async function decodeProbe(
-  session: CtcSession,
-  idToToken: readonly string[],
+async function readProbe(
   tracks: Track[],
-  win: ProbeWindow,
-  out: DecodedChar[],
+  win: ProbeWindow | undefined,
   signal: AbortSignal | undefined,
-): Promise<void> {
+): Promise<ProbePcm | null> {
+  if (!win) return null;
   const track = trackAt(tracks, win.startMs);
-  if (!track) return;
+  if (!track) return null;
   // Clipped to the track: a probe never spans a file boundary, because the two
   // halves need separate seeks and the sliver lost at the join is worth nothing.
   const relStart = win.startMs - track.startMs;
   const coreMs = Math.min(win.durationMs, track.durationMs - relStart);
-  if (coreMs < 1000) return;
+  if (coreMs < 1000) return null;
 
   const readStart = Math.max(0, relStart - PROBE_CONTEXT_MS);
   const readEnd = Math.min(track.durationMs, relStart + coreMs + PROBE_CONTEXT_MS);
   const samples = await readPcm(track.path, readStart, readEnd - readStart, signal);
-  if (samples.length < MIN_SEGMENT_SAMPLES) return;
+  if (samples.length < MIN_SEGMENT_SAMPLES) return null;
 
-  const segStartMs = track.startMs + readStart;
   const coreLoMs = track.startMs + relStart;
-  const coreHiMs = coreLoMs + coreMs;
-  const maxCore = Math.round((PROBE_MAX_CORE_MS / 1000) * SAMPLE_RATE);
+  return {
+    samples,
+    segStartMs: track.startMs + readStart,
+    coreLoMs,
+    coreHiMs: coreLoMs + coreMs,
+  };
+}
 
-  for (let off = 0; off < samples.length; off += maxCore) {
+/** Run the model over one probe's audio and collapse its core into `out`. */
+async function decodeProbe(
+  session: CtcSession,
+  idToToken: readonly string[],
+  pcm: ProbePcm,
+  out: DecodedChar[],
+): Promise<void> {
+  const maxCore = Math.round((PROBE_MAX_CORE_MS / 1000) * SAMPLE_RATE);
+  for (let off = 0; off < pcm.samples.length; off += maxCore) {
     const lo = Math.max(0, off - SAMPLE_RATE);
-    const hi = Math.min(samples.length, off + maxCore + SAMPLE_RATE);
-    const seg = samples.subarray(lo, hi);
+    const hi = Math.min(pcm.samples.length, off + maxCore + SAMPLE_RATE);
+    const seg = pcm.samples.subarray(lo, hi);
     if (seg.length < MIN_SEGMENT_SAMPLES) break;
     const emission = await session.run(seg);
     assertFrameCount(seg.length, emission.frames);
     collapseChunk({
       emission,
-      segStartMs: segStartMs + (lo / SAMPLE_RATE) * 1000,
-      coreLoMs: Math.max(coreLoMs, segStartMs + (off / SAMPLE_RATE) * 1000),
-      coreHiMs: Math.min(coreHiMs, segStartMs + ((off + maxCore) / SAMPLE_RATE) * 1000),
+      segStartMs: pcm.segStartMs + (lo / SAMPLE_RATE) * 1000,
+      coreLoMs: Math.max(pcm.coreLoMs, pcm.segStartMs + (off / SAMPLE_RATE) * 1000),
+      coreHiMs: Math.min(pcm.coreHiMs, pcm.segStartMs + ((off + maxCore) / SAMPLE_RATE) * 1000),
       idToToken,
       // Every probe starts a fresh CTC path: there is no previous frame to
       // suppress a repeat against when the audio before it was never decoded.

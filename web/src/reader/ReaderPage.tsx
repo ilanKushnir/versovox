@@ -14,6 +14,7 @@ import { Sheet, useToast } from '../components/ui';
 import {
   IconBack,
   IconBookmark,
+  IconChevronDown,
   IconCheck,
   IconClose,
   IconTrash,
@@ -30,6 +31,15 @@ import {
   rangeForSpan,
   type TextMap,
 } from './textmap';
+import {
+  COLOR_LABELS,
+  DEFAULT_HIGHLIGHT,
+  HIGHLIGHT_COLORS,
+  colorOf,
+  markAtPoint,
+  paintMarks,
+  type HighlightColor,
+} from './marks';
 import { liveCheckpointOffset } from './liveOffset';
 import {
   computePageLayout,
@@ -85,6 +95,8 @@ export function ReaderPage() {
     y: number;
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
+  /** Set while the note sheet is editing an existing note rather than making one. */
+  const [editingNote, setEditingNote] = useState<string | null>(null);
   /** Mirror of currentOffsetRef for rendering: page turns set it, scroll updates it live. */
   const [liveOffset, setLiveOffset] = useState(0);
   /** Where the reader was before a jump (bookmark, contents, search, slider). */
@@ -418,7 +430,7 @@ export function ReaderPage() {
       }
     }
 
-    paintAnnotations(map, annotations, spineIdx);
+    paintMarks(map, annotations, spineIdx);
     if (target?.handoff && target.sentenceId && map) {
       const s = sentences.find((x) => x.id === target.sentenceId);
       if (s) {
@@ -446,7 +458,7 @@ export function ReaderPage() {
 
   // Re-paint highlights when annotations change.
   useEffect(() => {
-    paintAnnotations(textMapRef.current, annotations, spineIdx);
+    paintMarks(textMapRef.current, annotations, spineIdx);
   }, [annotations, spineIdx]);
 
   // Restore the current stable text anchor after a layout change, WITHOUT
@@ -714,7 +726,7 @@ export function ReaderPage() {
   }, []);
 
   const addAnnotation = useCallback(
-    async (kind: 'highlight' | 'bookmark' | 'note', note?: string) => {
+    async (kind: 'highlight' | 'bookmark' | 'note', note?: string, color?: HighlightColor) => {
       if (!manifest) return;
       const sel = selection;
       const start = sel?.start ?? currentOffsetRef.current;
@@ -733,7 +745,7 @@ export function ReaderPage() {
           end > start
             ? { medium: 'ebook', spineIdx, charOffset: end, pct: pctFor(manifest, spineIdx, end) }
             : null,
-        color: kind === 'highlight' ? 'leaf' : null,
+        color: kind === 'highlight' ? (color ?? DEFAULT_HIGHLIGHT) : null,
         selectedText: sel?.text ?? null,
         note: note ?? null,
       };
@@ -753,6 +765,58 @@ export function ReaderPage() {
       }
     },
     [manifest, selection, sentences, spineIdx, id, toast],
+  );
+
+  /**
+   * The mark the reader tapped. A highlight is paint, not an element, so the
+   * tap is resolved by character offset (see marks.ts) — and it has to win
+   * over toggling the chrome, or a highlight would be unreachable on a phone.
+   */
+  const [markPop, setMarkPop] = useState<{ a: Annotation; x: number; y: number } | null>(null);
+
+  const openMarkAt = useCallback(
+    (x: number, y: number): boolean => {
+      const hit = markAtPoint(textMapRef.current, annotations, spineIdx, x, y);
+      if (!hit) {
+        setMarkPop(null);
+        return false;
+      }
+      setMarkPop({
+        a: hit,
+        x: Math.max(12, Math.min(x - 150, window.innerWidth - 340)),
+        y: Math.max(70, y + 14),
+      });
+      return true;
+    },
+    [annotations, spineIdx],
+  );
+
+  // A mark's popover belongs to the mark, not to the page: turning the page or
+  // changing chapter must not leave it hanging over unrelated text.
+  useEffect(() => setMarkPop(null), [spineIdx, page]);
+
+  const patchAnnotation = useCallback(
+    async (annId: string, body: { color?: HighlightColor; note?: string }) => {
+      try {
+        const res = await api<{ annotation: Annotation }>(`/api/annotations/${annId}`, {
+          method: 'PATCH',
+          body,
+        });
+        setAnnotations((all) => all.map((x) => (x.id === annId ? res.annotation : x)));
+        setMarkPop((m) => (m && m.a.id === annId ? { ...m, a: res.annotation } : m));
+      } catch {
+        toast.show('Could not save the change — are you offline?');
+      }
+    },
+    [toast],
+  );
+  const recolour = useCallback(
+    (annId: string, color: HighlightColor) => patchAnnotation(annId, { color }),
+    [patchAnnotation],
+  );
+  const editNote = useCallback(
+    (annId: string, note: string) => patchAnnotation(annId, { note }),
+    [patchAnnotation],
   );
 
   /** Bookmarks in this chapter, with "is it on the page I am looking at". */
@@ -948,14 +1012,32 @@ export function ReaderPage() {
         <button className="icon-btn" onClick={() => setSheet('search')} aria-label="Search in book">
           <IconSearch />
         </button>
-        <button
-          className={`icon-btn ${currentBookmark ? 'is-marked' : ''}`}
-          onClick={() => void toggleBookmark()}
-          aria-pressed={!!currentBookmark}
-          aria-label={currentBookmark ? 'Remove bookmark from this page' : 'Bookmark this page'}
-        >
-          <IconBookmark filled={!!currentBookmark} />
-        </button>
+        {/* Two jobs, one control: the ribbon marks this page, the caret opens
+            everything already marked. The caret only exists once there is
+            something behind it. */}
+        <div className="bm-split">
+          <button
+            className={`icon-btn ${currentBookmark ? 'is-marked' : ''}`}
+            onClick={() => void toggleBookmark()}
+            aria-pressed={!!currentBookmark}
+            aria-label={currentBookmark ? 'Remove bookmark from this page' : 'Bookmark this page'}
+          >
+            <IconBookmark filled={!!currentBookmark} />
+          </button>
+          {annotations.length > 0 && (
+            <button
+              className="icon-btn bm-split__more"
+              onClick={() => {
+                setContentsTab('marks');
+                setSheet('toc');
+              }}
+              aria-haspopup="dialog"
+              aria-label={`Bookmarks and notes (${annotations.length})`}
+            >
+              <IconChevronDown size={16} />
+            </button>
+          )}
+        </div>
         <button
           className="icon-btn"
           onClick={() => setSheet('settings')}
@@ -1014,6 +1096,7 @@ export function ReaderPage() {
                   ) {
                     const sel = document.getSelection();
                     if (sel && !sel.isCollapsed) return;
+                    if (openMarkAt(e.clientX, e.clientY)) return;
                     setChrome((c) => !c);
                   }
                 }}
@@ -1035,6 +1118,7 @@ export function ReaderPage() {
                 }
                 const sel = document.getSelection();
                 if (sel && !sel.isCollapsed) return;
+                if (openMarkAt(e.clientX, e.clientY)) return;
                 setChrome((c) => !c);
               }}
               onPointerDown={() => handoffCleanupRef.current?.()}
@@ -1098,10 +1182,22 @@ export function ReaderPage() {
       {selection && (
         <div
           className="selection-menu"
-          style={{ left: selection.x - 60, top: selection.y }}
+          style={{ left: selection.x - 90, top: selection.y }}
           role="menu"
         >
-          <button onClick={() => void addAnnotation('highlight')}>Highlight</button>
+          {/* The colours ARE the highlight button: picking one is the act, so
+              highlighting in a chosen colour costs the same single tap as
+              highlighting at all. */}
+          <span className="swatches" role="group" aria-label="Highlight">
+            {HIGHLIGHT_COLORS.map((c) => (
+              <button
+                key={c}
+                className={`swatch swatch--${c}`}
+                aria-label={`Highlight in ${COLOR_LABELS[c].toLowerCase()}`}
+                onClick={() => void addAnnotation('highlight', undefined, c)}
+              />
+            ))}
+          </span>
           <button
             onClick={() => {
               setNoteDraft('');
@@ -1110,7 +1206,59 @@ export function ReaderPage() {
           >
             Note
           </button>
-          <button onClick={() => void addAnnotation('bookmark')}>Bookmark here</button>
+          <button onClick={() => void addAnnotation('bookmark')}>Bookmark</button>
+        </div>
+      )}
+
+      {markPop && (
+        <div
+          className="mark-pop"
+          style={{ left: markPop.x, top: markPop.y }}
+          role="dialog"
+          aria-label={markPop.a.kind === 'note' ? 'Note' : 'Highlight'}
+        >
+          {markPop.a.selectedText && (
+            <p className="mark-pop__quote">&ldquo;{markPop.a.selectedText}&rdquo;</p>
+          )}
+          {markPop.a.note && <p className="mark-pop__note">{markPop.a.note}</p>}
+          <div className="mark-pop__row">
+            {markPop.a.kind === 'highlight' && (
+              <span className="swatches" role="group" aria-label="Colour">
+                {HIGHLIGHT_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    className={`swatch swatch--${c}`}
+                    aria-pressed={colorOf(markPop.a) === c}
+                    aria-label={COLOR_LABELS[c]}
+                    onClick={() => void recolour(markPop.a.id, c)}
+                  />
+                ))}
+              </span>
+            )}
+            {markPop.a.kind === 'note' && (
+              <button
+                className="btn btn--ghost"
+                onClick={() => {
+                  setNoteDraft(markPop.a.note ?? '');
+                  setEditingNote(markPop.a.id);
+                  setMarkPop(null);
+                  setSheet('note');
+                }}
+              >
+                Edit
+              </button>
+            )}
+            <button
+              className="btn btn--ghost"
+              onClick={() => {
+                const target = markPop.a.id;
+                setMarkPop(null);
+                void deleteAnnotation(target);
+              }}
+            >
+              <IconTrash size={15} /> Remove
+            </button>
+          </div>
         </div>
       )}
 
@@ -1314,8 +1462,14 @@ export function ReaderPage() {
       )}
 
       {sheet === 'note' && (
-        <Sheet title="Add note" onClose={() => setSheet('none')}>
-          {selection && (
+        <Sheet
+          title={editingNote ? 'Edit note' : 'Add note'}
+          onClose={() => {
+            setSheet('none');
+            setEditingNote(null);
+          }}
+        >
+          {selection && !editingNote && (
             <blockquote style={{ color: 'var(--vx-text-soft)', fontSize: 14, margin: '0 0 12px' }}>
               “{selection.text.slice(0, 160)}
               {selection.text.length > 160 ? '…' : ''}”
@@ -1327,6 +1481,7 @@ export function ReaderPage() {
               id="note-text"
               className="input"
               rows={4}
+              autoFocus
               style={{ paddingBlock: 10, resize: 'vertical' }}
               value={noteDraft}
               onChange={(e) => setNoteDraft(e.target.value)}
@@ -1335,11 +1490,13 @@ export function ReaderPage() {
           <button
             className="btn"
             onClick={() => {
-              void addAnnotation('note', noteDraft);
+              if (editingNote) void editNote(editingNote, noteDraft);
+              else void addAnnotation('note', noteDraft);
               setSheet('none');
+              setEditingNote(null);
             }}
           >
-            Save note
+            {editingNote ? 'Save changes' : 'Save note'}
           </button>
         </Sheet>
       )}
@@ -1425,26 +1582,6 @@ function isRtlLanguage(lang: string | null): boolean {
 type HighlightApi = {
   highlights?: Map<string, unknown> & { set(k: string, v: unknown): void; delete(k: string): void };
 };
-
-function paintAnnotations(map: TextMap | null, annotations: Annotation[], spineIdx: number): void {
-  const css = CSS as unknown as HighlightApi;
-  if (!map || !css.highlights || typeof Highlight === 'undefined') return;
-  const ranges: Range[] = [];
-  for (const a of annotations) {
-    if (a.kind !== 'highlight' && a.kind !== 'note') continue;
-    if (a.locator.medium !== 'ebook' || a.locator.spineIdx !== spineIdx) continue;
-    const start = a.locator.charOffset ?? 0;
-    const end =
-      a.endLocator?.medium === 'ebook' ? (a.endLocator.charOffset ?? start + 1) : start + 1;
-    const r = rangeForSpan(map, start, end);
-    if (r) ranges.push(r);
-  }
-  if (ranges.length > 0) {
-    css.highlights.set('vx-h', new Highlight(...ranges));
-  } else {
-    css.highlights.delete('vx-h');
-  }
-}
 
 function paintHandoff(map: TextMap, start: number, end: number): () => void {
   const css = CSS as unknown as HighlightApi;

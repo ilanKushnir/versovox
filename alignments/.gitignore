@@ -1,0 +1,4 @@
+# Alignments written at run time; the folder itself is committed so the
+# stock compose file has somewhere to mount.
+*
+!.gitignore

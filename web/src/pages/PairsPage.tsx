@@ -266,6 +266,7 @@ export function PairsPage() {
               </h2>
               {candidates.map((p) => (
                 <PairCard
+                  speedRatio={summary?.speedRatio ?? 0}
                   key={p.id}
                   pair={p}
                   busy={busyId === p.id}
@@ -287,6 +288,7 @@ export function PairsPage() {
               </h2>
               {linked.map((p) => (
                 <PairCard
+                  speedRatio={summary?.speedRatio ?? 0}
                   key={p.id}
                   pair={p}
                   busy={busyId === p.id}
@@ -308,6 +310,7 @@ export function PairsPage() {
               </h2>
               {rejected.map((p) => (
                 <PairCard
+                  speedRatio={summary?.speedRatio ?? 0}
                   key={p.id}
                   pair={p}
                   busy={busyId === p.id}
@@ -389,10 +392,13 @@ function PairCard({
   selectable,
   selected,
   onSelect,
+  speedRatio,
 }: {
   pair: PairDto;
   busy: boolean;
   isAdmin: boolean;
+  /** Seconds of audio aligned per second of wall clock; 0 = not yet measured. */
+  speedRatio: number;
   onAction: (id: string, a: PairAction) => void;
   onLanguage: (id: string, language: string | null) => void;
   onDownloadModel: (modelId: string, language: string) => void;
@@ -478,6 +484,15 @@ function PairCard({
             exact
           </span>
         )}
+        {/* What THIS book will cost, beside the button that starts it. The
+            queue-wide total answers a different question, and a reader
+            comparing one number against one book is how "it took longer than
+            you said" happens. */}
+        {!pair.alignment && speedRatio > 0 && pair.audio?.durationMs ? (
+          <span className="badge badge--muted">
+            ≈ {formatSpan(pair.audio.durationMs / speedRatio)} to align
+          </span>
+        ) : null}
         <span className="pair-card__score">Match {formatPct(pair.score)}</span>
         <label className="lang-pick">
           <span className="lang-pick__label">Narration</span>

@@ -13,9 +13,9 @@ import {
   trackSourceVersion,
 } from '../../audio/integrity.js';
 import { realResolveWithin } from '../../util/paths.js';
-import { libraryRoots, resolveSettings, saveSettings } from '../../domain/settings.js';
+import { alignmentRoots, libraryRoots, resolveSettings, saveSettings } from '../../domain/settings.js';
 import { cancelJob, retryJob } from '../../jobs/queue.js';
-import { modelById } from '../../transcription/models.js';
+import { modelById } from '../../alignment/model.js';
 
 export function registerJobRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
@@ -142,6 +142,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
         cacheDir: config.cacheDir,
         modelsDir: config.modelsDir,
         ...libraryRoots(db, config),
+        alignmentDirs: alignmentRoots(db, config),
       },
       precedence:
         'Environment variables override in-app settings; in-app settings override defaults.',
@@ -163,25 +164,6 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
     const patch = Object.fromEntries(
       Object.entries(parsed.data).filter(([k]) => sent.has(k) && !envPinned.includes(k)),
     );
-    // A web admin may only point the worker at executables/models that the
-    // operator placed inside the models volume — never at arbitrary paths
-    // in the container (that would turn an admin session into code
-    // execution). Paths are checked again by the provider at run time.
-    for (const key of ['whisperBin', 'whisperModel'] as const) {
-      const value = patch[key];
-      if (typeof value !== 'string' || value === '') continue;
-      try {
-        realResolveWithin(
-          config.modelsDir,
-          path.relative(config.modelsDir, path.resolve(config.modelsDir, value)),
-        );
-      } catch {
-        return reply.code(400).send({
-          error: 'invalid',
-          detail: `${key} must be a file inside the models directory (${config.modelsDir})`,
-        });
-      }
-    }
     saveSettings(db, patch);
     const { values } = resolveSettings(db, config);
     return { settings: values, envPinned };

@@ -19,6 +19,7 @@ import { LibraryPage } from './pages/LibraryPage';
 import { BookPage } from './pages/BookPage';
 import { ReaderPage } from './reader/ReaderPage';
 import { PlayerPage } from './player/PlayerPage';
+import { NotesPage } from './pages/NotesPage';
 import { PairsPage } from './pages/PairsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import './styles/immersive.css';
@@ -96,6 +97,7 @@ const router = createBrowserRouter([
       { path: '/book/:id', element: <BookPage /> },
       { path: '/read/:id', element: <ReaderPage /> },
       { path: '/listen/:id', element: <PlayerPage /> },
+      { path: '/notes', element: <NotesPage /> },
       { path: '/pairs', element: <PairsPage /> },
       { path: '/settings', element: <SettingsPage /> },
       { path: '/settings/people', element: <PeoplePage /> },

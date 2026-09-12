@@ -7,12 +7,11 @@ import { type AppContext } from '../../context.js';
 import { hasRole } from '../../auth/roles.js';
 import { checkCtcEngine } from '../../alignment/ctc/emissions.js';
 import {
-  ALIGNER_MODEL_ID,
+  ALIGNER,
   isInstalled,
-  modelById,
   modelFiles,
   modelPath,
-} from '../../transcription/models.js';
+} from '../../alignment/model.js';
 import { libraryRoots } from '../../domain/settings.js';
 import { checkLibraryPath } from '../../setup/paths.js';
 
@@ -168,7 +167,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
       .all() as { payload_json: string; state: string; progress: number; detail: string | null }[];
     for (const r of rows) {
       const { modelId } = JSON.parse(r.payload_json) as { modelId: string };
-      if (modelId === ALIGNER_MODEL_ID) {
+      if (modelId === ALIGNER.id) {
         return { state: r.state, progress: Number(r.progress), detail: r.detail };
       }
     }
@@ -184,7 +183,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
       .all() as { payload_json: string; error: string | null }[];
     for (const r of rows) {
       const { modelId } = JSON.parse(r.payload_json) as { modelId: string };
-      if (modelId === ALIGNER_MODEL_ID) return r.error ?? 'failed';
+      if (modelId === ALIGNER.id) return r.error ?? 'failed';
     }
     return null;
   };
@@ -195,7 +194,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
     if (!body.success) return reply.code(400).send({ error: 'invalid' });
 
     const checks: PreflightCheck[] = [];
-    const spec = modelById(ALIGNER_MODEL_ID)!;
+    const spec = ALIGNER;
     const alignerInstalled = isInstalled(config.modelsDir, spec);
     const download = alignerDownload();
 
@@ -332,24 +331,6 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
               fix: 'Check the path as the SERVER sees it (inside the container) and that the container user may read it.',
             }
           : {}),
-    });
-
-    // 7. whisper.cpp. Optional under forced alignment — it only detects the
-    // language and serves as a rescue engine — so never a failure.
-    const whisperBin = config.whisperBin;
-    const whisperOk = Boolean(whisperBin) && fs.existsSync(whisperBin);
-    checks.push({
-      id: 'whisper',
-      label: 'Speech recognition (optional)',
-      state: whisperOk ? 'ok' : 'warn',
-      detail: whisperOk
-        ? `whisper-cli at ${whisperBin}`
-        : 'whisper-cli not found — alignment does not need it',
-      ...(whisperOk
-        ? {}
-        : {
-            fix: 'Only needed to auto-detect a book’s language or to fall back to transcription.',
-          }),
     });
 
     return {

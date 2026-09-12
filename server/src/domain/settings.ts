@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { settingsSchema, type Settings } from '@versovox/shared';
 import { type DB, nowIso } from '../db/index.js';
 import { type EnvConfig } from '../config.js';
@@ -10,49 +11,48 @@ import { type EnvConfig } from '../config.js';
 
 const DEFAULTS: Settings = {
   defaultLanguage: 'en',
-  transcribeProvider: 'none',
-  whisperBin: '',
-  whisperModel: '',
   jobConcurrency: 2,
-  autoPairThreshold: 0.92,
-  storageBudgetMb: 0,
-  languageModels: {},
-  autoDownloadDefaultModel: true,
   ebookDirs: [],
   audiobookDirs: [],
-  alignEngine: 'forced-align',
-  alignPrecision: 'fast',
-  processingMode: 'verify',
-  transcribeSpeedRatio: 0,
+  alignmentDirs: [],
+  alignPrecision: 'standard',
+  autoAlign: true,
+  alignSpeedRatio: 0,
 };
 
 /**
- * Remember how fast this machine actually transcribes, so time estimates come
- * from measurement rather than a guess. Exponential moving average over
- * whisper runs; ignores samples too short to be meaningful.
+ * Confidence at which two files are taken to be the same work without being
+ * asked. Fixed rather than exposed: nobody can pick a better number than this
+ * one without data they do not have, and the alignment itself is the real
+ * check — a wrong pairing produces no matches and is handed back undecided.
  */
-export function recordTranscribeSpeed(db: DB, audioMs: number, wallMs: number): void {
+export const AUTO_PAIR_THRESHOLD = 0.92;
+
+/**
+ * Remember how fast this machine actually aligns, so the time a book will take
+ * comes from measurement rather than a guess. Exponential moving average;
+ * samples too short to mean anything are ignored.
+ */
+export function recordAlignSpeed(db: DB, audioMs: number, wallMs: number): void {
   if (audioMs < 30_000 || wallMs < 1_000) return;
   const sample = audioMs / wallMs;
   if (!Number.isFinite(sample) || sample <= 0 || sample > 500) return;
-  const stored = getStoredSettings(db).transcribeSpeedRatio ?? 0;
-  // A sample this far from the average is not noise, it is a different method
-  // — the alignment engine or its precision changed. Blending would leave the
-  // estimate wrong for the next several books, so start again from the truth.
+  const stored = getStoredSettings(db).alignSpeedRatio ?? 0;
+  // A sample this far from the average is not noise — the precision setting
+  // changed, or the machine did. Blending would leave the estimate wrong for
+  // the next several books, so start again from the truth.
   const changed = stored > 0 && (sample > stored * 3 || sample * 3 < stored);
   const next = stored > 0 && !changed ? stored * 0.7 + sample * 0.3 : sample;
-  saveSettings(db, { transcribeSpeedRatio: Math.round(next * 1000) / 1000 });
+  saveSettings(db, { alignSpeedRatio: Math.round(next * 1000) / 1000 });
 }
 
 /** Settings keys that can be pinned by env vars, mapped to config fields. */
 const ENV_MAP: Partial<Record<keyof Settings, keyof EnvConfig>> = {
   defaultLanguage: 'defaultLanguage',
-  transcribeProvider: 'transcribeProvider',
-  whisperBin: 'whisperBin',
-  whisperModel: 'whisperModel',
   jobConcurrency: 'jobConcurrency',
   ebookDirs: 'ebookDirs',
   audiobookDirs: 'audiobookDirs',
+  alignmentDirs: 'alignmentDirs',
 };
 
 /**
@@ -71,6 +71,22 @@ export function libraryRoots(
     ebookDirs: values.ebookDirs.length ? values.ebookDirs : env.ebookDirs,
     audiobookDirs: values.audiobookDirs.length ? values.audiobookDirs : env.audiobookDirs,
   };
+}
+
+/**
+ * Where alignments are saved as files.
+ *
+ * Always at least one, so no caller ever has an "if configured" branch: an
+ * unset list resolves to a folder inside the app's own data directory. That is
+ * enough to keep alignments across a container restart, but not across a
+ * rebuild that discards the volume — which is why the setup wizard asks for a
+ * folder in the library instead, and why this one is the fallback rather than
+ * the recommendation.
+ */
+export function alignmentRoots(db: DB, env: EnvConfig): string[] {
+  const { values } = resolveSettings(db, env);
+  const chosen = values.alignmentDirs.length ? values.alignmentDirs : env.alignmentDirs;
+  return chosen.length ? chosen : [path.join(env.dataDir, 'alignments')];
 }
 
 export function getStoredSettings(db: DB): Partial<Settings> {

@@ -57,14 +57,9 @@ export const DEFAULT_SPARSE_PLAN: SparsePlan = {
  * The settings-level choice, expressed as schedules. `thorough` has no
  * schedule: it decodes every sample.
  */
-export const SPARSE_PRESETS: Record<'fast' | 'careful', SparsePlan> = {
-  fast: { ...DEFAULT_SPARSE_PLAN },
-  careful: { ...DEFAULT_SPARSE_PLAN, windowMs: 10_000, everyMs: 75_000 },
-};
-
-/** Schedule for a settings value, or null for a whole-book decode. */
-export function planFor(precision: 'fast' | 'careful' | 'thorough'): SparsePlan | null {
-  return precision === 'thorough' ? null : SPARSE_PRESETS[precision];
+/** Schedule for a settings value, or null when every sample is decoded. */
+export function planFor(precision: 'standard' | 'exact'): SparsePlan | null {
+  return precision === 'exact' ? null : DEFAULT_SPARSE_PLAN;
 }
 
 /** The first pass: one probe every `everyMs`, from the top of the book. */

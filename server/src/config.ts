@@ -32,6 +32,8 @@ const envSchema = z.object({
   modelsDir: z.string().default('./models'),
   ebookDirs: z.array(z.string()).default([]),
   audiobookDirs: z.array(z.string()).default([]),
+  /** Where alignments are saved as files. The only library folder written to. */
+  alignmentDirs: z.array(z.string()).default([]),
   sessionSecret: z.string().min(16).optional(),
   /** One-time first-run bootstrap token (VX_SETUP_TOKEN / VX_SETUP_TOKEN_FILE). */
   setupToken: z.string().min(8).optional(),
@@ -46,15 +48,11 @@ const envSchema = z.object({
   inlineWorker: z.boolean().default(true),
   jobConcurrency: z.coerce.number().int().min(1).max(8).default(2),
   /**
-   * ONNX intra-op threads for the forced aligner. Measured on an i7-12700T:
-   * RTF 0.39 at one thread, 0.25 at four with four CPUs, and 0.18 at four to six
-   * threads once eight CPUs are available. Past the container's CPU allowance it
-   * gets slower again, so this should track `cpus`, not the host's core count.
+   * Threads the alignment model may use. Past the container's CPU allowance it
+   * gets slower rather than faster, so this should track that allowance and
+   * not the host's core count. Measurements are in docs/alignment.md.
    */
   alignThreads: z.coerce.number().int().min(1).max(32).default(4),
-  transcribeProvider: z.enum(['none', 'fixture', 'whisper-cli']).default('none'),
-  whisperBin: z.string().default(''),
-  whisperModel: z.string().default(''),
   defaultLanguage: z.string().default('en'),
   /** Minutes between automatic library rescans; 0 disables (manual only). */
   scanIntervalMinutes: z.coerce.number().int().min(0).max(10_080).default(60),
@@ -116,6 +114,7 @@ export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): En
     modelsDir: readEnv('VX_MODELS_DIR'),
     ebookDirs: splitDirs(readEnv('VX_EBOOK_DIRS')),
     audiobookDirs: splitDirs(readEnv('VX_AUDIOBOOK_DIRS')),
+    alignmentDirs: splitDirs(readEnv('VX_ALIGNMENT_DIRS')),
     sessionSecret: readEnv('VX_SESSION_SECRET'),
     setupToken: readEnv('VX_SETUP_TOKEN'),
     trustProxy: parseTrustProxy(readEnv('VX_TRUST_PROXY')),
@@ -124,9 +123,6 @@ export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): En
     inlineWorker: bool(readEnv('VX_INLINE_WORKER')),
     jobConcurrency: readEnv('VX_JOB_CONCURRENCY'),
     alignThreads: readEnv('VX_ALIGN_THREADS'),
-    transcribeProvider: readEnv('VX_TRANSCRIBE_PROVIDER'),
-    whisperBin: readEnv('VX_WHISPER_BIN'),
-    whisperModel: readEnv('VX_WHISPER_MODEL'),
     defaultLanguage: readEnv('VX_DEFAULT_LANGUAGE'),
     scanIntervalMinutes: readEnv('VX_SCAN_INTERVAL_MINUTES'),
     proxyAuthHeader: readEnv('VX_PROXY_AUTH_HEADER'),

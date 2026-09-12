@@ -6,21 +6,6 @@
 # binary (@rollup/rollup-linux-*-musl) uninstalled when `npm ci` runs on
 # musl from that lockfile. Do not hard-code a platform Rollup package.
 
-# whisper.cpp CLI (CPU build) so sentence-level alignment works out of the
-# box: mount a ggml model into /models (see docker/versovox-model). Built from
-# a pinned release tag; only the CLI binary + its runtime libs are copied.
-FROM debian:bookworm-slim AS whisper
-ARG WHISPER_CPP_VERSION=v1.9.3
-RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential cmake git ca-certificates \
- && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-RUN git clone --depth 1 --branch "$WHISPER_CPP_VERSION" https://github.com/ggml-org/whisper.cpp.git . \
- && cmake -B build -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
-      -DGGML_NATIVE=OFF -DCMAKE_BUILD_TYPE=Release \
- && cmake --build build --config Release --target whisper-cli -j"$(nproc)" \
- && strip build/bin/whisper-cli
-
 FROM node:26-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -55,7 +40,6 @@ FROM node:26-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg gosu tini wget ca-certificates libgomp1 \
  && rm -rf /var/lib/apt/lists/*
-COPY --from=whisper /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY docker/versovox-model /usr/local/bin/versovox-model
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -63,8 +47,7 @@ ENV NODE_ENV=production \
     VX_CACHE_DIR=/cache \
     VX_MODELS_DIR=/models \
     VX_HOST=0.0.0.0 \
-    VX_PORT=8383 \
-    VX_WHISPER_BIN=/usr/local/bin/whisper-cli
+    VX_PORT=8383
 
 COPY --from=deps /app/node_modules node_modules
 COPY --from=build /app/shared/dist shared/dist
@@ -76,7 +59,7 @@ COPY package.json LICENSE ./
 COPY docker/entrypoint.sh /entrypoint.sh
 # The node base image ships a `node` user at 1000:1000; remove it so
 # `versovox` can take that UID/GID.
-RUN chmod +x /entrypoint.sh /usr/local/bin/versovox-model /usr/local/bin/whisper-cli \
+RUN chmod +x /entrypoint.sh /usr/local/bin/versovox-model \
  && userdel -r node \
  && if getent group node >/dev/null; then groupdel node; fi \
  && groupadd -g 1000 versovox \

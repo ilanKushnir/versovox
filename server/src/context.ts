@@ -46,6 +46,3 @@ export function coversDir(ctx: AppContext): string {
   return path.join(ctx.config.cacheDir, 'covers');
 }
 
-export function transcriptsDir(ctx: AppContext): string {
-  return path.join(ctx.config.cacheDir, 'transcripts');
-}

@@ -2707,3 +2707,119 @@ select.input {
 .settings-page .settings-section {
   scroll-margin-top: 80px;
 }
+
+/* --- Notes & marks ------------------------------------------------------ */
+/* One reader's whole marginalia. Laid out as cards rather than a table
+   because the content is prose of wildly varying length: a one-word note and
+   a paragraph-long quotation have to sit in the same list without either
+   looking broken. */
+.notes-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+  margin-block-end: var(--sp-5);
+}
+.notes-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1 1 260px;
+  color: var(--vx-text-soft);
+}
+.notes-search .input {
+  flex: 1;
+}
+.notes-group {
+  margin-block-end: var(--sp-6);
+}
+.notes-group__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: 16px;
+  font-weight: 650;
+  margin: 0 0 var(--sp-3);
+  padding-block-end: var(--sp-2);
+  border-block-end: 1px solid var(--vx-border);
+}
+.notes-group__author {
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--vx-text-soft);
+}
+.notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+.note-card {
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-2);
+  background: var(--vx-surface-raised);
+  border: 1px solid var(--vx-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.note-card__body {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  background: none;
+  border: 0;
+  padding: var(--sp-3) var(--sp-4);
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  display: grid;
+  gap: 6px;
+}
+.note-card__body:hover {
+  background: color-mix(in srgb, var(--vx-primary) 6%, transparent);
+}
+.note-card__swatch {
+  width: 26px;
+  height: 5px;
+  border-radius: 999px;
+}
+.note-card__quote {
+  margin: 0;
+  font-family: var(--vx-font-reading);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--vx-text);
+}
+.note-card--highlight .note-card__quote {
+  border-inline-start: 3px solid var(--vx-border-strong);
+  padding-inline-start: var(--sp-3);
+}
+.note-card__note {
+  margin: 0;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+.note-card__note--plain {
+  color: var(--vx-text-soft);
+}
+.note-card__meta {
+  font-size: 12px;
+  color: var(--vx-text-soft);
+}
+.note-card__delete {
+  align-self: center;
+  margin-inline-end: var(--sp-2);
+  opacity: 0;
+}
+.note-card:hover .note-card__delete,
+.note-card__delete:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .note-card__delete {
+    opacity: 1;
+  }
+}

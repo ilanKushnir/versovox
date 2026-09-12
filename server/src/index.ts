@@ -8,7 +8,7 @@ import { type AppContext } from './context.js';
 import { startWorker } from './jobs/worker.js';
 import { enqueueJob } from './jobs/queue.js';
 import { compactProgressHistory } from './progress/service.js';
-import { ensureDefaultModel, requeueAlignmentsWaitingFor } from './jobs/handlers.js';
+import { requeueAlignmentsWaitingFor } from './jobs/handlers.js';
 import { pruneLoginThrottle } from './auth/sessions.js';
 import { libraryRoots } from './domain/settings.js';
 
@@ -51,13 +51,12 @@ if (hasUsers && hasRoots()) {
   enqueueJob(db, 'scan', {}, { dedupeKey: 'scan' });
 }
 
-// Speech models: fetch only the default one on a fresh install, and let
-// alignments that were waiting for a model (installed by any route) run.
+// An alignment that stopped because the model was not here yet runs again as
+// soon as it is, however it arrived.
 try {
-  if (hasUsers) ensureDefaultModel(ctx);
   requeueAlignmentsWaitingFor(ctx);
 } catch (err) {
-  ctx.log.error(`Model bootstrap failed: ${(err as Error).message}`);
+  ctx.log.error(`Could not re-queue waiting alignments: ${(err as Error).message}`);
 }
 
 // Periodic rescan so titles added to Calibre/Audiobookshelf/plain folders

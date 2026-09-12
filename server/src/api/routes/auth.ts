@@ -143,7 +143,8 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
       if (body.data.defaultLanguage && !config.envPinned.includes('defaultLanguage')) {
         patch.defaultLanguage = body.data.defaultLanguage;
       }
-      if (body.data.processingMode) patch.processingMode = body.data.processingMode;
+      if (body.data.autoAlign !== undefined) patch.autoAlign = body.data.autoAlign;
+      if (body.data.alignmentDirs) patch.alignmentDirs = body.data.alignmentDirs;
       if (Object.keys(patch).length) saveSettings(db, patch);
       db.exec('COMMIT');
     } catch (err) {

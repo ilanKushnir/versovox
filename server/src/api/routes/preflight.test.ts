@@ -73,8 +73,15 @@ describe('preflight', () => {
       'disk',
       'writable',
       'libraries',
-      'whisper',
     ]);
+    // The wizard renders a check by its state and offers the fix as the next
+    // step, so a stateless check or an unactionable failure is a dead end.
+    for (const c of body.checks) {
+      expect(['ok', 'warn', 'fail']).toContain(c.state);
+      if (c.state === 'fail') expect(c.fix).toBeTruthy();
+    }
+    // The id is what the download job and the client's progress poll key on.
+    expect(body.aligner.id).toBe('alignment-model');
     // No model was downloaded in this temp dir, and a missing aligner is a
     // warning rather than a failure: setup can continue without it.
     expect(body.aligner.installed).toBe(false);

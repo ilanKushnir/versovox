@@ -8,9 +8,6 @@ import { formatBytes, formatDate, formatSpan } from '../lib/format';
 import { storageEstimate } from '../offline/downloads';
 import {
   alignerModel,
-  languageIdModel,
-  speechModels,
-  transcriptionModels,
   type ModelInfo,
   type ModelsResponse,
 } from '../lib/types';
@@ -42,6 +39,7 @@ interface SettingsResponse {
     modelsDir: string;
     ebookDirs: string[];
     audiobookDirs: string[];
+    alignmentDirs: string[];
   };
   precedence: string;
 }
@@ -63,7 +61,6 @@ export function SettingsPage() {
   // panel and the model cards can never disagree about what is installed.
   const { models, reload: reloadModels } = useModels();
   const aligner = alignerModel(models);
-  const speechInstalled = speechModels(models).filter((m) => m.installed).length;
 
   const load = useCallback(async () => {
     try {
@@ -130,15 +127,7 @@ export function SettingsPage() {
   }
 
   const s = { ...data.settings, ...draft };
-  // Readiness depends on the engine in force: forced alignment needs only the
-  // aligner, and the whisper engine does not care whether the aligner is on
-  // disk at all. The other engines compute nothing, so nothing is missing.
-  const modelsReady =
-    s.alignEngine === 'forced-align'
-      ? Boolean(aligner?.installed)
-      : s.alignEngine === 'whisper-cli'
-        ? speechInstalled > 0
-        : true;
+  const modelsReady = Boolean(aligner?.installed);
   const pinned = (k: string) => data.envPinned.includes(k);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
@@ -186,29 +175,24 @@ export function SettingsPage() {
                 ? `${stats.jobsQueued} waiting`
                 : stats.jobsFailed > 0
                   ? `${stats.jobsFailed} failed`
-                  : (MODE_LABEL[s.processingMode] ?? 'Ready')
+                  : s.autoAlign
+                    ? 'Aligning new matches'
+                    : 'Manual'
             }
             busy={stats.jobsRunning > 0}
             warn={stats.jobsRunning === 0 && stats.jobsFailed > 0}
           />
           <DashCard
-            to="#speech-models"
-            label="Models"
+            to="#alignment"
+            label="Alignment"
             value={!models ? '—' : modelsReady ? 'Ready' : 'Set up'}
             unit={modelsReady ? 'to align' : 'needed'}
             detail={
-              // A count of speech models is only news to someone running the
-              // whisper engine; on the default engine the honest headline is
-              // that one model covers every language.
               !models
-                ? 'Catalog unavailable'
-                : s.alignEngine === 'forced-align'
-                  ? aligner?.installed
-                    ? 'One aligner, every language'
-                    : 'The forced aligner is not installed yet'
-                  : s.alignEngine === 'whisper-cli'
-                    ? `${speechInstalled} speech model${speechInstalled === 1 ? '' : 's'} installed`
-                    : 'This engine downloads nothing'
+                ? 'Unavailable'
+                : modelsReady
+                  ? 'Model installed'
+                  : 'Model not installed yet'
             }
             warn={Boolean(models) && !modelsReady}
           />
@@ -234,8 +218,8 @@ export function SettingsPage() {
       <section className="settings-section" aria-label="Libraries" id="libraries">
         <h2>Libraries</h2>
         <p className="settings-section__lede">
-          Folders are only ever read — Versovox never writes into them. New titles are picked up by
-          the periodic rescan or right away with the button below.
+          Your book folders are only ever read. New titles are picked up by the periodic rescan, or
+          right away with the button below.
         </p>
         {isAdmin ? (
           <LibrariesEditor
@@ -252,18 +236,12 @@ export function SettingsPage() {
               <dt>Audiobook folders</dt>
               <dd>{data.paths.audiobookDirs.join(', ') || 'Not configured'}</dd>
             </div>
+            <div className="kv">
+              <dt>Alignment folder</dt>
+              <dd>{data.paths.alignmentDirs.join(', ') || 'Not configured'}</dd>
+            </div>
           </dl>
         )}
-        <dl style={{ margin: 'var(--sp-4) 0 0' }}>
-          <div className="kv">
-            <dt>App data</dt>
-            <dd>{data.paths.dataDir}</dd>
-          </div>
-          <div className="kv">
-            <dt>Cache</dt>
-            <dd>{data.paths.cacheDir}</dd>
-          </div>
-        </dl>
         {isAdmin && (
           <div style={{ marginBlockStart: 'var(--sp-4)' }}>
             <button className="btn btn--secondary" onClick={() => void rescan()}>
@@ -288,193 +266,19 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <SpeechModelsSection
+      <AlignmentSection
         settings={s}
         isAdmin={isAdmin}
         pinned={pinned}
         models={models}
         reload={reloadModels}
-        onProviderChange={(v) => void save({ transcribeProvider: v })}
-        onLanguageModel={(code, modelId) =>
-          void save({ languageModels: { ...s.languageModels, [code]: modelId } })
-        }
-        onAutoDefault={(v) => void save({ autoDownloadDefaultModel: v })}
+        onSave={(patch) => void save(patch)}
+        onDraft={set}
+        dirty={dirty}
+        saving={saving}
+        onCommit={() => void save()}
+        speedRatio={s.alignSpeedRatio}
       />
-
-      <section className="settings-section" aria-label="Processing" id="processing">
-        <h2>Processing</h2>
-        <p className="settings-section__lede">
-          Listening to the narration is the expensive part. Titles are matched on their metadata
-          first; with forced alignment the run itself is the edition check, because a different
-          edition produces no anchors and the pair is handed back to you undecided. These options
-          decide what happens once a pair looks right.
-          {s.transcribeSpeedRatio > 0 && (
-            <>
-              {' '}
-              Measured on this server: {formatSpan((6 * 3600_000) / s.transcribeSpeedRatio)} of
-              computing for a six-hour audiobook.
-            </>
-          )}
-        </p>
-        <div className="role-picker" role="radiogroup" aria-label="Processing mode">
-          {
-            // Three modes only make sense for the whisper engine, where a cheap
-            // two-clip check runs before hours of transcription and there is
-            // something to stop between. Forced alignment does the check and
-            // the work in one short pass, so "verify then ask" and "do it all"
-            // are the same instruction — offering both would be a lie. Under
-            // that engine we show two, mapping the automatic one to 'verify'.
-            (
-              (s.alignEngine === 'forced-align'
-                ? [
-                    [
-                      'verify',
-                      'Align strong matches automatically',
-                      'A confident metadata match is aligned on its own, one book at a time. Anything less certain waits for you.',
-                    ],
-                    [
-                      'manual',
-                      'Do nothing without me',
-                      'Nothing is aligned until you press Start on a pair.',
-                    ],
-                  ]
-                : [
-                    [
-                      'verify',
-                      'Verify, then ask me',
-                      'Check and link strong matches automatically; wait before the long transcription.',
-                    ],
-                    [
-                      'auto',
-                      'Do everything automatically',
-                      'Strong matches are transcribed on their own, one at a time.',
-                    ],
-                    [
-                      'manual',
-                      'Do nothing without me',
-                      'Every check and every alignment is started by hand.',
-                    ],
-                  ]) as [Settings['processingMode'], string, string][]
-            ).map(([value, label, blurb]) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={modeMatches(s, value)}
-                disabled={!isAdmin}
-                className={`role-picker__opt ${modeMatches(s, value) ? 'is-on' : ''}`}
-                onClick={() => void save({ processingMode: value })}
-              >
-                <strong>{label}</strong>
-                <span>{blurb}</span>
-              </button>
-            ))
-          }
-        </div>
-        <h3 className="settings-h3">Alignment engine</h3>
-        <AlignmentEngine
-          settings={s}
-          isAdmin={isAdmin}
-          models={models}
-          onEngine={(v) => void save({ alignEngine: v })}
-          onPrecision={(v) => void save({ alignPrecision: v })}
-        />
-        <h3 className="settings-h3">Languages and limits</h3>
-        <div className="field">
-          <label htmlFor="set-lang">
-            Default language {pinned('defaultLanguage') && <em>(env)</em>}
-          </label>
-          <input
-            id="set-lang"
-            className="input"
-            disabled={pinned('defaultLanguage') || !isAdmin}
-            value={s.defaultLanguage}
-            maxLength={8}
-            style={{ maxWidth: 120 }}
-            onChange={(e) => set('defaultLanguage', e.target.value)}
-          />
-          <span className="hint">
-            The last resort: used only when the ebook declares no language, the audio tags carry
-            none, and no detection ran or it was unsure. Each pair can override its narration
-            language on the Pairing page.
-          </span>
-        </div>
-        <div className="field">
-          <label htmlFor="set-conc">
-            Background job concurrency {pinned('jobConcurrency') && <em>(env)</em>}
-          </label>
-          <input
-            id="set-conc"
-            className="input"
-            type="number"
-            min={1}
-            max={8}
-            disabled={pinned('jobConcurrency') || !isAdmin}
-            value={s.jobConcurrency}
-            style={{ maxWidth: 120 }}
-            onChange={(e) => set('jobConcurrency', Number(e.target.value))}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="set-thresh">Auto-pair threshold</label>
-          <input
-            id="set-thresh"
-            className="input"
-            type="number"
-            min={0.5}
-            max={1}
-            step={0.01}
-            disabled={!isAdmin}
-            value={s.autoPairThreshold}
-            style={{ maxWidth: 120 }}
-            onChange={(e) => set('autoPairThreshold', Number(e.target.value))}
-          />
-          <span className="hint">
-            Pairs scoring below this always wait for manual review. Raising it is safer.
-          </span>
-        </div>
-        {(s.alignEngine === 'whisper-cli' || s.transcribeProvider === 'whisper-cli') && (
-          <details className="settings-advanced">
-            <summary>Advanced: custom whisper paths</summary>
-            <div className="field">
-              <label htmlFor="set-bin">
-                Whisper binary path {pinned('whisperBin') && <em>(env)</em>}
-              </label>
-              <input
-                id="set-bin"
-                className="input"
-                disabled={pinned('whisperBin') || !isAdmin}
-                value={s.whisperBin}
-                placeholder="/usr/local/bin/whisper-cli"
-                onChange={(e) => set('whisperBin', e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="set-model">
-                Fallback model path {pinned('whisperModel') && <em>(env)</em>}
-              </label>
-              <input
-                id="set-model"
-                className="input"
-                disabled={pinned('whisperModel') || !isAdmin}
-                value={s.whisperModel}
-                placeholder="/models/ggml-custom.bin"
-                onChange={(e) => set('whisperModel', e.target.value)}
-              />
-              <span className="hint">
-                Only used when no catalog model is installed for a language. Must live inside the
-                models directory.
-              </span>
-            </div>
-          </details>
-        )}
-        {dirty && (
-          <button className="btn" onClick={() => void save()} disabled={saving}>
-            <IconCheck size={16} /> {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        )}
-        <p style={{ color: 'var(--vx-text-soft)', fontSize: 13 }}>{data.precedence}</p>
-      </section>
 
       <section className="settings-section" aria-label="Offline storage" id="offline">
         <h2>Offline storage</h2>
@@ -723,12 +527,6 @@ function AccountSelfService({ via }: { via: string }) {
   );
 }
 
-const MODE_LABEL: Record<string, string> = {
-  auto: 'Runs unattended',
-  verify: 'Verifies, then asks',
-  manual: 'Nothing without you',
-};
-
 /**
  * One number with its meaning, linking to the section or page that explains
  * it. Anchors scroll within Settings; paths navigate.
@@ -774,16 +572,6 @@ function DashCard({
   );
 }
 
-/**
- * Which radio is lit. Under forced alignment a stored 'auto' means the same
- * thing as 'verify', so it must light the automatic option rather than
- * silently showing nothing selected.
- */
-function modeMatches(s: Settings, value: Settings['processingMode']): boolean {
-  if (s.processingMode === value) return true;
-  return s.alignEngine === 'forced-align' && s.processingMode === 'auto' && value === 'verify';
-}
-
 function jobLabel(type: string): string {
   switch (type) {
     case 'scan':
@@ -806,208 +594,188 @@ function jobLabel(type: string): string {
 /* ---------------------------------------------------- alignment engine */
 
 /** The engines, in the order someone choosing one should consider them. */
-const ENGINES: [Settings['alignEngine'], string, string][] = [
-  [
-    'forced-align',
-    'Forced alignment (recommended)',
-    'Listens to the narration and pins it to the words your ebook already contains. One download covers every language, and it is several times faster than transcribing because it never has to work out which words were said.',
-  ],
-  [
-    'whisper-cli',
-    'Transcribe with whisper',
-    'Writes the whole audiobook out as text first, then matches that text to the book. Needs a speech model per language, is several times slower, and is worth keeping for a book forced alignment cannot handle.',
-  ],
-  [
-    'fixture',
-    'Sidecar transcripts',
-    'Reads transcript files you place next to the audio and computes nothing on this server. A sidecar wins wherever one exists, whichever engine is selected.',
-  ],
-  [
-    'none',
-    'Off',
-    'No timings are produced at all. Books stay readable and listenable; only sentence-exact switching is lost.',
-  ],
-];
-
 /**
- * How much of the narration is actually decoded. The timeline is built from
- * points where the audio and the text provably agree, and those are cheap to
- * find in samples — so the honest framing is not "quality" but how often it
- * stops to listen, and what that buys.
+ * Alignment: four controls, in the order the questions arise. Is the model
+ * here, does it run by itself, how closely does it listen, and what language
+ * should it assume when a book does not say.
+ *
+ * The rule this section is written to: describe a CHOICE and its CONSEQUENCE,
+ * never a mechanism the reader cannot choose between.
  */
+
+/** Two outcomes, not two settings. Anything finer is a parameter, not a choice. */
 const PRECISIONS: [Settings['alignPrecision'], string, string][] = [
   [
-    'fast',
-    'Sample the narration (recommended)',
-    'Listens for a few seconds every couple of minutes, then goes back over anything that looks off. A six-hour audiobook takes minutes instead of an hour, and switching still lands on the right paragraph.',
+    'standard',
+    'Standard',
+    'A few minutes for a six-hour audiobook. Switching lands on the right paragraph.',
   ],
   [
-    'careful',
-    'Sample twice as often',
-    'Roughly double the time, for books that are cut up a lot — dense chapter breaks, interviews, verse, or anything with long pauses.',
-  ],
-  [
-    'thorough',
-    'Listen to every second',
-    'Sentence-perfect timings at around fifteen times the cost — hours per book. Worth it only if you read along with the narration word by word.',
+    'exact',
+    'Sentence-perfect',
+    'Hours per book instead of minutes. Worth it only if you follow the narration word by word on the page.',
   ],
 ];
 
-/**
- * The primary alignment control, with an honest readiness line underneath it:
- * forced alignment needs its model AND the native ONNX runtime, and a server
- * missing either should say so here rather than at the end of a queued job.
- */
-function AlignmentEngine({
+function AlignmentSection({
   settings,
   isAdmin,
+  pinned,
   models,
-  onEngine,
-  onPrecision,
+  reload,
+  onSave,
+  onDraft,
+  dirty,
+  saving,
+  onCommit,
+  speedRatio,
 }: {
   settings: Settings;
   isAdmin: boolean;
+  pinned: (k: string) => boolean;
   models: ModelsResponse | null;
-  onEngine: (v: Settings['alignEngine']) => void;
-  onPrecision: (v: Settings['alignPrecision']) => void;
+  reload: () => Promise<void>;
+  onSave: (patch: Partial<Settings>) => void;
+  onDraft: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
+  dirty: boolean;
+  saving: boolean;
+  onCommit: () => void;
+  speedRatio: number;
 }) {
-  const aligner = alignerModel(models);
+  const toast = useToast();
+  const model = alignerModel(models);
   const runtime = models?.alignerRuntime ?? null;
+
+  const download = async () => {
+    if (!model) return;
+    try {
+      await api(`/api/models/${model.id}/download`, { method: 'POST' });
+      toast.show('Downloading');
+      await reload();
+    } catch {
+      toast.show('Could not start the download (admin only)');
+    }
+  };
+  const remove = async () => {
+    if (!model) return;
+    try {
+      await api(`/api/models/${model.id}`, { method: 'DELETE' });
+      toast.show('Removed');
+      await reload();
+    } catch {
+      toast.show('Could not remove it (admin only)');
+    }
+  };
+
   return (
-    <>
-      <div className="role-picker" role="radiogroup" aria-label="Alignment engine">
-        {ENGINES.map(([value, label, blurb]) => (
+    <section className="settings-section" aria-label="Alignment" id="alignment">
+      <h2>Alignment</h2>
+      <p className="settings-section__lede">
+        Lining a book up with its audiobook is what lets you switch between reading and listening
+        at the same place. It happens once per book, here on this server — no audio, text or
+        metadata ever leaves it.
+      </p>
+
+      {model && (
+        <SoloModelCard
+          model={model}
+          isAdmin={isAdmin}
+          cta="Download"
+          licenceNote="Fine for your own library, not for a paid service. Everything else in Versovox is AGPL-3.0."
+          onDownload={() => void download()}
+          onRemove={() => void remove()}
+        />
+      )}
+      {models && !model && (
+        <div className="banner banner--error" role="alert">
+          <IconAlert size={16} />
+          <span className="grow">This server&rsquo;s catalog is out of date — update Versovox.</span>
+        </div>
+      )}
+      {model?.installed && runtime && !runtime.available && (
+        <div className="banner banner--error" role="alert">
+          <IconAlert size={16} />
+          <span className="grow">
+            The model is installed but its runtime did not load, so nothing can be aligned. The
+            Docker image includes it; on other installs see docs/self-hosting.md.
+            {runtime.error ? (
+              <span style={{ display: 'block', fontSize: 12.5, opacity: 0.85 }}>
+                {runtime.error}
+              </span>
+            ) : null}
+          </span>
+        </div>
+      )}
+
+      <h3 className="settings-h3">When it runs</h3>
+      <label className="rs-toggle" style={{ maxWidth: 620 }}>
+        <span>
+          Align new matches automatically
+          <span className="hint" style={{ display: 'block' }}>
+            {speedRatio > 0
+              ? `About ${formatSpan((6 * 3600_000) / speedRatio)} for a six-hour audiobook on this server. One book at a time.`
+              : 'One book at a time, in the background. Off means nothing runs until you press Start on a book.'}
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          role="switch"
+          disabled={!isAdmin}
+          checked={settings.autoAlign}
+          onChange={(e) => onSave({ autoAlign: e.target.checked })}
+        />
+      </label>
+
+      <h3 className="settings-h3">How closely it listens</h3>
+      <div className="role-picker" role="radiogroup" aria-label="How closely it listens">
+        {PRECISIONS.map(([value, label, blurb]) => (
           <button
             key={value}
             type="button"
             role="radio"
-            aria-checked={settings.alignEngine === value}
+            aria-checked={settings.alignPrecision === value}
             disabled={!isAdmin}
-            className={`role-picker__opt ${settings.alignEngine === value ? 'is-on' : ''}`}
-            onClick={() => onEngine(value)}
+            className={`role-picker__opt ${settings.alignPrecision === value ? 'is-on' : ''}`}
+            onClick={() => onSave({ alignPrecision: value })}
           >
             <strong>{label}</strong>
             <span>{blurb}</span>
           </button>
         ))}
       </div>
+      <p className="settings-section__lede">
+        Switching from reading to listening always lands a little <em>behind</em> where you were,
+        never ahead — so a switch never plays you a sentence you have not read yet.
+      </p>
 
-      {settings.alignEngine === 'forced-align' && models && (
-        <>
-          {!aligner ? (
-            <div className="banner banner--error" role="alert">
-              <IconAlert size={16} />
-              <span className="grow">
-                This server&rsquo;s model catalog has no forced aligner. Update Versovox, or pick
-                another engine above.
-              </span>
-            </div>
-          ) : !aligner.installed ? (
-            <div className="banner banner--action">
-              <IconDownload size={16} />
-              <span className="grow">
-                The aligner model is not installed yet — a single {formatBytes(aligner.sizeBytes)}{' '}
-                download that covers every language. Alignment jobs wait for it and start on their
-                own once it arrives.
-              </span>
-              <a className="btn btn--secondary" href="#speech-models">
-                Get the aligner
-              </a>
-            </div>
-          ) : runtime && !runtime.available ? (
-            <div className="banner banner--error" role="alert">
-              <IconAlert size={16} />
-              <span className="grow">
-                The aligner model is installed, but the ONNX runtime did not load, so forced
-                alignment cannot run. The Docker image ships it; elsewhere install{' '}
-                <code>onnxruntime-node</code> and point <code>VX_ORT_DIR</code> at it.
-                {runtime.error ? (
-                  <span style={{ display: 'block', fontSize: 12.5, opacity: 0.85 }}>
-                    {runtime.error}
-                  </span>
-                ) : null}
-              </span>
-            </div>
-          ) : (
-            <div className="banner">
-              <IconCheck size={16} />
-              <span className="grow">
-                Ready: the aligner model is installed
-                {runtime?.available ? ' and the ONNX runtime is loaded' : ''}. Nothing else is
-                needed for any language.
-              </span>
-            </div>
-          )}
-          {/* A sidecar transcript is exact and free, so the server skips the
-              aligner entirely while sidecars are the transcript source. Say so
-              where the engine is chosen, not in a failed job. */}
-          {settings.transcribeProvider === 'fixture' && (
-            <div className="banner banner--action">
-              <IconAlert size={16} />
-              <span className="grow">
-                Transcript source is set to sidecar files, which always win — forced alignment is
-                skipped while that is the case.
-              </span>
-            </div>
-          )}
-        </>
+      <h3 className="settings-h3">Language</h3>
+      <div className="field">
+        <label htmlFor="set-lang">
+          Fallback language {pinned('defaultLanguage') && <em>(env)</em>}
+        </label>
+        <input
+          id="set-lang"
+          className="input"
+          disabled={pinned('defaultLanguage') || !isAdmin}
+          value={settings.defaultLanguage}
+          maxLength={8}
+          style={{ maxWidth: 120 }}
+          onChange={(e) => onDraft('defaultLanguage', e.target.value)}
+        />
+        <span className="hint">
+          Used only when a book says nothing about its own language and its text is not enough to
+          tell. Any single book can be overridden on the Pairing page.
+        </span>
+      </div>
+      {dirty && (
+        <button className="btn" onClick={onCommit} disabled={saving}>
+          <IconCheck size={16} /> {saving ? 'Saving…' : 'Save changes'}
+        </button>
       )}
-
-      {settings.alignEngine === 'forced-align' && (
-        <>
-          <h3 className="settings-h3">How closely it listens</h3>
-          <div className="role-picker" role="radiogroup" aria-label="Alignment precision">
-            {PRECISIONS.map(([value, label, blurb]) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={settings.alignPrecision === value}
-                disabled={!isAdmin}
-                className={`role-picker__opt ${settings.alignPrecision === value ? 'is-on' : ''}`}
-                onClick={() => onPrecision(value)}
-              >
-                <strong>{label}</strong>
-                <span>{blurb}</span>
-              </button>
-            ))}
-          </div>
-          <p className="settings-section__lede">
-            Switching from reading to listening always lands a little <em>behind</em> where you
-            were, never ahead — the player steps back by however far the aligner says it might be
-            wrong, so a switch never plays you a sentence you have not read yet.
-          </p>
-        </>
-      )}
-
-      {settings.alignEngine === 'whisper-cli' && models && !models.whisperAvailable && (
-        <div className="banner banner--error" role="alert">
-          <IconAlert size={16} /> whisper-cli was not found on this server. The Docker image bundles
-          it; for other installs set VX_WHISPER_BIN.
-        </div>
-      )}
-      {settings.alignEngine === 'whisper-cli' && (
-        <p className="settings-section__lede">
-          This engine needs a speech model for every language you align, and roughly three to four
-          times the computing forced alignment needs for the same book.
-        </p>
-      )}
-      {settings.alignEngine === 'none' && (
-        <p className="settings-section__lede">
-          Timings that already exist are kept; nothing new is computed.
-        </p>
-      )}
-    </>
+    </section>
   );
 }
 
-/* ------------------------------------------------------- speech models */
-
-/**
- * The model catalog, polled while a download is running. Lifted to the page
- * so the overview card, the engine readiness panel and the model cards all
- * read the same answer.
- */
 function useModels(): { models: ModelsResponse | null; reload: () => Promise<void> } {
   const [models, setModels] = useState<ModelsResponse | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1041,334 +809,6 @@ function useModels(): { models: ModelsResponse | null; reload: () => Promise<voi
   return { models, reload };
 }
 
-function SpeechModelsSection({
-  settings,
-  isAdmin,
-  pinned,
-  models,
-  reload,
-  onProviderChange,
-  onLanguageModel,
-  onAutoDefault,
-}: {
-  settings: Settings;
-  isAdmin: boolean;
-  pinned: (k: string) => boolean;
-  models: ModelsResponse | null;
-  reload: () => Promise<void>;
-  onProviderChange: (v: Settings['transcribeProvider']) => void;
-  onLanguageModel: (code: string, modelId: string) => void;
-  onAutoDefault: (v: boolean) => void;
-}) {
-  const toast = useToast();
-
-  const download = async (m: ModelInfo) => {
-    try {
-      await api(`/api/models/${m.id}/download`, { method: 'POST' });
-      toast.show(`Downloading ${m.label}`);
-      await reload();
-    } catch {
-      toast.show('Could not start the download (admin only)');
-    }
-  };
-  const remove = async (m: ModelInfo) => {
-    try {
-      await api(`/api/models/${m.id}`, { method: 'DELETE' });
-      toast.show(`Removed ${m.label}`);
-      await reload();
-    } catch {
-      toast.show('Could not remove the model');
-    }
-  };
-
-  const aligner = alignerModel(models);
-  const byId = new Map(speechModels(models).map((m) => [m.id, m]));
-  const speechInstalled = speechModels(models).filter((m) => m.installed).length;
-  // Grouped by what each model is FOR, not by language: since 0.7.0 the one
-  // aligner covers every language, and the per-language whisper models serve
-  // only the engine someone has to pick on purpose.
-  const langId = languageIdModel(models);
-  const heavy = transcriptionModels(models);
-  const heavyInstalled = heavy.filter((m) => m.installed);
-  const heavyBytes = heavyInstalled.reduce((n, m) => n + (m.installedBytes || m.sizeBytes), 0);
-  const them = heavyInstalled.length === 1 ? 'it' : 'them';
-  const they = heavyInstalled.length === 1 ? 'it' : 'they';
-  // Sizes come from the catalog, never from a number typed into this page.
-  const heavySizes = heavy.map((m) => m.sizeBytes);
-  const heavyRange = heavySizes.length
-    ? `${formatBytes(Math.min(...heavySizes))}–${formatBytes(Math.max(...heavySizes))}`
-    : 'a gigabyte or more';
-  const whisperEngine = settings.alignEngine === 'whisper-cli';
-  // Language detection is the only reason the default engine ever touches
-  // whisper, and even that is gated on the transcript source being this
-  // server — worth saying, because it is the difference between "optional"
-  // and "never used".
-  const canDetectLanguage = settings.transcribeProvider === 'whisper-cli';
-
-  return (
-    <section className="settings-section" aria-label="Models" id="speech-models">
-      <h2>Models</h2>
-      <p className="settings-section__lede">
-        Everything runs <strong>on this server</strong> — no audio, text or metadata ever leaves it.
-        Models are downloaded once from Hugging Face into{' '}
-        <code>{models?.modelsDir ?? 'the models directory'}</code>. Aligning a book needs exactly
-        one of them, whatever its language; everything after that is optional.
-      </p>
-
-      <h3 className="settings-h3">The aligner — one model, every language</h3>
-      {!models ? (
-        <div className="skeleton" style={{ height: 150 }} />
-      ) : !aligner ? (
-        <p className="settings-section__lede">This server&rsquo;s catalog has no forced aligner.</p>
-      ) : (
-        <SoloModelCard
-          model={aligner}
-          isAdmin={isAdmin}
-          badge={settings.alignEngine === 'forced-align' ? 'In use' : null}
-          cta="Download the aligner"
-          licenceNote="Everything else in Versovox is permissively licensed; this model is not, so it is never fetched without the click below."
-          onDownload={() => void download(aligner)}
-          onRemove={() => void remove(aligner)}
-        />
-      )}
-
-      <h3 className="settings-h3">Speech recognition — optional</h3>
-      <p className="settings-section__lede">
-        Whisper models write narration out as words, and <strong>alignment never uses them</strong>{' '}
-        — the aligner above times the words your ebook already contains. Speech recognition is left
-        with two jobs: naming a book&rsquo;s language when neither the ebook nor the audio tags say
-        (rare — nearly every book declares one), and the &ldquo;Transcribe with whisper&rdquo;
-        rescue engine, which someone has to choose deliberately under Processing.
-      </p>
-      {langId && (
-        <>
-          <SoloModelCard
-            model={langId}
-            isAdmin={isAdmin}
-            badge={langId.installed && canDetectLanguage ? 'In use' : null}
-            cta="Download"
-            onDownload={() => void download(langId)}
-            onRemove={() => void remove(langId)}
-          />
-          <p className="settings-section__lede" style={{ marginBlockStart: 'var(--sp-2)' }}>
-            At {formatBytes(langId.sizeBytes)} it is enough for the only job the default engine has
-            for speech recognition. It is consulted only while the transcript source below is set to
-            &ldquo;On this server&rdquo;
-            {canDetectLanguage ? '' : ', which it is not right now'} — and then only for a book that
-            declares no language of its own.
-          </p>
-        </>
-      )}
-      <div className="field">
-        <label htmlFor="set-provider">
-          Transcript source {pinned('transcribeProvider') && <em>(set by environment)</em>}
-        </label>
-        <div className="segmented" id="set-provider" role="group" aria-label="Transcript source">
-          {(
-            [
-              ['whisper-cli', 'On this server'],
-              ['fixture', 'Sidecar transcripts'],
-              ['none', 'Off'],
-            ] as const
-          ).map(([v, label]) => (
-            <button
-              key={v}
-              aria-pressed={settings.transcribeProvider === v}
-              disabled={pinned('transcribeProvider') || !isAdmin}
-              onClick={() => onProviderChange(v)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <span className="hint">
-          Where transcripts come from when one is needed — which, with forced alignment, is only for
-          the language check above. A sidecar transcript is exact and free, so it is always
-          preferred over any engine.
-        </span>
-      </div>
-      {models && !models.whisperAvailable && settings.transcribeProvider === 'whisper-cli' && (
-        <div className="banner banner--error" role="alert">
-          <IconAlert size={16} /> whisper-cli was not found on this server. The Docker image bundles
-          it; for other installs set VX_WHISPER_BIN.
-        </div>
-      )}
-      {!models ? (
-        <div className="skeleton" style={{ height: 120 }} />
-      ) : (
-        <>
-          {/* Folded away on purpose: these are the 0.5–3 GB downloads, and on
-              the default engine not one of them is required. Opened by default
-              only when the whisper engine — the thing that needs them — is the
-              one selected. */}
-          <details className="settings-advanced" open={whisperEngine}>
-            <summary>Show per-language models (Whisper engine only)</summary>
-            <p className="settings-section__lede">
-              One model per language, {heavyRange} each. You need them only if you deliberately run{' '}
-              <strong>Transcribe with whisper</strong> as the alignment engine
-              {whisperEngine ? ', which is what is selected now' : ''}. Hebrew included: the
-              multilingual aligner handles Hebrew as well as English, so the ivrit.ai fine-tune is
-              worth its size only for transcribing Hebrew.
-            </p>
-            <label className="rs-toggle" style={{ maxWidth: 560 }}>
-              <span>
-                Fetch the default speech model automatically when the whisper engine has none
-              </span>
-              <input
-                type="checkbox"
-                role="switch"
-                checked={settings.autoDownloadDefaultModel}
-                disabled={!isAdmin}
-                onChange={(e) => onAutoDefault(e.target.checked)}
-              />
-            </label>
-            {/* The server checks the engine before it acts on this
-                (ensureDefaultModel returns early on forced-align), so the
-                switch must not read like a promise it will keep today. */}
-            <p className="settings-section__lede">
-              {settings.alignEngine === 'forced-align'
-                ? 'The forced aligner never triggers this, so while it is the engine nothing is downloaded on its own — whatever the switch says.'
-                : 'Acts on start-up only, and only while the transcript source is “On this server” with no multilingual model installed.'}
-            </p>
-            <div className="model-grid">
-              {models.languages.map((lang) => {
-                const chosenId = settings.languageModels?.[lang.code] ?? lang.models[0]!;
-                const chosen = byId.get(chosenId) ?? byId.get(lang.models[0]!);
-                if (!chosen) return null;
-                const installedAlt = lang.models
-                  .map((id) => byId.get(id))
-                  .find((m) => m?.installed && m.id !== chosen.id);
-                const dl = chosen.download;
-                return (
-                  <article
-                    className={`model-card ${chosen.installed ? 'is-installed' : ''}`}
-                    key={lang.code}
-                  >
-                    <div className="model-card__head">
-                      <span className="model-card__native" lang={lang.code}>
-                        {lang.native}
-                      </span>
-                      <span className="model-card__lang">{lang.label}</span>
-                      {chosen.installed ? (
-                        <span className="badge badge--sync">
-                          <IconCheck size={11} /> Ready
-                        </span>
-                      ) : dl ? (
-                        <span className="badge">Downloading</span>
-                      ) : installedAlt ? (
-                        <span className="badge">Fallback ready</span>
-                      ) : (
-                        <span className="badge badge--muted">Not installed</span>
-                      )}
-                    </div>
-                    <label className="model-card__select">
-                      <span className="visually-hidden">Model for {lang.label}</span>
-                      <select
-                        className="input"
-                        value={chosen.id}
-                        disabled={!isAdmin}
-                        onChange={(e) => onLanguageModel(lang.code, e.target.value)}
-                      >
-                        {lang.models.map((id) => {
-                          const m = byId.get(id);
-                          if (!m) return null;
-                          return (
-                            <option key={id} value={id}>
-                              {m.label} · {formatBytes(m.sizeBytes)}
-                              {m.installed ? ' · installed' : ''}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </label>
-                    <p className="model-card__note">{chosen.note}</p>
-                    {dl ? (
-                      <div className="model-card__progress">
-                        <span className="progressbar" aria-hidden="true">
-                          <span style={{ width: `${Math.round(dl.progress * 100)}%` }} />
-                        </span>
-                        <span className="model-card__progress-text">
-                          {dl.detail ?? (dl.state === 'queued' ? 'Queued…' : 'Starting…')}
-                        </span>
-                      </div>
-                    ) : chosen.installed ? (
-                      <div className="model-card__actions">
-                        <span className="model-card__size">
-                          {formatBytes(chosen.installedBytes)}
-                        </span>
-                        {isAdmin && (
-                          <button
-                            className="btn btn--ghost"
-                            style={{ minHeight: 36 }}
-                            onClick={() => void remove(chosen)}
-                          >
-                            <IconTrash size={15} /> Remove
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="model-card__actions">
-                        <span className="model-card__size">{formatBytes(chosen.sizeBytes)}</span>
-                        {chosen.lastError && (
-                          <span className="model-card__error" title={chosen.lastError}>
-                            Last attempt failed
-                          </span>
-                        )}
-                        <button
-                          className="btn"
-                          style={{ minHeight: 38 }}
-                          disabled={!isAdmin}
-                          onClick={() => void download(chosen)}
-                        >
-                          <IconDownload size={15} /> {chosen.lastError ? 'Retry' : 'Download'}
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          </details>
-          <p style={{ color: 'var(--vx-text-soft)', fontSize: 13 }}>
-            {whisperEngine ? (
-              <>
-                {speechInstalled} speech model{speechInstalled === 1 ? '' : 's'} installed. With the
-                whisper engine a pair whose language has no installed model fails with a clear
-                message and a download link, and the alignment runs by itself once the model
-                arrives.
-              </>
-            ) : (
-              <>
-                Alignment needs none of these: the aligner covers every language on its own.
-                {heavyInstalled.length > 0 && (
-                  <>
-                    {' '}
-                    {heavyInstalled.length} transcription model
-                    {heavyInstalled.length === 1 ? ' is' : 's are'} installed,{' '}
-                    {formatBytes(heavyBytes)} on disk.{' '}
-                    {canDetectLanguage && !langId?.installed
-                      ? `The only use this engine could make of ${them} is the rare language check above; fetch the small model instead and ${they} can go.`
-                      : `The engine you are running never opens ${them}.`}{' '}
-                    Open the per-language list above to remove {them} and reclaim that space; a
-                    download brings {them} back.
-                  </>
-                )}
-              </>
-            )}
-          </p>
-        </>
-      )}
-    </section>
-  );
-}
-
-/**
- * A model that stands on its own rather than in the per-language grid, because
- * what it is for is not a language: the aligner (one model, every language)
- * and the small language detector. The licence is stated above the download
- * button, never after it — the aligner is the only part of Versovox under a
- * non-permissive one.
- */
 function SoloModelCard({
   model,
   isAdmin,
