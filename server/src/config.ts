@@ -45,6 +45,13 @@ const envSchema = z.object({
   sessionDays: z.coerce.number().int().min(1).max(365).default(30),
   inlineWorker: z.boolean().default(true),
   jobConcurrency: z.coerce.number().int().min(1).max(8).default(2),
+  /**
+   * ONNX intra-op threads for the forced aligner. Measured on an i7-12700T:
+   * RTF 0.39 at one thread, 0.25 at four with four CPUs, and 0.18 at four to six
+   * threads once eight CPUs are available. Past the container's CPU allowance it
+   * gets slower again, so this should track `cpus`, not the host's core count.
+   */
+  alignThreads: z.coerce.number().int().min(1).max(32).default(4),
   transcribeProvider: z.enum(['none', 'fixture', 'whisper-cli']).default('none'),
   whisperBin: z.string().default(''),
   whisperModel: z.string().default(''),
@@ -116,6 +123,7 @@ export function loadConfig(overrides: Partial<Record<string, unknown>> = {}): En
     sessionDays: readEnv('VX_SESSION_DAYS'),
     inlineWorker: bool(readEnv('VX_INLINE_WORKER')),
     jobConcurrency: readEnv('VX_JOB_CONCURRENCY'),
+    alignThreads: readEnv('VX_ALIGN_THREADS'),
     transcribeProvider: readEnv('VX_TRANSCRIBE_PROVIDER'),
     whisperBin: readEnv('VX_WHISPER_BIN'),
     whisperModel: readEnv('VX_WHISPER_MODEL'),

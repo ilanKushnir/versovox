@@ -12,11 +12,29 @@ import path from 'node:path';
  * nothing is bundled in the image and nothing ever leaves the server.
  */
 
+/** One downloadable artefact. Most models are a single file; the CTC aligner is not. */
+export interface ModelFile {
+  /** Path inside VX_MODELS_DIR (may contain a subdirectory). */
+  name: string;
+  url: string;
+  sizeBytes: number;
+}
+
 export interface ModelSpec {
   id: string;
   label: string;
   /** Provider / fine-tune family shown in the UI. */
-  family: 'openai' | 'ivrit-ai';
+  family: 'openai' | 'ivrit-ai' | 'meta';
+  /**
+   * What runtime consumes it. `whisper-ggml` is speech recognition for the
+   * edition probe and the legacy aligner; `ctc-onnx` is the forced aligner,
+   * which needs the ebook text and is the default engine.
+   */
+  kind?: 'whisper-ggml' | 'ctc-onnx';
+  /** Shown before any download, because not every model is permissively licensed. */
+  licence?: string;
+  /** Extra artefacts beyond `file` (vocabularies, configs). */
+  extraFiles?: ModelFile[];
   /** BCP-47 base codes this model is meant for; '*' = multilingual. */
   languages: string[] | '*';
   url: string;
@@ -29,7 +47,30 @@ export interface ModelSpec {
   cost: number;
 }
 
+const MMS_BASE =
+  'https://huggingface.co/onnx-community/mms-300m-1130-forced-aligner-ONNX/resolve/main';
+
 export const MODELS: ModelSpec[] = [
+  {
+    // The default engine. One model aligns every supported language, because
+    // it works on a romanized consonant skeleton rather than on words — which
+    // is also why unvocalized Hebrew costs it almost nothing.
+    id: 'mms-forced-aligner',
+    label: 'MMS forced aligner (all languages)',
+    family: 'meta',
+    kind: 'ctc-onnx',
+    licence: 'CC-BY-NC-4.0 (non-commercial)',
+    languages: '*',
+    url: `${MMS_BASE}/onnx/model_int8.onnx`,
+    file: 'mms-fa/model_int8.onnx',
+    sizeBytes: 317_341_664,
+    extraFiles: [
+      { name: 'mms-fa/vocab.json', url: `${MMS_BASE}/vocab.json`, sizeBytes: 351 },
+      { name: 'mms-fa/config.json', url: `${MMS_BASE}/config.json`, sizeBytes: 2_141 },
+    ],
+    note: 'Aligns the audiobook to the ebook text you already have. One download covers every language, and it is several times faster than transcribing.',
+    cost: 0.3,
+  },
   {
     id: 'large-v3-turbo',
     label: 'Whisper large-v3-turbo',
@@ -104,15 +145,25 @@ export function modelPath(modelsDir: string, spec: ModelSpec): string {
   return path.join(modelsDir, spec.file);
 }
 
+/** Every artefact this model needs, primary first. */
+export function modelFiles(spec: ModelSpec): ModelFile[] {
+  return [
+    { name: spec.file, url: spec.url, sizeBytes: spec.sizeBytes },
+    ...(spec.extraFiles ?? []),
+  ];
+}
+
 export function isInstalled(modelsDir: string, spec: ModelSpec): boolean {
-  try {
-    const st = fs.statSync(modelPath(modelsDir, spec));
-    // A model file is an all-or-nothing artifact: anything below ~90% of the
-    // published size is a truncated download, never a usable model.
-    return st.isFile() && st.size >= spec.sizeBytes * 0.9;
-  } catch {
-    return false;
-  }
+  // A model is an all-or-nothing artifact: every file must be present and no
+  // smaller than ~90% of its published size, or the download was truncated.
+  return modelFiles(spec).every((f) => {
+    try {
+      const st = fs.statSync(path.join(modelsDir, f.name));
+      return st.isFile() && st.size >= f.sizeBytes * 0.9;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export class ModelMissingError extends Error {
@@ -161,6 +212,22 @@ export function resolveModelForLanguage(
 
 /** The one model Versovox may fetch on its own; every other download is a user click. */
 export const DEFAULT_MODEL_ID = 'large-v3-turbo';
+
+/** The forced aligner: the default engine, and the only model most people need. */
+export const ALIGNER_MODEL_ID = 'mms-forced-aligner';
+
+/** Resolve the forced aligner's files, or null when it is not installed yet. */
+export function resolveAligner(
+  modelsDir: string,
+): { spec: ModelSpec; modelPath: string; vocabPath: string } | null {
+  const spec = modelById(ALIGNER_MODEL_ID);
+  if (!spec || !isInstalled(modelsDir, spec)) return null;
+  return {
+    spec,
+    modelPath: path.join(modelsDir, spec.file),
+    vocabPath: path.join(modelsDir, spec.extraFiles![0]!.name),
+  };
+}
 
 /** Any installed multilingual model (for language detection). */
 export function anyMultilingualModel(modelsDir: string): { spec: ModelSpec; path: string } | null {

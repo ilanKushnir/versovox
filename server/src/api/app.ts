@@ -14,6 +14,7 @@ import { registerAnnotationRoutes } from './routes/annotations.js';
 import { registerPairRoutes } from './routes/pairs.js';
 import { registerJobRoutes, registerOfflineRoutes, registerSettingsRoutes } from './routes/misc.js';
 import { registerModelRoutes } from './routes/models.js';
+import { registerPreflightRoutes } from './routes/preflight.js';
 import { registerUserRoutes } from './routes/users.js';
 import { createRequire } from 'node:module';
 
@@ -134,6 +135,7 @@ export function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): FastifyIn
   registerSettingsRoutes(app, ctx);
   registerOfflineRoutes(app, ctx);
   registerModelRoutes(app, ctx);
+  registerPreflightRoutes(app, ctx);
   registerUserRoutes(app, ctx);
 
   // Static web app + SPA fallback (everything not under /api).

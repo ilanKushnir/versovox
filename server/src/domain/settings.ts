@@ -20,6 +20,7 @@ const DEFAULTS: Settings = {
   autoDownloadDefaultModel: true,
   ebookDirs: [],
   audiobookDirs: [],
+  alignEngine: 'forced-align',
   processingMode: 'verify',
   transcribeSpeedRatio: 0,
 };

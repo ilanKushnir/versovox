@@ -130,6 +130,14 @@ is reported honestly instead of a blanket "exact" claim:
   after, and the UI names them rather than silently jumping to an unrelated
   sentence.
 
+Refusals are not rare edge cases and are not a defect. The default forced
+aligner deliberately produces no timing where the narration and the text do
+not both exist — a title page, a copyright notice, a spoken chapter
+announcement, an index — so those regions are explicit gaps and the switch
+says so instead of landing somewhere plausible but wrong. On the audiobook
+the engine was validated against, 830 of 880 sentences had timings
+(docs/alignment.md).
+
 Pair status shows the honest numbers: handoff availability plus the
 percentage of sentences with sentence-exact coverage (the remainder is
 approximate or unavailable). A temporary handoff marker is left after a

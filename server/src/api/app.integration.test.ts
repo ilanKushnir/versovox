@@ -573,7 +573,10 @@ describe('Versovox API', () => {
       const put = await authed({
         method: 'PUT',
         url: '/api/settings',
-        payload: { transcribeProvider: 'whisper-cli' },
+        // This case is about the WHISPER path's structured error, so select that
+        // engine explicitly; the default engine is forced alignment, which
+        // demands a different model (asserted separately below).
+        payload: { transcribeProvider: 'whisper-cli', alignEngine: 'whisper-cli' },
       });
       expect(put.statusCode).toBe(200);
       // Narration language override drives the model choice (Hebrew → ivrit.ai).
@@ -601,6 +604,28 @@ describe('Versovox API', () => {
       expect(dto.lastAlignJob.modelMissing).toMatchObject({
         language: 'he',
         modelId: 'ivrit-large-v3-turbo',
+      });
+
+      // The DEFAULT engine asks for the forced aligner instead — one model for
+      // every language — and says so through the same structured error, so the
+      // "download it" prompt works for either engine.
+      await authed({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { alignEngine: 'forced-align' },
+      });
+      const align2 = await authed({ method: 'POST', url: `/api/pairs/${pair.id}/align` });
+      expect(align2.statusCode).toBe(200);
+      await drainJobs();
+      const afterFa = await authed({ url: `/api/pairs/${pair.id}` });
+      expect(
+        (afterFa.json() as { pair: { lastAlignJob: { modelMissing: unknown } } }).pair.lastAlignJob
+          .modelMissing,
+      ).toMatchObject({ modelId: 'mms-forced-aligner' });
+      await authed({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { alignEngine: 'whisper-cli' },
       });
 
       // Catalog endpoint reports the gap; a fake install re-queues the alignment.

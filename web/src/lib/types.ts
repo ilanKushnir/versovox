@@ -102,7 +102,7 @@ export interface PairDto {
   } | null;
 }
 
-/** Outstanding transcription work, with an estimate measured on this server. */
+/** Outstanding alignment work, with an estimate measured on this server. */
 export interface ProcessingSummary {
   pendingPairs: number;
   pendingAudioMs: number;
@@ -131,7 +131,15 @@ export type { Annotation, BookSummary, Locator };
 export interface ModelInfo {
   id: string;
   label: string;
-  family: 'openai' | 'ivrit-ai';
+  family: 'openai' | 'ivrit-ai' | 'meta';
+  /**
+   * Which runtime consumes it: `ctc-onnx` is the forced aligner (one model,
+   * every language), `whisper-ggml` is speech recognition. Optional because a
+   * server from before forced alignment only ever shipped whisper models.
+   */
+  kind?: 'whisper-ggml' | 'ctc-onnx';
+  /** Present when the licence is not permissive; shown BEFORE the download button. */
+  licence?: string;
   languages: string[] | '*';
   file: string;
   sizeBytes: number;
@@ -143,9 +151,29 @@ export interface ModelInfo {
   lastError: string | null;
 }
 
+/** Result of the server's non-throwing runtime probe (checkCtcEngine). */
+export interface EngineStatus {
+  available: boolean;
+  error?: string | null;
+}
+
 export interface ModelsResponse {
   modelsDir: string;
   whisperAvailable: boolean;
+  /** Whether onnxruntime-node loaded, i.e. whether forced alignment can run at all. */
+  alignerRuntime?: EngineStatus;
   models: ModelInfo[];
   languages: { code: string; label: string; native: string; models: string[] }[];
+}
+
+/** Catalog id of the forced aligner (server: ALIGNER_MODEL_ID). */
+export const ALIGNER_MODEL_ID = 'mms-forced-aligner';
+
+export function alignerModel(models: ModelsResponse | null): ModelInfo | null {
+  return models?.models.find((m) => m.kind === 'ctc-onnx' || m.id === ALIGNER_MODEL_ID) ?? null;
+}
+
+/** Whisper models only — the aligner is presented on its own, not per language. */
+export function speechModels(models: ModelsResponse | null): ModelInfo[] {
+  return (models?.models ?? []).filter((m) => m.kind !== 'ctc-onnx' && m.id !== ALIGNER_MODEL_ID);
 }

@@ -24,19 +24,55 @@ exact two-way switching immediately.
 
 ## Volumes
 
-| Mount                 | Purpose                                                  | Notes                                                                                                 |
-| --------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `/data`               | SQLite database, derived reading indexes, progress       | **Local disk only.** Never place it on SMB/NFS — SQLite in WAL mode is unsafe on network filesystems. |
-| `/cache`              | Covers, transcripts, alignment work                      | Safe to delete; rebuilt on demand.                                                                    |
-| `/models`             | Optional speech model packs (experimental transcription) | Empty unless you use `whisper-cli`.                                                                   |
-| `/library/ebooks`     | Your ebook library                                       | `:ro` — read-only, required posture.                                                                  |
-| `/library/audiobooks` | Your audiobook library                                   | `:ro`                                                                                                 |
+| Mount                 | Purpose                                            | Notes                                                                                                 |
+| --------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `/data`               | SQLite database, derived reading indexes, progress | **Local disk only.** Never place it on SMB/NFS — SQLite in WAL mode is unsafe on network filesystems. |
+| `/cache`              | Covers, transcripts, alignment work                | Safe to delete; rebuilt on demand.                                                                    |
+| `/models`             | Speech and alignment models                        | Holds the 317 MB forced aligner (`mms-fa/`) once downloaded, plus any whisper models you add.         |
+| `/library/ebooks`     | Your ebook library                                 | `:ro` — read-only, required posture.                                                                  |
+| `/library/audiobooks` | Your audiobook library                             | `:ro`                                                                                                 |
 
 Your libraries can be the folders already used by Calibre / Calibre-Web
 Automated (`.../Calibre Library`), Kavita, Audiobookshelf
 (`Author/Title/*.m4b|mp3`), Shelfmark output, or any plain folder tree.
 Versovox detects `.epub` files and `.m4b/.mp3/.m4a/.flac/.ogg/.opus` audio
 (one directory per multi-file book).
+
+## Turning on alignment
+
+Linking editions works out of the box. Computing the timings that make the
+sentence-exact switch possible needs two things, **in this order**:
+
+1. **The aligner model.** Settings → Speech models → _MMS forced aligner
+   (all languages)_ downloads 317 MB into `/models/mms-fa/`. One download
+   covers all ten languages. Its licence is **CC-BY-NC-4.0 —
+   non-commercial**, shown on the card before the download starts; it is the
+   only non-permissive component in the project, so do not install it if you
+   are running Versovox commercially. (The `versovox-model` CLI covers the
+   whisper catalog only; the aligner is a web-UI download, or copy
+   `model_int8.onnx`, `vocab.json` and `config.json` into `/models/mms-fa/`
+   yourself.)
+2. **A provider setting that is not `none`.** `VX_TRANSCRIBE_PROVIDER=none`
+   (the compose default) disables alignment jobs entirely, including the
+   forced aligner — a leftover from the transcription-first design. Set
+   `VX_TRANSCRIBE_PROVIDER=whisper-cli`; the bundled binary is already at
+   `/usr/local/bin/whisper-cli`, and nothing transcribes unless you also
+   choose that engine.
+
+The order matters: on a start with `whisper-cli` set and no multilingual
+model on disk, Versovox fetches the 1.6 GB default whisper model as a
+first-run convenience. An installed aligner counts as a multilingual model
+and suppresses that, and so does turning off "download the default model" in
+Settings → Speech models.
+
+`POST /api/preflight` (and the setup wizard, which calls it) answers "can
+this container actually align a book?" in plain language: ffmpeg/ffprobe, the
+native ONNX runtime, the model, free disk, writable volumes and the library
+roots, each with a concrete detail and a fix.
+
+Then start a pair from the Pairing page. Expect wall clock of roughly
+0.33–0.46× the audio duration on a 4-CPU server. Full detail, including what
+the aligner refuses and why, is in [alignment.md](alignment.md).
 
 ## Users, PUID/PGID, timezone
 
@@ -89,12 +125,19 @@ account there first if you want a break-glass path.
 
 ## Resource and concurrency controls
 
-- `VX_JOB_CONCURRENCY` (default 2) bounds simultaneous transcriptions; scans,
+- `VX_JOB_CONCURRENCY` (default 2) bounds simultaneous alignments; scans,
   indexing, pairing and model downloads run in their own lanes beside them.
   A job interrupted by a container restart is re-queued, not failed.
 - The compose file sets container memory limits; adjust to taste.
-- Alignment/transcription is CPU-bound only if you enable the experimental
-  `whisper-cli` provider; the default install does no heavy compute.
+- **Aligning a book is the only heavy compute here, and it is CPU-bound.**
+  With the default `forced-align` engine, one measured run on a 4-CPU server
+  used wall clock of 0.33–0.46× the audio duration — roughly two to three
+  hours for a six-hour book. Each alignment asks for 2 ONNX threads when
+  concurrency is above 1 and 4 when it is 1, so `VX_JOB_CONCURRENCY=1` on a
+  small box finishes one book sooner than two books slowly. The legacy
+  `whisper-cli` engine is several times more expensive again.
+- Nothing heavy runs until a pair is actually aligned: an idle instance
+  scanning and serving books is cheap.
 - For big libraries, run the dedicated worker:
   `docker compose --profile worker up -d` with `VX_INLINE_WORKER=0` on the
   web service. Both share `/data` (same host volume) safely.
@@ -137,6 +180,9 @@ recorded in `schema_migrations`). Downgrades are not supported — restore the
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Library is empty after setup                              | Check the `:ro` mounts exist inside the container (`docker compose exec versovox ls /library/ebooks`) and rescan from Settings.                                                                                                                                                                                                                |
 | Books stuck in "Indexing…"                                | See Settings → Background activity for the job error; `docker compose logs versovox`.                                                                                                                                                                                                                                                          |
+| Nothing ever starts aligning                              | `VX_TRANSCRIBE_PROVIDER` is `none`, which switches off alignment jobs entirely. See "Turning on alignment" above.                                                                                                                                                                                                                              |
+| Alignment fails with "model is not installed"             | Download the MMS forced aligner in Settings → Speech models; the pairing page turns the error into a one-click download and re-queues the alignment when the file lands.                                                                                                                                                                       |
+| Pairing says the narration is not the same work           | The aligner found almost no matching passages. That usually means an abridged, dramatized or differently translated edition — a correct pair produces hundreds of anchors per thousand characters. Confirm the pair manually only if you are sure.                                                                                             |
 | A book shows "Indexing failed"                            | The EPUB may be malformed or DRM-protected. Versovox does not remove DRM.                                                                                                                                                                                                                                                                      |
 | "Add to Home Screen" gives a browser shortcut, not an app | You are not on HTTPS. See the reverse-proxy section.                                                                                                                                                                                                                                                                                           |
 | m4b won't play in Firefox/Chromium                        | AAC decoding is missing from some open-source browser builds. Chrome, Edge and Safari play m4b/m4a; mp3/flac/ogg play everywhere.                                                                                                                                                                                                              |

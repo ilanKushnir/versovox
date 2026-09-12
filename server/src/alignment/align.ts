@@ -1,5 +1,10 @@
-import { type AlignmentGap, type AlignmentSegment } from '@versovox/shared';
 import { stringSimilarity } from '../util/text.js';
+import {
+  segmentsFromTimings,
+  type AlignerResult,
+  type EbookSentenceInput,
+  type RawTiming,
+} from './timings.js';
 
 /**
  * Deterministic monotonic text/transcript aligner.
@@ -13,22 +18,16 @@ import { stringSimilarity } from '../util/text.js';
  *     subsequence.
  *  2. Between consecutive anchors, run a banded dynamic-programming token
  *     alignment (match / fuzzy-match / gap), preserving monotonic order.
- *  3. Derive sentence start/end times from their first/last aligned words.
- *  4. Score per-sentence confidence from lexical match rate and timing
- *     continuity. Low-confidence sentences with aligned neighbours are
- *     interpolated (marked as such, never claimed exact); larger holes
- *     become explicit gaps.
+ *  3. Derive sentence start/end times from their first/last aligned words and
+ *     score each sentence from its lexical match rate.
  *
- * The output is monotonic by construction and never invents timings across
- * long low-confidence regions.
+ * Stage 4 — monotonicity, interpolation, gaps, and the decision about what may
+ * be called `exact` — is not this module's business: it is shared with the CTC
+ * aligner and lives in timings.ts, the only place an `AlignmentSegment` is
+ * built. This file reports evidence; that file decides what is claimed.
  */
 
-export interface EbookSentenceInput {
-  sentenceId: string;
-  spineIdx: number;
-  sentenceOrd: number;
-  tokens: string[];
-}
+export type { AlignerResult, EbookSentenceInput } from './timings.js';
 
 export interface TranscriptWord {
   w: string;
@@ -36,17 +35,21 @@ export interface TranscriptWord {
   e: number; // end ms
 }
 
-export interface AlignerResult {
-  segments: AlignmentSegment[];
-  gaps: AlignmentGap[];
-  coverage: number;
-  meanConfidence: number;
-}
-
 const SHINGLE = 4;
 const FUZZY_SIM = 0.8;
-const MIN_EXACT_CONFIDENCE = 0.6;
-const INTERPOLATE_MAX_RUN = 3;
+
+/** Above this share of word-for-word matches the sentence may claim `exact`. */
+const EXACT_RATE = 0.85;
+
+/**
+ * Lexical evidence to confidence. The 0.15 floor keeps a sentence that matched
+ * nothing from scoring zero (the words were somewhere; we just could not pin
+ * them), and exact matches are weighted on top of plain matches so a fuzzy
+ * region can never reach the sentence-exact band on its own.
+ */
+function lexicalConfidence(matchRate: number, exactRate: number): number {
+  return Math.min(1, 0.15 + 0.55 * matchRate + 0.3 * exactRate);
+}
 
 export function alignBook(sentences: EbookSentenceInput[], words: TranscriptWord[]): AlignerResult {
   const flatTokens: { tok: string; sentIdx: number }[] = [];
@@ -79,15 +82,12 @@ export function alignBook(sentences: EbookSentenceInput[], words: TranscriptWord
     alignSpan(flatTokens, words, a0, a1, b0, b1, tokenWord, tokenExact);
   }
 
-  // --- 3+4. per-sentence timing + confidence ---
-  const segments: AlignmentSegment[] = [];
-  const raw: {
-    sent: EbookSentenceInput;
-    startMs: number | null;
-    endMs: number | null;
-    matchRate: number;
-    exactRate: number;
-  }[] = [];
+  // --- 3. per-sentence timing + lexical evidence ---
+  // A sentence spans from the first to the last transcript word any of its
+  // tokens matched; unmatched tokens in between are simply covered by that
+  // span. Sentences that matched nothing stay null for the timing layer to
+  // interpolate or turn into a gap.
+  const timings: (RawTiming | null)[] = [];
   let cursor = 0;
   for (const s of sentences) {
     const n = s.tokens.length;
@@ -105,95 +105,24 @@ export function alignBook(sentences: EbookSentenceInput[], words: TranscriptWord
       }
     }
     cursor += n;
-    raw.push({
-      sent: s,
-      startMs: first !== null ? words[first]!.s : null,
-      endMs: last !== null ? words[last]!.e : null,
-      matchRate: n ? matched / n : 0,
-      exactRate: n ? exact / n : 0,
+    if (first === null || last === null) {
+      timings.push(null);
+      continue;
+    }
+    const matchRate = n ? matched / n : 0;
+    const exactRate = n ? exact / n : 0;
+    timings.push({
+      startMs: words[first]!.s,
+      endMs: words[last]!.e,
+      score: lexicalConfidence(matchRate, exactRate),
+      exact: exactRate > EXACT_RATE,
     });
   }
 
-  // Enforce monotonic non-overlapping times; drop matches that violate order
-  // (can happen at fuzzy region borders).
-  let lastEnd = -1;
-  for (const r of raw) {
-    if (r.startMs === null || r.endMs === null) continue;
-    if (r.startMs < lastEnd - 1500) {
-      r.startMs = null;
-      r.endMs = null;
-      r.matchRate = 0;
-      continue;
-    }
-    if (r.endMs < r.startMs) r.endMs = r.startMs;
-    lastEnd = r.endMs;
-  }
-
-  // Interpolate short unmatched runs between confident neighbours.
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i]!.startMs !== null) continue;
-    let j = i;
-    while (j < raw.length && raw[j]!.startMs === null) j++;
-    const prev = i > 0 ? raw[i - 1] : null;
-    const next = j < raw.length ? raw[j] : null;
-    const run = j - i;
-    if (prev?.endMs != null && next?.startMs != null && run <= INTERPOLATE_MAX_RUN) {
-      const total = raw.slice(i, j).reduce((acc, r) => acc + Math.max(1, r.sent.tokens.length), 0);
-      let t = prev.endMs;
-      const span = Math.max(0, next.startMs - prev.endMs);
-      for (let k = i; k < j; k++) {
-        const w = Math.max(1, raw[k]!.sent.tokens.length) / total;
-        raw[k]!.startMs = Math.round(t);
-        t += span * w;
-        raw[k]!.endMs = Math.round(t);
-        raw[k]!.matchRate = -1; // marker: interpolated
-      }
-    }
-    i = j - 1;
-  }
-
-  const gaps: AlignmentGap[] = [];
-  let prevEnd = 0;
-  for (const r of raw) {
-    if (r.startMs === null || r.endMs === null) continue;
-    const interpolated = r.matchRate === -1;
-    const confidence = interpolated
-      ? 0.35
-      : Math.min(1, 0.15 + 0.55 * r.matchRate + 0.3 * r.exactRate);
-    const source = interpolated ? 'interpolated' : r.exactRate > 0.85 ? 'exact' : 'fuzzy';
-    if (!interpolated && confidence < MIN_EXACT_CONFIDENCE - 0.25) {
-      // Too weak to trust at all: leave unaligned (becomes a gap).
-      continue;
-    }
-    if (r.startMs - prevEnd > 15_000) {
-      gaps.push({ fromMs: prevEnd, toMs: r.startMs, reason: 'narration-only' });
-    }
-    segments.push({
-      sentenceId: r.sent.sentenceId,
-      spineIdx: r.sent.spineIdx,
-      sentenceOrd: r.sent.sentenceOrd,
-      startMs: Math.round(r.startMs),
-      endMs: Math.round(r.endMs),
-      confidence: Math.round(confidence * 1000) / 1000,
-      source,
-    });
-    prevEnd = r.endMs;
-  }
-  const audioEnd = words[words.length - 1]!.e;
-  if (audioEnd - prevEnd > 15_000) {
-    gaps.push({ fromMs: prevEnd, toMs: audioEnd, reason: 'narration-only' });
-  }
-
-  const coverage = sentences.length ? segments.length / sentences.length : 0;
-  const meanConfidence = segments.length
-    ? segments.reduce((a, s) => a + s.confidence, 0) / segments.length
-    : 0;
-  return {
-    segments,
-    gaps,
-    coverage: Math.round(coverage * 1000) / 1000,
-    meanConfidence: Math.round(meanConfidence * 1000) / 1000,
-  };
+  // --- 4. shared timing + honesty layer ---
+  return segmentsFromTimings(sentences, (i) => timings[i] ?? null, {
+    audioMs: words[words.length - 1]!.e,
+  });
 }
 
 /** Unique-shingle anchors + longest increasing subsequence for monotonicity. */

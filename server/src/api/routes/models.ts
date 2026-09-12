@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { type FastifyInstance } from 'fastify';
+import { checkCtcEngine } from '../../alignment/ctc/emissions.js';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';
 import { requeueAlignmentsWaitingFor } from '../../jobs/handlers.js';
@@ -8,6 +10,7 @@ import {
   LANGUAGES,
   modelById,
   modelPath,
+  modelFiles,
   MODELS,
 } from '../../transcription/models.js';
 
@@ -52,6 +55,10 @@ export function registerModelRoutes(app: FastifyInstance, ctx: AppContext): void
     return {
       modelsDir: config.modelsDir,
       whisperAvailable: Boolean(config.whisperBin) && fs.existsSync(config.whisperBin),
+      // Whether the ONNX runtime actually loaded. A model on disk is not enough:
+      // the settings page needs to distinguish "not downloaded" from "downloaded
+      // but this build cannot run it".
+      alignerRuntime: await checkCtcEngine(),
       models: MODELS.map((m) => {
         const installed = isInstalled(config.modelsDir, m);
         let installedBytes = 0;
@@ -88,9 +95,13 @@ export function registerModelRoutes(app: FastifyInstance, ctx: AppContext): void
     const { id } = req.params as { id: string };
     const spec = modelById(id);
     if (!spec) return reply.code(404).send({ error: 'not-found' });
-    const p = modelPath(config.modelsDir, spec);
-    fs.rmSync(p, { force: true });
-    fs.rmSync(`${p}.part`, { force: true });
+    // Remove every artefact, not just the big one — a stray vocab.json would
+    // otherwise linger for the life of the volume.
+    for (const f of modelFiles(spec)) {
+      const p = path.join(config.modelsDir, f.name);
+      fs.rmSync(p, { force: true });
+      fs.rmSync(`${p}.part`, { force: true });
+    }
     return { ok: true };
   });
 }

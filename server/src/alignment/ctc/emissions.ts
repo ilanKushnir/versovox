@@ -1,0 +1,657 @@
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import { z } from 'zod';
+import { probeAudio } from '../../audio/probe.js';
+
+/**
+ * CTC emission front end: turns a book's audio tracks into one continuous
+ * stream of romanized characters, each stamped with the absolute millisecond
+ * of the acoustic frame that emitted it.
+ *
+ * This replaces ASR (whisper) as the acoustic side of alignment. We do not
+ * need a transcript — we need a *timed character stream* that the matcher can
+ * anchor against the ebook's own characters. A 300M CTC forced-aligner model
+ * produces that ~6x faster than whisper and, measured on real human narration,
+ * with far better anchor quality (see docs/alignment.md and the validation
+ * notes: 18,913 shared 14-grams, 99.94% monotone).
+ *
+ * Shape of the model output: [1, frames, vocab] log-probabilities, one frame
+ * per 320 input samples (20.0 ms at 16 kHz) over a 400-sample window. The
+ * vocabulary has ~31 entries: a blank at id 0, a few `<...>` specials, and the
+ * romanized letters. There is no space token, so the decode is one
+ * uninterrupted character stream — exactly what the n-gram matcher wants.
+ *
+ * Streaming is not an optimisation here, it is a requirement: a 6-hour book is
+ * 1.4 GB of float32 PCM. ffmpeg's output is consumed chunk-by-chunk and only a
+ * ~32 s window is ever resident.
+ */
+
+/** One decoded character with its absolute position in the book's audio. */
+export interface DecodedChar {
+  c: string;
+  ms: number;
+}
+
+export interface EmissionOptions {
+  /** Path to the ONNX model file (int8 build; measured faster than q4f16 on CPU). */
+  modelPath: string;
+  /** Path to the model's `vocab.json` (token -> id). */
+  vocabPath: string;
+  /** Absolute paths of the book's audio files, in playback order. */
+  trackPaths: string[];
+  /** Absolute start offset of each track (ms), parallel to `trackPaths`. */
+  trackStartMs: number[];
+  /** ONNX intra-op thread count. */
+  threads: number;
+  /** Abort the decode (e.g. the job lease was lost); kills ffmpeg promptly. */
+  signal?: AbortSignal;
+  /** Live progress in decoded audio milliseconds. */
+  onProgress?: (info: { doneMs: number; totalMs: number }) => void;
+}
+
+export interface DecodedBook {
+  chars: DecodedChar[];
+  /** Absolute end of the decoded audio (ms), i.e. the last track's offset + its length. */
+  audioMs: number;
+  /** Provenance string for the model that produced these emissions. */
+  model: string;
+}
+
+/** Sample rate the model was trained at; ffmpeg resamples every track to it. */
+export const SAMPLE_RATE = 16_000;
+/** Frame hop in samples (320 @ 16 kHz = 20.0 ms). */
+const FRAME_HOP = 320;
+/** Frame window in samples. */
+const FRAME_WINDOW = 400;
+/** Milliseconds advanced by one emission frame. */
+export const MS_PER_FRAME = (FRAME_HOP / SAMPLE_RATE) * 1000;
+
+/** Core audio decoded per inference call. */
+const CHUNK_SAMPLES = 30 * SAMPLE_RATE;
+/**
+ * Context fed on each side of a chunk and then discarded. The model's
+ * receptive field means frames near a hard cut decode badly; one second of
+ * overlap is enough that the kept (core) frames are identical to what a
+ * whole-file decode would have produced.
+ */
+const CONTEXT_SAMPLES = 1 * SAMPLE_RATE;
+/** Segments shorter than this carry no usable frames; the tail is dropped. */
+const MIN_SEGMENT_SAMPLES = 4000;
+/** CTC blank. Never emitted. */
+const BLANK_ID = 0;
+
+/**
+ * Frames the model must emit for `sampleCount` input samples.
+ *
+ * This is the model's own geometry, not a guess: a 400-sample window advanced
+ * by 320 samples. We assert it on every chunk so that swapping in a model with
+ * a different stride fails loudly instead of silently shifting every timestamp.
+ */
+export function frameCount(sampleCount: number): number {
+  if (sampleCount < FRAME_WINDOW) return 0;
+  return Math.floor((sampleCount - FRAME_WINDOW) / FRAME_HOP) + 1;
+}
+
+/** Throws unless the model's reported frame count matches its documented stride. */
+export function assertFrameCount(sampleCount: number, reportedFrames: number): void {
+  const expected = frameCount(sampleCount);
+  if (reportedFrames !== expected) {
+    throw new Error(
+      `CTC model emitted ${reportedFrames} frames for ${sampleCount} samples, expected ` +
+        `${expected} (floor((n-${FRAME_WINDOW})/${FRAME_HOP})+1 = ${MS_PER_FRAME.toFixed(1)} ms ` +
+        `per frame). This model has a different frame rate; timestamps would be wrong.`,
+    );
+  }
+}
+
+const vocabSchema = z.record(z.string(), z.number().int().min(0));
+
+/**
+ * Parse a `vocab.json` (token -> id) into an id -> token table.
+ *
+ * Ids must be dense and id 0 must be the blank, because the greedy collapse
+ * hard-codes `BLANK_ID`; a vocabulary that violates either assumption would
+ * decode into plausible-looking garbage.
+ */
+export function parseVocab(raw: unknown): string[] {
+  const map = vocabSchema.parse(raw);
+  const table: string[] = [];
+  for (const [token, id] of Object.entries(map)) {
+    if (table[id] !== undefined) throw new Error(`vocab has duplicate id ${id}`);
+    table[id] = token;
+  }
+  for (let i = 0; i < table.length; i++) {
+    if (table[i] === undefined) throw new Error(`vocab is not dense: no token for id ${i}`);
+  }
+  const blank = table[BLANK_ID];
+  if (blank === undefined || !blank.startsWith('<')) {
+    throw new Error(
+      `vocab token at id ${BLANK_ID} is ${JSON.stringify(blank)}, expected the blank`,
+    );
+  }
+  return table;
+}
+
+/** Per-frame log-probabilities for one chunk, flattened frame-major. */
+export interface CtcEmission {
+  frames: number;
+  vocab: number;
+  logits: ArrayLike<number>;
+}
+
+/**
+ * The acoustic model, reduced to the one operation the decoder needs. Keeping
+ * this seam lets the chunking and timestamp arithmetic be tested without the
+ * 317 MB model (and without onnxruntime, which CI does not install).
+ */
+export interface CtcSession {
+  run(samples: Float32Array): Promise<CtcEmission>;
+}
+
+export interface CollapseInput {
+  emission: CtcEmission;
+  /** Absolute ms of the first frame in this chunk. */
+  segStartMs: number;
+  /** Keep only frames in [coreLoMs, coreHiMs); the rest are context. */
+  coreLoMs: number;
+  coreHiMs: number;
+  idToToken: readonly string[];
+  /** Argmax id of the previous kept frame (-1 at the start of a track). */
+  prevId: number;
+  /** Appended in place — a book decodes to ~50k characters and copying adds up. */
+  out: DecodedChar[];
+}
+
+/**
+ * Greedy CTC collapse over one chunk. Returns the new `prevId`.
+ *
+ * Standard best-path decoding: take the argmax per frame, drop blanks, and
+ * drop repeats of the previous frame's id (a held phoneme spans many frames).
+ * `<...>` specials (pad, eos, unk) are dropped from the output but still count
+ * as "the previous id", so a repeat across one of them stays suppressed.
+ *
+ * Context frames are skipped before the argmax, so `prevId` only ever tracks
+ * frames that were actually kept — the same continuity a whole-file decode has.
+ */
+export function collapseChunk(input: CollapseInput): number {
+  const { emission, segStartMs, coreLoMs, coreHiMs, idToToken, out } = input;
+  const { frames, vocab, logits } = emission;
+  let prevId = input.prevId;
+  for (let f = 0; f < frames; f++) {
+    const ms = segStartMs + f * MS_PER_FRAME;
+    if (ms < coreLoMs || ms >= coreHiMs) continue;
+    let best = 0;
+    let bestVal = -Infinity;
+    const base = f * vocab;
+    for (let v = 0; v < vocab; v++) {
+      const x = logits[base + v]!;
+      if (x > bestVal) {
+        bestVal = x;
+        best = v;
+      }
+    }
+    if (best !== prevId && best !== BLANK_ID) {
+      const tok = idToToken[best];
+      if (tok !== undefined && !tok.startsWith('<')) out.push({ c: tok, ms: Math.round(ms) });
+    }
+    prevId = best;
+  }
+  return prevId;
+}
+
+/**
+ * Sliding PCM window over one track.
+ *
+ * ffmpeg hands us arbitrarily-sized byte runs that need not land on float
+ * boundaries, and `Buffer.concat` gives no 4-byte alignment guarantee for a
+ * `Float32Array` view. So bytes are copied into a byte view of an owned,
+ * aligned Float32Array; samples are then read directly, and consumed audio is
+ * shifted out so the window stays ~32 s regardless of track length.
+ */
+class PcmWindow {
+  private scratch: Float32Array;
+  private bytes: Uint8Array;
+  private byteLen = 0;
+  /** Absolute sample index of scratch[0]. */
+  private base = 0;
+
+  constructor(capacitySamples: number) {
+    this.scratch = new Float32Array(capacitySamples);
+    this.bytes = new Uint8Array(this.scratch.buffer);
+  }
+
+  /** Absolute index one past the last complete sample received. */
+  get end(): number {
+    return this.base + Math.floor(this.byteLen / 4);
+  }
+
+  pushBytes(chunk: Uint8Array): void {
+    this.ensure(this.byteLen + chunk.length);
+    this.bytes.set(chunk, this.byteLen);
+    this.byteLen += chunk.length;
+  }
+
+  pushSamples(samples: Float32Array): void {
+    if (this.byteLen % 4 !== 0) throw new Error('cannot push samples after a partial byte run');
+    this.ensure(this.byteLen + samples.length * 4);
+    this.scratch.set(samples, this.byteLen / 4);
+    this.byteLen += samples.length * 4;
+  }
+
+  /** Zero-copy view of [fromAbs, toAbs); valid until the next trim. */
+  view(fromAbs: number, toAbs: number): Float32Array {
+    return this.scratch.subarray(fromAbs - this.base, toAbs - this.base);
+  }
+
+  /** Drop everything before `absStart`. */
+  trimTo(absStart: number): void {
+    const shift = Math.min(absStart, this.end) - this.base;
+    if (shift <= 0) return;
+    const shiftBytes = shift * 4;
+    this.bytes.copyWithin(0, shiftBytes, this.byteLen);
+    this.byteLen -= shiftBytes;
+    this.base += shift;
+  }
+
+  private ensure(byteCapacity: number): void {
+    if (byteCapacity <= this.bytes.length) return;
+    const grown = new Float32Array(Math.ceil(Math.max(byteCapacity, this.bytes.length * 2) / 4));
+    const grownBytes = new Uint8Array(grown.buffer);
+    grownBytes.set(this.bytes.subarray(0, this.byteLen));
+    this.scratch = grown;
+    this.bytes = grownBytes;
+  }
+}
+
+export interface TrackDecoderConfig {
+  session: CtcSession;
+  idToToken: readonly string[];
+  /** Absolute ms of this track's first sample. */
+  startMs: number;
+  out: DecodedChar[];
+  signal?: AbortSignal;
+  /** Called after each chunk with the track-relative ms decoded so far (rounded). */
+  onChunk?: (trackMs: number) => void;
+}
+
+/**
+ * Chunked decoder for a single track. Audio is pushed in as it arrives (raw
+ * ffmpeg bytes, which need not land on float boundaries, or samples); each
+ * time a full chunk plus its right-hand context is available, one inference
+ * runs and the chunk's core frames are collapsed into `out`.
+ *
+ * Exported so the streaming path can be driven from a test with a fake session
+ * instead of the 317 MB model.
+ */
+export class TrackDecoder {
+  private readonly win = new PcmWindow(CHUNK_SAMPLES + 2 * CONTEXT_SAMPLES + SAMPLE_RATE);
+  private chunkIndex = 0;
+  /** Reset per track: a new file starts a new CTC path, never a repeat of the old one. */
+  private prevId = -1;
+
+  constructor(private readonly cfg: TrackDecoderConfig) {}
+
+  /** Total samples received for this track. */
+  get sampleCount(): number {
+    return this.win.end;
+  }
+
+  async pushBytes(chunk: Uint8Array): Promise<void> {
+    this.win.pushBytes(chunk);
+    await this.drain(false);
+  }
+
+  async pushSamples(samples: Float32Array): Promise<void> {
+    this.win.pushSamples(samples);
+    await this.drain(false);
+  }
+
+  /** Decode the trailing partial chunk. Call once the track's audio has ended. */
+  async finish(): Promise<void> {
+    await this.drain(true);
+  }
+
+  private async drain(final: boolean): Promise<void> {
+    for (;;) {
+      throwIfAborted(this.cfg.signal);
+      const coreLo = this.chunkIndex * CHUNK_SAMPLES;
+      const total = this.win.end;
+      // Mid-stream we wait until the right-hand context has arrived, so every
+      // core frame is decoded with the same surroundings a full decode gives it.
+      if (final ? coreLo >= total : total < coreLo + CHUNK_SAMPLES + CONTEXT_SAMPLES) return;
+
+      const segLo = Math.max(0, coreLo - CONTEXT_SAMPLES);
+      const segHi = Math.min(total, coreLo + CHUNK_SAMPLES + CONTEXT_SAMPLES);
+      const coreHi = Math.min(total, coreLo + CHUNK_SAMPLES);
+      const seg = this.win.view(segLo, segHi);
+      if (seg.length < MIN_SEGMENT_SAMPLES) return;
+
+      const emission = await this.cfg.session.run(seg);
+      assertFrameCount(seg.length, emission.frames);
+      this.prevId = collapseChunk({
+        emission,
+        segStartMs: this.cfg.startMs + (segLo / SAMPLE_RATE) * 1000,
+        coreLoMs: this.cfg.startMs + (coreLo / SAMPLE_RATE) * 1000,
+        coreHiMs: this.cfg.startMs + (coreHi / SAMPLE_RATE) * 1000,
+        idToToken: this.cfg.idToToken,
+        prevId: this.prevId,
+        out: this.cfg.out,
+      });
+
+      this.chunkIndex++;
+      this.win.trimTo(Math.max(0, this.chunkIndex * CHUNK_SAMPLES - CONTEXT_SAMPLES));
+      this.cfg.onChunk?.(Math.round((coreHi / SAMPLE_RATE) * 1000));
+    }
+  }
+}
+
+export interface DecodeSamplesOptions {
+  session: CtcSession;
+  idToToken: readonly string[];
+  samples: Float32Array;
+  /** Absolute ms of `samples[0]` in the book's timeline. */
+  startMs: number;
+  out: DecodedChar[];
+  signal?: AbortSignal;
+  onChunk?: (trackMs: number) => void;
+}
+
+/**
+ * Decode one in-memory track. Used by tests and by any caller that already
+ * holds PCM; `decodeBook` drives the exact same decoder from an ffmpeg stream.
+ * The samples are fed in small pushes so this path exercises the streaming
+ * chunk boundaries rather than a convenient single-shot one.
+ */
+export async function decodeTrackSamples(opts: DecodeSamplesOptions): Promise<void> {
+  const decoder = new TrackDecoder({
+    session: opts.session,
+    idToToken: opts.idToToken,
+    startMs: opts.startMs,
+    out: opts.out,
+    signal: opts.signal,
+    onChunk: opts.onChunk,
+  });
+  for (let off = 0; off < opts.samples.length; off += SAMPLE_RATE) {
+    await decoder.pushSamples(opts.samples.subarray(off, off + SAMPLE_RATE));
+  }
+  await decoder.finish();
+}
+
+/* ------------------------------------------------------------------ */
+/* onnxruntime-node (optional native dependency)                       */
+/* ------------------------------------------------------------------ */
+
+interface OrtValue {
+  dims: readonly number[];
+  data: Float32Array;
+}
+
+interface OrtSession {
+  readonly inputNames: readonly string[];
+  readonly outputNames: readonly string[];
+  run(feeds: Record<string, OrtValue>): Promise<Record<string, OrtValue>>;
+  release?(): Promise<void>;
+}
+
+interface OrtModule {
+  Tensor: new (type: 'float32', data: Float32Array, dims: number[]) => OrtValue;
+  InferenceSession: {
+    create(
+      modelPath: string,
+      options: { intraOpNumThreads: number; graphOptimizationLevel: 'all' },
+    ): Promise<OrtSession>;
+  };
+}
+
+/**
+ * Typed as `string` on purpose: the specifier must stay out of the static
+ * import graph so a server without the native runtime still boots and reports
+ * the CTC engine as unavailable instead of failing at module load.
+ */
+const ORT_PACKAGE: string = 'onnxruntime-node';
+
+/**
+ * Roots to `require` from when a bare import fails. In the container the
+ * runtime is installed outside the app tree (it is a large optional native
+ * dep) and, measured on node:26-slim, ESM resolution does not find it there —
+ * neither a bare import nor NODE_PATH — while a CommonJS require rooted at the
+ * install directory does.
+ */
+function ortRequireRoots(): string[] {
+  const roots: string[] = [];
+  const configured = process.env['VX_ORT_DIR'];
+  if (configured) roots.push(configured.endsWith(path.sep) ? configured : configured + path.sep);
+  roots.push('/opt/ort/lib/node_modules/');
+  return roots;
+}
+
+let ortPromise: Promise<OrtModule> | null = null;
+
+/** Load onnxruntime-node once per process. Rejects with every path we tried. */
+export function loadOnnxRuntime(): Promise<OrtModule> {
+  if (!ortPromise) {
+    ortPromise = loadOnnxRuntimeOnce();
+    // A failure must not be cached: the operator can install the runtime and
+    // retry the job without restarting the server.
+    ortPromise.catch(() => {
+      ortPromise = null;
+    });
+  }
+  return ortPromise;
+}
+
+async function loadOnnxRuntimeOnce(): Promise<OrtModule> {
+  const tried: string[] = [];
+  try {
+    const mod = (await import(ORT_PACKAGE)) as { default?: OrtModule } & OrtModule;
+    return mod.default ?? mod;
+  } catch (err) {
+    tried.push(`import: ${(err as Error).message}`);
+  }
+  for (const root of ortRequireRoots()) {
+    try {
+      return createRequire(root)(ORT_PACKAGE) as OrtModule;
+    } catch (err) {
+      tried.push(`require(${root}): ${(err as Error).message}`);
+    }
+  }
+  throw new Error(`onnxruntime-node is not installed or failed to load — ${tried.join('; ')}`);
+}
+
+export interface EngineStatus {
+  available: boolean;
+  error?: string;
+}
+
+/** Non-throwing probe for the settings UI / job preflight. */
+export async function checkCtcEngine(): Promise<EngineStatus> {
+  try {
+    await loadOnnxRuntime();
+    return { available: true };
+  } catch (err) {
+    return { available: false, error: (err as Error).message };
+  }
+}
+
+async function createOrtSession(
+  modelPath: string,
+  threads: number,
+): Promise<{ session: CtcSession; close: () => Promise<void> }> {
+  const ort = await loadOnnxRuntime();
+  const sess = await ort.InferenceSession.create(modelPath, {
+    intraOpNumThreads: Math.max(1, Math.floor(threads)),
+    graphOptimizationLevel: 'all',
+  });
+  const inName = sess.inputNames[0];
+  const outName = sess.outputNames[0];
+  if (!inName || !outName) throw new Error(`model ${modelPath} exposes no input/output tensor`);
+
+  const session: CtcSession = {
+    async run(samples: Float32Array): Promise<CtcEmission> {
+      // `samples` is a view into the sliding window; hand the native binding a
+      // standalone, zero-offset buffer rather than relying on it honouring
+      // byteOffset.
+      const feeds = { [inName]: new ort.Tensor('float32', samples.slice(), [1, samples.length]) };
+      const out = await sess.run(feeds);
+      const tensor = out[outName];
+      if (!tensor) throw new Error(`model produced no "${outName}" output`);
+      const dims = tensor.dims;
+      if (dims.length !== 3 || dims[0] !== 1) {
+        throw new Error(`unexpected emission shape [${dims.join(', ')}], expected [1, frames, V]`);
+      }
+      return { frames: dims[1]!, vocab: dims[2]!, logits: tensor.data };
+    },
+  };
+  const close = async (): Promise<void> => {
+    await sess.release?.();
+  };
+  return { session, close };
+}
+
+/* ------------------------------------------------------------------ */
+/* book decode                                                         */
+/* ------------------------------------------------------------------ */
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error('CTC decode aborted');
+}
+
+/** Short provenance id, e.g. `mms-300m-1130-forced-aligner/model_int8.onnx`. */
+function modelId(modelPath: string): string {
+  const base = path.basename(modelPath);
+  const dir = path.basename(path.dirname(modelPath));
+  return dir && dir !== '.' && dir !== path.sep ? `${dir}/${base}` : base;
+}
+
+/**
+ * Total audio length for the progress bar. Derived from ffprobe rather than
+ * from the decode itself, which only learns a track's length once it has
+ * finished it. Best-effort: progress accuracy is not worth failing a job over.
+ */
+async function estimateTotalMs(trackPaths: string[], trackStartMs: number[]): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < trackPaths.length; i++) {
+    try {
+      const probe = await probeAudio(trackPaths[i]!);
+      total = Math.max(total, (trackStartMs[i] ?? 0) + probe.durationMs);
+    } catch {
+      total = Math.max(total, trackStartMs[i] ?? 0);
+    }
+  }
+  return total;
+}
+
+/** Decode one track through ffmpeg; returns the track's decoded length in ms. */
+async function decodeTrackFile(
+  filePath: string,
+  decoder: TrackDecoder,
+  signal: AbortSignal | undefined,
+): Promise<number> {
+  throwIfAborted(signal);
+  const child = spawn(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-nostdin',
+      '-i',
+      filePath,
+      '-vn',
+      '-ac',
+      '1',
+      '-ar',
+      String(SAMPLE_RATE),
+      '-f',
+      'f32le',
+      '-',
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+
+  let stderrTail = '';
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-2000);
+  });
+  const exited = new Promise<number | null>((resolve) =>
+    child.on('close', (code) => resolve(code)),
+  );
+  const onAbort = () => child.kill('SIGKILL');
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  try {
+    for await (const piece of child.stdout) {
+      if (signal?.aborted) break;
+      await decoder.pushBytes(piece as Buffer);
+    }
+  } catch (err) {
+    // A decode failure (or abort) must not leave ffmpeg streaming a whole book
+    // into a closed pipe.
+    child.kill('SIGKILL');
+    await exited;
+    throw err;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+
+  const code = await exited;
+  throwIfAborted(signal);
+  if (code !== 0) {
+    throw new Error(`ffmpeg exited with code ${code} on ${filePath}: ${stderrTail.trim()}`);
+  }
+  await decoder.finish();
+  return Math.round((decoder.sampleCount / SAMPLE_RATE) * 1000);
+}
+
+/**
+ * Decode a whole book into one timestamped character stream.
+ *
+ * Timestamps are absolute across the book: each track's frames are offset by
+ * its `trackStartMs`, so a multi-file audiobook produces the same monotone
+ * stream a single file would.
+ */
+export async function decodeBook(opts: EmissionOptions): Promise<DecodedBook> {
+  if (opts.trackPaths.length !== opts.trackStartMs.length) {
+    throw new Error('trackPaths and trackStartMs must have the same length');
+  }
+  if (os.endianness() !== 'LE') {
+    throw new Error('CTC decoding requires a little-endian host (ffmpeg emits f32le)');
+  }
+  throwIfAborted(opts.signal);
+
+  const idToToken = parseVocab(JSON.parse(fs.readFileSync(opts.vocabPath, 'utf8')));
+  const { session, close } = await createOrtSession(opts.modelPath, opts.threads);
+
+  try {
+    const totalMs = await estimateTotalMs(opts.trackPaths, opts.trackStartMs);
+    const chars: DecodedChar[] = [];
+    let audioMs = 0;
+    let doneMs = 0;
+
+    for (let i = 0; i < opts.trackPaths.length; i++) {
+      const startMs = opts.trackStartMs[i]!;
+      const base = doneMs;
+      const decoder = new TrackDecoder({
+        session,
+        idToToken,
+        startMs,
+        out: chars,
+        signal: opts.signal,
+        onChunk: (trackMs) => {
+          doneMs = base + trackMs;
+          opts.onProgress?.({ doneMs, totalMs: Math.max(totalMs, doneMs) });
+        },
+      });
+      const trackMs = await decodeTrackFile(opts.trackPaths[i]!, decoder, opts.signal);
+      doneMs = base + trackMs;
+      audioMs = Math.max(audioMs, startMs + trackMs);
+      opts.onProgress?.({ doneMs, totalMs: Math.max(totalMs, doneMs) });
+    }
+
+    return { chars, audioMs: Math.round(audioMs), model: modelId(opts.modelPath) };
+  } finally {
+    await close();
+  }
+}

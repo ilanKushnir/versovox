@@ -43,7 +43,13 @@ COPY package.json package-lock.json ./
 COPY shared/package.json shared/package.json
 COPY server/package.json server/package.json
 COPY web/package.json web/package.json
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force \
+ # onnxruntime-node ships prebuilt binaries for all three desktop platforms
+ # (283 MB). Only Linux can ever run here, and dropping the other two keeps
+ # ~216 MB out of the image. Its postinstall only fetches optional GPU extras,
+ # so --ignore-scripts leaves a working CPU runtime.
+ && rm -rf node_modules/onnxruntime-node/bin/napi-v*/darwin \
+           node_modules/onnxruntime-node/bin/napi-v*/win32
 
 FROM node:26-slim
 RUN apt-get update \

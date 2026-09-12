@@ -275,6 +275,16 @@ export const settingsSchema = z.object({
   ebookDirs: dirListSchema.default([]),
   audiobookDirs: dirListSchema.default([]),
   /**
+   * Which engine computes the ebook-to-audio timings.
+   *  - `forced-align` (default) aligns the narration to the text you already
+   *    have. One model, every language, several times faster than recognition.
+   *  - `whisper-cli` transcribes the audiobook from scratch and fuzzy-matches
+   *    the result. Slower and needs a model per language; kept as a rescue
+   *    path and for the two-clip edition check.
+   *  - `fixture` reads sidecar transcripts; `none` disables alignment.
+   */
+  alignEngine: z.enum(['none', 'fixture', 'forced-align', 'whisper-cli']).default('forced-align'),
+  /**
    * How much work a library scan may start on its own.
    *  - `auto`   verify a strong match, then transcribe it in full, unattended
    *  - `verify` verify and link, then wait for you before the long transcription

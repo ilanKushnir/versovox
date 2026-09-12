@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { type Job } from '@versovox/shared';
 import { api } from '../api/client';
-import { type ModelsResponse } from '../lib/types';
+import { alignerModel, type ModelsResponse } from '../lib/types';
 import { IconAlert, IconCheck, IconClose, IconHeadphones, IconBookOpen } from './icons';
 import { useToast } from './ui';
 
@@ -10,7 +10,7 @@ const ACTIVE = new Set(['queued', 'running']);
 
 /** Keys are the server's real job types (server/src/jobs/handlers.ts). */
 const TYPE_LABEL: Record<string, string> = {
-  align: 'Transcribe & align',
+  align: 'Align to the text',
   'model-download': 'Model download',
   scan: 'Library scan',
   'index-ebook': 'Index ebook',
@@ -27,7 +27,7 @@ function typeLabel(t: string): string {
 
 /** Which of the three scheduler lanes a job waits in. */
 function laneLabel(t: string): string {
-  if (t === 'align') return 'transcription';
+  if (t === 'align') return 'alignment';
   if (t === 'model-download') return 'download';
   return 'library';
 }
@@ -62,9 +62,9 @@ function ago(iso: string | null): string {
 }
 
 /**
- * Live view of the job queue: what is running right now (with whisper's
- * own progress), what is waiting behind it, and the last few outcomes.
- * Polls quickly while anything is active and slowly otherwise.
+ * Live view of the job queue: what is running right now (with the alignment
+ * engine's own progress), what is waiting behind it, and the last few
+ * outcomes. Polls quickly while anything is active and slowly otherwise.
  */
 export function ProcessingQueue({
   canManage,
@@ -150,8 +150,8 @@ export function ProcessingQueue({
           </h2>
           <p className="queue__lede">
             {idle
-              ? 'Nothing is being processed right now. Confirming a pair or downloading a speech model adds work here.'
-              : 'Three lanes run side by side: one transcription, one model download, one library task — so a long alignment never blocks a scan.'}
+              ? 'Nothing is being processed right now. Confirming a pair or downloading a model adds work here.'
+              : 'Three lanes run side by side: one alignment, one model download, one library task — so a long alignment never blocks a scan.'}
           </p>
         </div>
         <span className={`queue__dot ${idle ? '' : 'is-live'}`} aria-hidden="true" />
@@ -295,8 +295,13 @@ function JobRow({
 }
 
 /**
- * The "what actually happens" diagram: audio → ffmpeg → whisper → words →
- * aligned to the ebook's sentences → a sentence↔second map used for switching.
+ * The "what actually happens" diagram for forced alignment: audio → ffmpeg →
+ * an acoustic model reporting sounds every 20 ms → the ebook reduced to the
+ * same alphabet → passages unique on both sides pin the two together →
+ * a sentence↔second map used for switching.
+ *
+ * Deliberately does NOT promise a transcript: the engine never decides which
+ * words were said, which is exactly why it is fast and language-agnostic.
  */
 export function PipelineDiagram() {
   const [models, setModels] = useState<ModelsResponse | null>(null);
@@ -305,37 +310,40 @@ export function PipelineDiagram() {
       .then(setModels)
       .catch(() => setModels(null));
   }, []);
-  const installed = models?.models.filter((m) => m.installed) ?? [];
+  const aligner = alignerModel(models);
   const steps: { n: number; title: string; body: string; tag?: string }[] = [
     {
       n: 1,
       title: 'Audiobook',
-      body: 'Each part is decoded to plain 16 kHz mono audio with ffmpeg. Files are only read, never changed.',
+      body: 'Each part is decoded to plain 16 kHz mono audio with ffmpeg. Your files are only read, never changed.',
       tag: 'ffmpeg',
     },
     {
       n: 2,
-      title: 'Speech model',
-      body: 'A whisper.cpp model listens to the narration and writes down every word with its timestamp. Better models for a language give cleaner words.',
-      tag:
-        installed.length === 0 ? 'no model installed' : installed.map((m) => m.label).join(' · '),
+      title: 'Listening',
+      body: 'An acoustic model hears the narration and reports which sound it is hearing, twenty milliseconds at a time. It never decides which words were said — that is what makes it fast, and the same model works for every language.',
+      tag: !aligner
+        ? 'acoustic model'
+        : aligner.installed
+          ? 'aligner installed · 20 ms frames'
+          : 'aligner not installed',
     },
     {
       n: 3,
-      title: 'Ebook',
-      body: 'The EPUB is split into sentences. A quick two-clip check confirms the narration really is this text before a full run starts.',
-      tag: 'sentences',
+      title: 'Ebook text',
+      body: 'The EPUB is split into sentences and reduced to the same small alphabet the model reports in, so the book and the narration can be compared letter for letter.',
+      tag: '27 letters',
     },
     {
       n: 4,
-      title: 'Alignment',
-      body: 'Spoken words are matched to the ebook sentences, tolerating skipped intros, renamed chapters and small edition differences.',
-      tag: 'anchors',
+      title: 'Pinning',
+      body: 'Passages that occur exactly once on each side pin text to audio, and only pins that keep their order are kept. Timings between two pins are interpolated; where nothing matches, the pair keeps an honest gap instead of a guess.',
+      tag: 'unique passages, in order',
     },
     {
       n: 5,
       title: 'Switching map',
-      body: 'Every sentence now knows its second in the audio and vice versa, so you can jump between reading and listening at the exact line.',
+      body: 'Every pinned or interpolated sentence knows its second in the audio, and every second knows its sentence — that is what the switch between reading and listening lands on.',
       tag: 'sentence ↔ second',
     },
   ];
@@ -351,11 +359,12 @@ export function PipelineDiagram() {
         </div>
       ))}
       <p className="pipeline__foot">
-        Models are chosen per language in{' '}
-        <Link to="/settings#speech-models">Settings → Speech models</Link>. Only the multilingual
-        default is fetched automatically; every other language is yours to pick. Steps 1 and 2 are
-        the slow part — hours for a full-length book — which is why they run one at a time and
-        report live progress above.
+        One model covers every language — set it up in{' '}
+        <Link to="/settings#speech-models">Settings → Speech models</Link>. Step 2 is the slow part,
+        an hour or so of computing per two to three hours of audio, which is why it runs one book at
+        a time and reports live progress above. How many pins turn up is also the edition check: a
+        narration that is not this text produces almost none, and Versovox refuses to publish
+        timings rather than inventing them.
       </p>
     </div>
   );

@@ -56,12 +56,23 @@ loss-resistant progress.)
 - **Libraries refresh themselves**: periodic rescans (default hourly) pick
   up titles added through Calibre-Web Automated, Audiobookshelf, or plain
   folders; pairing waits for indexing to finish so nothing is missed.
-- **No cloud required**: the image bundles whisper.cpp and a per-language
-  speech-model catalog — one click in Settings downloads the best model for
-  each of ten languages (Hebrew uses the ivrit.ai fine-tune), narration
-  language is detected or set per pair, and a missing model turns into a
-  download prompt instead of a silent failure. Sidecar word-timestamp
-  transcripts work too — documented honestly in docs/alignment.md.
+- **Alignment by forced alignment, not transcription**: the words are
+  already in the EPUB, so Versovox does not try to discover them — it runs
+  one pass of a 317 MB CTC acoustic model over the audio and finds where the
+  narration and the book agree. **One download covers all ten languages**,
+  and on a 4-CPU home server it took wall clock of 0.33–0.46× the audio
+  duration, against 0.61 seconds of audio per second of wall clock for the
+  transcription path it replaces — roughly two to three hours for a six-hour
+  book instead of about eleven. Measured on one real human-narrated
+  audiobook (67 minutes, 880 sentences); the method, the numbers and the
+  failure modes are in [docs/alignment.md](docs/alignment.md). The model is
+  Meta's MMS forced aligner, **CC-BY-NC-4.0 (non-commercial)** — surfaced
+  before you download it, and the only non-permissive thing here.
+- **No cloud required**: nothing leaves the machine, and no model is
+  bundled. whisper.cpp and the per-language model catalog are still shipped
+  for narration-language detection, for the legacy transcribe-and-match
+  engine, and for Hebrew via the ivrit.ai fine-tune. Sidecar word-timestamp
+  transcripts you produced elsewhere always win over any model.
 - **Plays well with your reverse proxy**: optional header-based single
   sign-on from Authentik / Authelia / oauth2-proxy, trusted only from the
   proxy's own address (docs/security.md).
@@ -99,24 +110,28 @@ VX_TRANSCRIBE_PROVIDER=fixture node server/dist/index.js
 
 ## Documentation
 
-|                                                                                                       |                                                          |
-| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| [Self-hosting](docs/self-hosting.md)                                                                  | Compose, volumes, HTTPS/PWA, backup/restore, upgrades    |
-| [Configuration](docs/configuration.md)                                                                | Every env var, precedence, secret files                  |
-| [Security model](docs/security.md)                                                                    | Auth, CSRF, sanitization, containment, container posture |
-| [Pairing & alignment](docs/alignment.md)                                                              | The three gates, providers, aligner, sample fixtures     |
-| [Reader & player](docs/reader-and-player.md)                                                          | Features and honest limitations                          |
-| [Progress durability](docs/progress.md)                                                               | The event model and reconciliation rules                 |
-| [HTTP API](docs/api.md)                                                                               | Endpoint reference                                       |
-| [Contributing](docs/contributing.md)                                                                  | Dev setup, tests, repo layout                            |
-| [Product brief](docs/product-brief.md) · [Research & architecture](docs/research-and-architecture.md) | Why it is built this way                                 |
+|                                                                                                       |                                                           |
+| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| [Self-hosting](docs/self-hosting.md)                                                                  | Compose, volumes, HTTPS/PWA, backup/restore, upgrades     |
+| [Configuration](docs/configuration.md)                                                                | Every env var, precedence, secret files                   |
+| [Security model](docs/security.md)                                                                    | Auth, CSRF, sanitization, containment, container posture  |
+| [Pairing & alignment](docs/alignment.md)                                                              | The three gates, forced alignment, engines, failure modes |
+| [Reader & player](docs/reader-and-player.md)                                                          | Features and honest limitations                           |
+| [Progress durability](docs/progress.md)                                                               | The event model and reconciliation rules                  |
+| [HTTP API](docs/api.md)                                                                               | Endpoint reference                                        |
+| [Contributing](docs/contributing.md)                                                                  | Dev setup, tests, repo layout                             |
+| [Product brief](docs/product-brief.md) · [Research & architecture](docs/research-and-architecture.md) | Why it is built this way                                  |
 
 ## Status
 
 V1 foundation: the surfaces above are implemented, tested (unit +
-integration + browser QA), and runnable today. Production-scale automatic
-transcription of full-length audiobooks remains explicitly experimental —
-see [docs/alignment.md](docs/alignment.md) for exactly where that line is.
+integration + browser QA), and runnable today. Forced alignment has been
+validated end to end on one full-length, human-narrated audiobook — not on a
+corpus, and not yet across all ten languages — so treat the numbers as
+evidence that the approach works rather than as a guarantee for your
+library. Transcribing a full audiobook from scratch (`whisper-cli`) remains
+explicitly experimental. [docs/alignment.md](docs/alignment.md) says exactly
+where each line is.
 
 ## License
 

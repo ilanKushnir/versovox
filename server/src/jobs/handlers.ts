@@ -28,9 +28,12 @@ import {
   ModelMissingError,
   MODELS,
   resolveModelForLanguage,
+  resolveAligner,
+  ALIGNER_MODEL_ID,
 } from '../transcription/models.js';
 import { languageCode } from '../pairing/score.js';
 import { libraryRoots, recordTranscribeSpeed, resolveSettings } from '../domain/settings.js';
+import { alignWithCtc, AlignmentRefusedError } from '../alignment/ctc/engine.js';
 import {
   enqueueJob,
   jobCheckpoint,
@@ -83,7 +86,20 @@ export async function runModelDownload(
     return;
   }
   fs.mkdirSync(config.modelsDir, { recursive: true });
+  // Small companion artefacts (vocabularies, configs) come down first: they are
+  // kilobytes, and fetching them up front means a finished big file is never
+  // left without the metadata that makes it usable.
+  for (const extra of spec.extraFiles ?? []) {
+    const target = path.join(config.modelsDir, extra.name);
+    if (fs.existsSync(target) && fs.statSync(target).size >= extra.sizeBytes * 0.9) continue;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const res = await fetch(extra.url, { redirect: 'follow' });
+    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status} from ${extra.url}`);
+    fs.writeFileSync(target, Buffer.from(await res.arrayBuffer()));
+    guard.assertHeld();
+  }
   const dest = modelPath(config.modelsDir, spec);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
   const part = `${dest}.part`;
   let have = 0;
   try {
@@ -199,6 +215,9 @@ export function requeueAlignmentsWaitingFor(ctx: AppContext, modelIds?: string[]
 export function ensureDefaultModel(ctx: AppContext): void {
   const { db, config } = ctx;
   const { values } = resolveSettings(db, config);
+  // The forced aligner is the default engine and needs no whisper model, so a
+  // stock install must not quietly pull 1.6 GB it will never open.
+  if (values.alignEngine === 'forced-align') return;
   if (values.transcribeProvider !== 'whisper-cli' || !values.autoDownloadDefaultModel) return;
   if (MODELS.some((m) => m.languages === '*' && isInstalled(config.modelsDir, m))) return;
   const id = enqueueJob(
@@ -813,7 +832,7 @@ export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuar
       guard.assertHeld();
       if (autoEligible) {
         evidence.notes.push(
-          settings.transcribeProvider !== 'none'
+          settings.alignEngine !== 'none' || settings.transcribeProvider !== 'none'
             ? 'Strong metadata match — automatic linking awaits content verification.'
             : 'Strong metadata match — enable transcription or confirm manually to link.',
         );
@@ -826,7 +845,7 @@ export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuar
       // two-clip verification and differ only in what happens after it passes.
       if (
         autoEligible &&
-        settings.transcribeProvider !== 'none' &&
+        (settings.alignEngine !== 'none' || settings.transcribeProvider !== 'none') &&
         settings.processingMode !== 'manual'
       ) {
         enqueueJob(db, 'align', { pairId }, { dedupeKey: `align:${pairId}`, priority: -2 });
@@ -859,10 +878,17 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     throw new Error('Ebook derived index missing; re-run the library scan first.');
   }
 
+  // Forced alignment needs no transcription provider — it never guesses words,
+  // it only times the ones the ebook already has. Only the legacy engine and
+  // the sidecar path need a provider, so the check lives with them below.
+  const usingForcedAlign =
+    settings.alignEngine === 'forced-align' && settings.transcribeProvider !== 'fixture';
   const provider = getProvider(settings.transcribeProvider);
-  if (!provider) {
+  if (!provider && !usingForcedAlign) {
     throw new Error(
-      'Transcription is disabled (VX_TRANSCRIBE_PROVIDER=none). Configure "fixture" or the experimental "whisper-cli" provider to align this pair.',
+      settings.alignEngine === 'none'
+        ? 'Alignment is switched off (Settings → Processing → Alignment engine).'
+        : 'Transcription is disabled (VX_TRANSCRIBE_PROVIDER=none). Choose the forced-alignment engine, or configure "fixture" or "whisper-cli" to align this pair.',
     );
   }
 
@@ -923,7 +949,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
   // Speech model for that language — a missing one fails the job with a
   // structured error the pairing page turns into a "download it" prompt.
   let whisperModel = settings.whisperModel || config.whisperModel;
-  if (settings.transcribeProvider === 'whisper-cli') {
+  if (!usingForcedAlign && settings.transcribeProvider === 'whisper-cli') {
     try {
       const chosen = resolveModelForLanguage(config.modelsDir, language, settings.languageModels);
       whisperModel = chosen.path;
@@ -933,6 +959,136 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
       }
       // A custom VX_WHISPER_MODEL path outside the catalog still works.
     }
+  }
+
+  // Sentences in reading order, shared by every engine.
+  const input: EbookSentenceInput[] = [];
+  const inputText: string[] = [];
+  sentences.forEach((chapter, spineIdx) => {
+    chapter.forEach((s, i) => {
+      const text = sentencesText[spineIdx]?.[i] ?? '';
+      input.push({
+        sentenceId: s.id,
+        spineIdx,
+        sentenceOrd: s.ord,
+        tokens: text.split(' ').filter(Boolean),
+      });
+      inputText.push(text);
+    });
+  });
+
+  // ── FORCED ALIGNMENT ──────────────────────────────────────────────────
+  // The default engine. One pass of a CTC acoustic model over the audio, then
+  // the narration is matched to the text we already have. Several times faster
+  // than transcribing, one model for every language, and the density of the
+  // match doubles as the edition check: a different book simply produces no
+  // anchors, so no separate content probe is needed.
+  // A sidecar transcript is exact and free, so it always wins; otherwise the
+  // forced aligner is the default.
+  if (usingForcedAlign) {
+    const aligner = resolveAligner(config.modelsDir);
+    if (!aligner) throw new ModelMissingError(language, ALIGNER_MODEL_ID);
+
+    jobProgress(db, job.id, job.lease_token, 0.18, 'Listening to the narration');
+    const alignStartedAt = Date.now();
+    const controller = new AbortController();
+    const stopOnLostLease = setInterval(() => {
+      if (guard.isLost()) controller.abort();
+    }, 5_000);
+    let ctc;
+    try {
+      ctc = await alignWithCtc({
+        modelPath: aligner.modelPath,
+        vocabPath: aligner.vocabPath,
+        trackPaths,
+        trackStartMs: trackRows.map((t) => Number(t.start_ms_absolute ?? 0)),
+        language,
+        sentences: input,
+        sentenceText: inputText,
+        threads: Math.max(1, config.alignThreads),
+        signal: controller.signal,
+        onProgress: (f: number, detail: string) =>
+          jobProgress(db, job.id, job.lease_token, 0.18 + 0.72 * f, detail),
+      });
+    } catch (err) {
+      if (err instanceof AlignmentRefusedError) {
+        const refusal: AlignmentRefusedError = err;
+        // Not a crash: the evidence says these are different works. Record it
+        // where the operator will see it and leave the pair undecided.
+        const ev = JSON.parse(String(pair.evidence_json ?? '{}'));
+        ev.notes = (ev.notes ?? []).filter((n: string) => !n.startsWith('Narration'));
+        ev.notes.push(`Narration check failed — ${refusal.message}`);
+        ev.contentScore = 0;
+        guard.assertHeld();
+        db.prepare('UPDATE pairs SET evidence_json = ? WHERE id = ?').run(
+          JSON.stringify(ev),
+          pairId,
+        );
+        jobProgress(
+          db,
+          job.id,
+          job.lease_token,
+          1,
+          'Not the same work — waiting for your decision',
+        );
+        return;
+      }
+      throw err;
+    } finally {
+      clearInterval(stopOnLostLease);
+    }
+
+    // What this machine can actually do, so the Pairing page's estimate comes
+    // from measurement rather than a guess.
+    try {
+      recordTranscribeSpeed(db, ctc.audioMs, Date.now() - alignStartedAt);
+    } catch {
+      /* estimates are a nicety; never fail a finished alignment for them */
+    }
+
+    const ev = JSON.parse(String(pair.evidence_json ?? '{}'));
+    ev.contentScore = Math.min(1, Math.round(ctc.stats.charRatio * 1000) / 1000);
+    ev.notes = (ev.notes ?? []).filter(
+      (n: string) => !n.startsWith('Narration') && !n.startsWith('Strong metadata match'),
+    );
+    ev.notes.push(
+      `Narration matched the text at ${ctc.stats.monotoneAnchors.toLocaleString()} points — linked automatically.`,
+    );
+    const compat = {
+      contentScore: ev.contentScore,
+      coverage: ctc.result.coverage,
+      meanConfidence: ctc.result.meanConfidence,
+      warning:
+        ctc.stats.charRatio < 0.7
+          ? 'The narration covers noticeably less text than the ebook — it may be abridged, or the ebook may carry a lot of unnarrated matter.'
+          : null,
+    };
+    guard.assertHeld();
+    db.prepare('UPDATE pairs SET evidence_json = ?, compat_json = ? WHERE id = ?').run(
+      JSON.stringify(ev),
+      JSON.stringify(compat),
+      pairId,
+    );
+    if (String(pair.status) === 'candidate') {
+      db.prepare(
+        `UPDATE pairs SET status = 'auto', decided_at = ? WHERE id = ? AND status = 'candidate'`,
+      ).run(nowIso(), pairId);
+    }
+    guard.assertHeld();
+    storeAlignment(db, pairId, language, ctc.model, ctc.result, {
+      provider: 'forced-align',
+      sentenceCount: input.length,
+      anchors: ctc.stats.monotoneAnchors,
+      charRatio: ctc.stats.charRatio,
+    });
+    jobProgress(
+      db,
+      job.id,
+      job.lease_token,
+      1,
+      `Aligned ${ctc.result.segments.length.toLocaleString()} sentences (${Math.round(ctc.result.coverage * 100)}% coverage)`,
+    );
+    return;
   }
 
   // ── Fast content probe for CANDIDATES ─────────────────────────────────
@@ -1037,6 +1193,13 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     }
   }
 
+  // Past this point every path transcribes, so a provider is mandatory.
+  if (!provider) {
+    throw new Error(
+      'Transcription is disabled (VX_TRANSCRIBE_PROVIDER=none) and forced alignment is not selected.',
+    );
+  }
+
   // Transcript cache: keyed by source content hash + provider + language.
   const sourceHash = String(audio.content_hash ?? sha256hex(trackPaths.join('|')));
   const cached = db
@@ -1119,17 +1282,6 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     0.6,
     `Aligning ${words.length.toLocaleString()} words to ${sentences.reduce((a, c) => a + c.length, 0).toLocaleString()} sentences`,
   );
-  const input: EbookSentenceInput[] = [];
-  sentences.forEach((chapter, spineIdx) => {
-    chapter.forEach((s, i) => {
-      input.push({
-        sentenceId: s.id,
-        spineIdx,
-        sentenceOrd: s.ord,
-        tokens: (sentencesText[spineIdx]?.[i] ?? '').split(' ').filter(Boolean),
-      });
-    });
-  });
   const result = alignBook(input, words);
 
   // Edition-compatibility content check: token overlap sampled from three
