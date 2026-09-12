@@ -318,57 +318,59 @@ export function SettingsPage() {
           )}
         </p>
         <div className="role-picker" role="radiogroup" aria-label="Processing mode">
-          {// Three modes only make sense for the whisper engine, where a cheap
-          // two-clip check runs before hours of transcription and there is
-          // something to stop between. Forced alignment does the check and
-          // the work in one short pass, so "verify then ask" and "do it all"
-          // are the same instruction — offering both would be a lie. Under
-          // that engine we show two, mapping the automatic one to 'verify'.
-          (
-            (s.alignEngine === 'forced-align'
-              ? [
-                  [
-                    'verify',
-                    'Align strong matches automatically',
-                    'A confident metadata match is aligned on its own, one book at a time. Anything less certain waits for you.',
-                  ],
-                  [
-                    'manual',
-                    'Do nothing without me',
-                    'Nothing is aligned until you press Start on a pair.',
-                  ],
-                ]
-              : [
-                  [
-                    'verify',
-                    'Verify, then ask me',
-                    'Check and link strong matches automatically; wait before the long transcription.',
-                  ],
-                  [
-                    'auto',
-                    'Do everything automatically',
-                    'Strong matches are transcribed on their own, one at a time.',
-                  ],
-                  [
-                    'manual',
-                    'Do nothing without me',
-                    'Every check and every alignment is started by hand.',
-                  ],
-                ]) as [Settings['processingMode'], string, string][]
-          ).map(([value, label, blurb]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={modeMatches(s, value)}
-              disabled={!isAdmin}
-              className={`role-picker__opt ${modeMatches(s, value) ? 'is-on' : ''}`}
-              onClick={() => void save({ processingMode: value })}
-            >
-              <strong>{label}</strong>
-              <span>{blurb}</span>
-            </button>
-          ))}
+          {
+            // Three modes only make sense for the whisper engine, where a cheap
+            // two-clip check runs before hours of transcription and there is
+            // something to stop between. Forced alignment does the check and
+            // the work in one short pass, so "verify then ask" and "do it all"
+            // are the same instruction — offering both would be a lie. Under
+            // that engine we show two, mapping the automatic one to 'verify'.
+            (
+              (s.alignEngine === 'forced-align'
+                ? [
+                    [
+                      'verify',
+                      'Align strong matches automatically',
+                      'A confident metadata match is aligned on its own, one book at a time. Anything less certain waits for you.',
+                    ],
+                    [
+                      'manual',
+                      'Do nothing without me',
+                      'Nothing is aligned until you press Start on a pair.',
+                    ],
+                  ]
+                : [
+                    [
+                      'verify',
+                      'Verify, then ask me',
+                      'Check and link strong matches automatically; wait before the long transcription.',
+                    ],
+                    [
+                      'auto',
+                      'Do everything automatically',
+                      'Strong matches are transcribed on their own, one at a time.',
+                    ],
+                    [
+                      'manual',
+                      'Do nothing without me',
+                      'Every check and every alignment is started by hand.',
+                    ],
+                  ]) as [Settings['processingMode'], string, string][]
+            ).map(([value, label, blurb]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={modeMatches(s, value)}
+                disabled={!isAdmin}
+                className={`role-picker__opt ${modeMatches(s, value) ? 'is-on' : ''}`}
+                onClick={() => void save({ processingMode: value })}
+              >
+                <strong>{label}</strong>
+                <span>{blurb}</span>
+              </button>
+            ))
+          }
         </div>
         <h3 className="settings-h3">Alignment engine</h3>
         <AlignmentEngine
