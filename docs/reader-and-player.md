@@ -39,10 +39,11 @@ Implemented:
   stepper, variable weight, line height, margins, ragged/justified,
   hyphenation toggle. The chapter is tagged with the book's language so
   hyphenation and RTL fallback are language-aware.
-- Bookmarks, highlights, and notes on text selections, anchored to sentence
-  IDs/character offsets (rendered with the CSS Custom Highlight API; on
-  browsers without it the annotations still save and list, they just are not
-  painted in the text).
+- Bookmarks, highlights in five colours, and notes on text selections,
+  anchored to sentence IDs/character offsets (rendered with the CSS Custom
+  Highlight API; on browsers without it the annotations still save and list,
+  they just are not painted in the text). How a mark is made, recoloured and
+  found again has a section of its own below.
 - Progress with revision-checked sync, percent, page-within-chapter.
 - RTL books (`page-progression-direction`, or inferred from a Hebrew /
   Arabic / Persian / Urdu language tag when the OPF declares no direction),
@@ -64,6 +65,9 @@ Known limitations (deliberate for V1, documented rather than half-built):
   unsupported instead of rendered badly.
 - No dictionary/share popovers yet; no reading ruler.
 - Sentence-range highlights spanning chapter boundaries are not supported.
+- The Notes & marks page returns the 500 most recent marks and does not page
+  past them. A reader who has passed that will still find everything in the
+  book it belongs to; only the cross-book view is truncated.
 
 ## Audiobook player
 
@@ -79,9 +83,16 @@ Known limitations (deliberate for V1, documented rather than half-built):
   multi-file books; chapter sheet with jump.
 - Scrubber with chapter tick marks, elapsed/remaining, time left in the
   current chapter and a chapter progress line; previous/next chapter,
-  configurable skip amounts (10–60 s each way), play/pause, keyboard
-  controls (space/j/k/l/arrows). The page takes an ambient tint from the
-  cover.
+  configurable skip amounts (10, 15, 30, 45 or 60 s, set independently for
+  each direction), play/pause, keyboard controls (space/j/k/l/arrows). The
+  page takes an ambient tint from the cover.
+- The skip buttons are drawn around their number rather than beside it: a ring
+  with a gap at the top, an arrowhead on the end the arc travels towards so
+  back and forward are exact mirrors, and the digits centred in the ring with
+  no stroke crossing them. That last constraint is the reason for the shape.
+  The transport draws these at 36 px, and a number sharing its space with the
+  arrow's tail is simply not readable at that size; only a three-digit label
+  shrinks to fit.
 - Speed 0.5×–3× (fine slider plus presets) with pitch preserved
   (`preservesPitch`), remembered per book.
 - Sleep timer: 15/30/45/60 minutes or end of chapter, extendable.
@@ -99,17 +110,64 @@ Known limitations (deliberate for V1, documented rather than half-built):
   before sync; a killed tab loses at most a few seconds and never regresses
   another device's explicit position (see docs/progress.md).
 
-## Bookmarks and getting back
+## Marks: bookmarks, highlights, notes
 
 In the reader the ribbon button bookmarks the first sentence on the current
 page (or the passage at the top of the viewport in scroll mode), keeping a
 short excerpt; the button fills and a ribbon hangs from the top edge while a
-bookmarked page is shown, and tapping again removes it. Contents has a
-**Bookmarks & notes** tab listing bookmarks, highlights and notes with
-chapter, position and excerpt, each with jump and delete. Any deliberate jump
-(bookmark, chapter, search result, slider) that moves more than a page away
-shows a **Back to where you were** pill naming the chapter you left; it stays
-until used or dismissed.
+bookmarked page is shown, and tapping again removes it. A caret is joined to
+the ribbon as one pill, because the two jobs are adjacent but not the same:
+the ribbon marks this page, the caret opens everything already marked in this
+book. It leads to Contents on its **Bookmarks & notes** tab, which lists
+bookmarks, highlights and notes in book order with chapter, position and
+excerpt, each with jump and delete. The caret exists only once there is
+something behind it, so an unmarked book shows the ribbon on its own.
+
+Selecting text offers five highlight colours — amber, rose, plum, sky and
+sand — as five swatches, and picking one *is* the act of highlighting: there
+is no Highlight button to press first, so highlighting in a chosen colour is
+one tap, the same as highlighting at all. They are muted tints of the app's own
+warm palette rather than the saturated yellows most readers reach for, on the
+grounds that a highlight has to leave the text under it legible; the night and
+dark reader themes carry their own values for the three that would otherwise
+glow. The colour is stored on the annotation, so it is the same colour on
+every device.
+
+A note is drawn differently on purpose — a dashed underline in the accent
+colour rather than a wash — because a note marks a place to come back to and
+a highlight marks a passage worth re-reading, and the two have to be tellable
+apart without being read.
+
+Tapping a mark opens it, which is less trivial than it sounds. Marks are
+painted with the CSS Custom Highlight API rather than by wrapping the text in
+elements: the chapter's DOM comes from the book and must not be rewritten, and
+a wrapper would shift the character offsets that everything else in the reader
+is addressed by. The cost of that choice is that a highlight is paint, with
+nothing under the finger to receive a click, so the hit test runs the other
+way round — the point becomes a character offset and the reader asks which
+mark covers it (`web/src/reader/marks.ts`). Where marks overlap the shortest
+wins: a note written inside a long highlight is both the more specific target
+and the one that cannot be reached any other way. A tap that lands on a mark
+opens it instead of toggling the chrome, or a highlight would be unreachable
+on a phone. The popover shows the quoted passage and the note, and offers the
+swatches again so a highlight can be recoloured after the fact, Edit for a
+note, and Remove for either; it closes on a page turn or a chapter change,
+since it belongs to the mark and not to the page.
+
+The **Notes & marks** page at `/notes` is the other half of the same problem.
+The reader shows a book's own marks while you are inside it, which is no help
+for the note you wrote six weeks ago in a book you have since finished. So
+this page collects every mark from every book, grouped by book with the most
+recently marked book first, filterable by kind and by highlight colour, and
+searchable across the note, the quoted passage, the title and the author at
+once; every entry opens its book at exactly the place it came from. The
+filtering happens in the browser rather than on the server, because the whole
+set is a few hundred rows at most and typing that filters instantly is the
+entire point of a page like this.
+
+Any deliberate jump (bookmark, chapter, search result, slider) that moves more
+than a page away shows a **Back to where you were** pill naming the chapter you
+left; it stays until used or dismissed.
 
 ## Two-way switching
 
@@ -159,6 +217,7 @@ something useful; the book detail JSON is served network-first so pairing
 and progress state never freeze at download time. Audio tracks download and store in bounded 8 MB chunks (no
 whole-book buffering on iPhone) and are served offline with correct HTTP
 Range (206/Content-Range) behavior. **Annotations are online-only in V1**:
-creating bookmarks/highlights/notes needs the server and fails with an
-honest message offline; existing annotations are not part of the offline
-package. Logout removes offline copies (see docs/security.md).
+creating bookmarks/highlights/notes needs the server, as does recolouring a
+highlight or editing a note, and each fails with an honest message offline;
+existing annotations are not part of the offline package. Logout removes
+offline copies (see docs/security.md).

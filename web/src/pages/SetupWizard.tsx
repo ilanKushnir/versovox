@@ -60,7 +60,14 @@ interface SetupStatus {
     audiobookDirs: string[];
     /** Absent on servers whose setup status predates the alignment folder. */
     alignmentDirs?: string[];
-    envPinned: { ebookDirs: boolean; audiobookDirs: boolean; alignmentDirs?: boolean };
+    envPinned: {
+      ebookDirs: boolean;
+      audiobookDirs: boolean;
+      /** Absent on servers whose setup status predates the alignment folder. */
+      alignmentDirs?: boolean;
+      /** Only known once signed in; /api/setup/status does not report it. */
+      defaultLanguage?: boolean;
+    };
   } | null;
   languages: { code: string; label: string }[] | null;
   defaultLanguage: string | null;
@@ -160,6 +167,7 @@ export function SetupWizard({
               ebookDirs: s.envPinned.includes('ebookDirs'),
               audiobookDirs: s.envPinned.includes('audiobookDirs'),
               alignmentDirs: s.envPinned.includes('alignmentDirs'),
+              defaultLanguage: s.envPinned.includes('defaultLanguage'),
             },
           },
           languages: LANGUAGES.map((l) => ({ code: l.code, label: l.label })),
@@ -186,14 +194,18 @@ export function SetupWizard({
     ebookDirs: status?.libraries?.envPinned.ebookDirs ?? false,
     audiobookDirs: status?.libraries?.envPinned.audiobookDirs ?? false,
     alignmentDirs: status?.libraries?.envPinned.alignmentDirs ?? false,
+    defaultLanguage: status?.libraries?.envPinned.defaultLanguage ?? false,
   };
   const languages = status?.languages ?? [{ code: 'en', label: 'English' }];
   const languageLabel = languages.find((l) => l.code === language)?.label ?? language;
   const aligner = preflight?.aligner ?? null;
 
   /**
-   * Server self-check. The folders are sent with it because on first run they
-   * exist only in this form — the server has not been told about them yet.
+   * Server self-check. All three folder lists are sent with it because on
+   * first run they exist only in this form — the server has not been told
+   * about them yet. `alignmentDirs` is the one the app will write to, so the
+   * writable probe needs it; a server whose /api/preflight body schema
+   * predates that field ignores the key rather than rejecting the request.
    */
   const runPreflight = useCallback(async () => {
     setChecking(true);
@@ -201,7 +213,7 @@ export function SetupWizard({
       setPreflight(
         await api<PreflightReport>('/api/preflight', {
           method: 'POST',
-          body: { ebookDirs, audiobookDirs: audioDirs },
+          body: { ebookDirs, audiobookDirs: audioDirs, alignmentDirs: alignDirs },
           headers: setupHeaders,
         }),
       );
@@ -211,7 +223,7 @@ export function SetupWizard({
     } finally {
       setChecking(false);
     }
-  }, [ebookDirs, audioDirs, setupHeaders]);
+  }, [ebookDirs, audioDirs, alignDirs, setupHeaders]);
 
   // Re-check on entering the screen that shows the result. `runPreflight`
   // only changes identity when the chosen folders do, and those cannot change
@@ -289,7 +301,7 @@ export function SetupWizard({
             ...(pinned.ebookDirs ? {} : { ebookDirs }),
             ...(pinned.audiobookDirs ? {} : { audiobookDirs: audioDirs }),
             ...(pinned.alignmentDirs ? {} : { alignmentDirs: alignDirs }),
-            defaultLanguage: language,
+            ...(pinned.defaultLanguage ? {} : { defaultLanguage: language }),
             autoAlign,
           },
         });
@@ -524,6 +536,7 @@ export function SetupWizard({
                 id="wz-lang"
                 className="input"
                 value={language}
+                disabled={pinned.defaultLanguage}
                 onChange={(e) => setLanguage(e.target.value)}
               >
                 {languages.map((l) => (
@@ -532,7 +545,11 @@ export function SetupWizard({
                   </option>
                 ))}
               </select>
-              <span className="hint">Only used when a book doesn&rsquo;t say.</span>
+              <span className="hint">
+                {pinned.defaultLanguage
+                  ? 'Set by VX_DEFAULT_LANGUAGE on the server; change it there.'
+                  : 'Only used when a book doesn’t say.'}
+              </span>
             </div>
             <div className="wizard__actions">
               {firstRun ? (

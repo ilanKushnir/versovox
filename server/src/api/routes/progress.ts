@@ -1,15 +1,43 @@
 import { type FastifyInstance } from 'fastify';
-import { progressBatchSchema } from '@versovox/shared';
+import { z } from 'zod';
+import { progressEventSchema, type ProgressAck, type ProgressEvent } from '@versovox/shared';
 import { type AppContext } from '../../context.js';
 import { applyProgressEvents, getProgressState } from '../../progress/service.js';
 
+/** The envelope must hold, but each event stands or falls on its own. */
+const progressEnvelopeSchema = z.object({ events: z.array(z.unknown()).min(1).max(200) });
+
 export function registerProgressRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post('/api/progress/events', async (req, reply) => {
-    const parsed = progressBatchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'invalid', detail: parsed.error.issues[0]?.message });
+    const envelope = progressEnvelopeSchema.safeParse(req.body);
+    if (!envelope.success) {
+      return reply.code(400).send({ error: 'invalid', detail: envelope.error.issues[0]?.message });
     }
-    return applyProgressEvents(ctx.db, req.user!.id, parsed.data.events);
+    // A batch is a drained offline queue, not a form. Refusing all 200 events
+    // because one is malformed loses the other 199 and leaves the client
+    // resending the same slice forever, blocking every later checkpoint for
+    // every book. Each bad event comes back named and rejected instead, which
+    // is a durable verdict the client can act on by dropping it.
+    const events: ProgressEvent[] = [];
+    const rejected: ProgressAck['results'] = [];
+    for (const raw of envelope.data.events) {
+      const parsed = progressEventSchema.safeParse(raw);
+      if (parsed.success) {
+        events.push(parsed.data);
+        continue;
+      }
+      const eventId = (raw as { eventId?: unknown } | null)?.eventId;
+      // Without an id there is no verdict to deliver; the rest still applies.
+      if (typeof eventId === 'string' && eventId.length > 0 && eventId.length <= 64) {
+        rejected.push({
+          eventId,
+          status: 'rejected',
+          reason: parsed.error.issues[0]?.message ?? 'invalid',
+        });
+      }
+    }
+    const ack = applyProgressEvents(ctx.db, req.user!.id, events);
+    return { ...ack, results: [...ack.results, ...rejected] };
   });
 
   app.get('/api/progress/:bookId', async (req) => {

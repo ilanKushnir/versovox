@@ -1,5 +1,14 @@
 # Research and architecture
 
+This is the research the project was designed from, kept as it was written. It
+is a record, not a description of the running system, and two of its
+conclusions have since been overtaken by what was actually built: the
+alignment pipeline no longer transcribes the audio at all — it forced-aligns
+it against the text the EPUB already contains, with one model for every
+language and no per-language packs — and finished alignments are written out
+as portable files rather than living only in the database. Where this document
+and [alignment.md](alignment.md) disagree, alignment.md is the code.
+
 ## Existing stack: what Versovox should and should not own
 
 | App                                                            | Existing responsibility                                                                                                             | Useful integration surface                                                                            | Versovox boundary                                                                                                                            |

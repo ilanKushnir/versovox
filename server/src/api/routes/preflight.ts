@@ -12,7 +12,7 @@ import {
   modelFiles,
   modelPath,
 } from '../../alignment/model.js';
-import { libraryRoots } from '../../domain/settings.js';
+import { alignmentRoots, libraryRoots } from '../../domain/settings.js';
 import { checkLibraryPath } from '../../setup/paths.js';
 
 /**
@@ -46,6 +46,7 @@ const bodySchema = z
   .object({
     ebookDirs: z.array(z.string().trim().min(1).max(1024)).max(16).optional(),
     audiobookDirs: z.array(z.string().trim().min(1).max(1024)).max(16).optional(),
+    alignmentDirs: z.array(z.string().trim().min(1).max(1024)).max(16).optional(),
   })
   .optional();
 
@@ -232,7 +233,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
       ...(engine.available
         ? {}
         : {
-            fix: 'Reinstall dependencies for this platform (npm ci) — the Docker image ships a matching build. Without it, alignment falls back to transcription.',
+            fix: 'Reinstall dependencies for this platform (npm ci) — the Docker image ships a matching build. Without it, nothing can be aligned.',
           }),
     });
 
@@ -250,7 +251,7 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
       ...(alignerInstalled || download
         ? {}
         : {
-            fix: 'Turn it on at the Alignment step, or fetch it later under Settings → Speech models.',
+            fix: 'Tick the download on the last step, or fetch it later under Settings → Alignment.',
           }),
     });
 
@@ -331,6 +332,30 @@ export function registerPreflightRoutes(app: FastifyInstance, ctx: AppContext): 
               fix: 'Check the path as the SERVER sees it (inside the container) and that the container user may read it.',
             }
           : {}),
+    });
+
+    // 7. The alignment folder. Never a failure — alignment works without one,
+    // the timings simply do not survive rebuilding the container. But it is
+    // the likeliest mistake in the whole setup: every other library line in
+    // the stock compose file ends in `:ro`, and people copy the pattern.
+    const alignDirs = body.data?.alignmentDirs ?? alignmentRoots(db, config);
+    const alignChecks = alignDirs.map((p) => checkLibraryPath(p, 'alignment'));
+    const notWritable = alignChecks.filter((c) => c.writable !== true);
+    const saved = alignChecks.reduce((n, c) => n + (c.matches ?? 0), 0);
+    checks.push({
+      id: 'alignments',
+      label: 'Alignment folder',
+      state: notWritable.length ? 'warn' : 'ok',
+      detail: notWritable.length
+        ? `Cannot save into ${notWritable.map((c) => c.path).join(', ')}`
+        : saved > 0
+          ? `${alignDirs.join(', ')} — ${saved} already saved`
+          : alignDirs.join(', '),
+      ...(notWritable.length
+        ? {
+            fix: 'Mount it read-write (no :ro) and make sure the container user owns it. Without it, alignments are kept inside the app data and a rebuild takes them with it.',
+          }
+        : {}),
     });
 
     return {

@@ -6,8 +6,8 @@ Versovox is a self-hosted, open-source (AGPL-3.0) reading layer for the
 libraries you already have. It mounts your existing ebook and audiobook
 folders **read-only** and gives you a calm, installable app with a serious
 EPUB reader, a resilient audiobook player, conservative edition pairing, and
-— where alignment allows — **exact sentence-level switching between reading
-and listening**.
+— where alignment allows — **sentence-level switching between reading and
+listening**.
 
 It deliberately is _not_ another library manager. Calibre / Calibre-Web
 Automated, Kavita, Audiobookshelf, and Shelfmark keep doing what they do;
@@ -29,22 +29,53 @@ loss-resistant progress.)
   search, Auto/Paper/Sepia/Night/Contrast themes, page dimming, seven
   typefaces (bundled Literata plus system book faces), size stepper,
   weight/leading/margins/justify/hyphenation, "pages left in chapter",
-  bookmarks/highlights/notes, RTL support (declared or inferred from the
-  language), calm hideable chrome. Publisher CSS is intentionally not
-  applied in V1 (see docs/reader-and-player.md for exact limitations).
+  RTL support (declared or inferred from the language), calm hideable
+  chrome. Publisher CSS is intentionally not applied in V1 (see
+  docs/reader-and-player.md for exact limitations).
+- **Marks you can find again**: highlights in five colours, picked as you
+  make one and changed afterwards by tapping the highlight; notes carried by
+  a dashed underline rather than being invisible; bookmarks; and a **Notes &
+  marks** page at `/notes` that collects every mark across every book and
+  searches the note, the quoted passage, the title and the author at once.
 - **Audiobook player**: chapters (embedded or per-file) with prev/next,
   scrubber with chapter ticks and time-left-in-chapter, configurable skips,
   0.5–3× speed with pitch preserved (remembered per book), sleep timer,
   bookmarks, lock-screen Media Session with live position, and an ambient
   tint taken from the cover.
 - **Pairing review**: explainable evidence (title/author/identifiers/
-  language/length/content overlap), automatic linking only above a
-  conservative threshold, manual link/unlink, edition-mismatch warnings,
-  alignment coverage & per-minute confidence.
-- **Exact two-way switching** on aligned pairs: reader ⇄ player at the same
+  language/length/content overlap), manual link/unlink, alignment coverage
+  and per-minute confidence. Metadata alone never links two editions — a
+  strong match waits until the narration itself has been checked against the
+  text, and a pair that fails that check is handed back undecided rather
+  than aligned wrongly.
+- **Two-way switching** on aligned pairs: reader ⇄ player at the same
   sentence — from inside the reader/player, from the book page, and from
   the library's "Listen/Read instead" — with a temporary handoff marker,
   degrading honestly (sentence → paragraph → refusal with a reason).
+  Reading-to-listening deliberately lands _behind_ you, by however far the
+  alignment admits it might be wrong: hearing a sentence twice is a
+  nuisance, hearing one you have not reached is a spoiler.
+- **Alignment by forced alignment, not transcription**: the words are
+  already in the EPUB, so Versovox does not try to discover them. One CTC
+  acoustic model (317 MB, one download, every language) is run over the
+  narration, greedy-decoded into romanized characters with 20 ms timestamps,
+  and matched against the book's own characters. There is one engine and one
+  model; nothing to choose between. On the target server for this project (a
+  6-CPU LXC, `VX_ALIGN_THREADS=4`) the default `standard` precision puts
+  about 7% of the audio through the model and timed a 67-minute book in 72
+  seconds and a 36.7-hour one in 28.6 minutes — roughly six minutes for a
+  six-hour audiobook. `exact` decodes every sample, takes some fifteen times
+  as long, and on everything measured so far is no more accurate at the
+  sentence level. The method, the numbers and the failure modes are in
+  [docs/alignment.md](docs/alignment.md).
+- **Alignments are files, and they outlive the container**: every finished
+  alignment is written into an alignment folder you mount from your own
+  library, as one gzipped JSON document per pair (`.vxalign`, readable with
+  `gunzip`). It is the **only** folder Versovox writes to. Files are matched
+  back to books by a fingerprint of the ebook's sentences and the
+  audiobook's track lengths — never by path or filename — so a from-scratch
+  reinstall imports whatever it recognises after its first scan, and imports
+  each file whole or not at all.
 - **Loss-resistant progress**: IndexedDB-first idempotent events, append-only
   server history with revisions, explicit-intent reconciliation — a stale
   background tab can never override your deliberate rewind.
@@ -56,23 +87,14 @@ loss-resistant progress.)
 - **Libraries refresh themselves**: periodic rescans (default hourly) pick
   up titles added through Calibre-Web Automated, Audiobookshelf, or plain
   folders; pairing waits for indexing to finish so nothing is missed.
-- **Alignment by forced alignment, not transcription**: the words are
-  already in the EPUB, so Versovox does not try to discover them — it runs
-  one pass of a 317 MB CTC acoustic model over the audio and finds where the
-  narration and the book agree. **One download covers all ten languages**,
-  and on a 4-CPU home server it took wall clock of 0.33–0.46× the audio
-  duration, against 0.61 seconds of audio per second of wall clock for the
-  transcription path it replaces — roughly two to three hours for a six-hour
-  book instead of about eleven. Measured on one real human-narrated
-  audiobook (67 minutes, 880 sentences); the method, the numbers and the
-  failure modes are in [docs/alignment.md](docs/alignment.md). The model is
-  Meta's MMS forced aligner, **CC-BY-NC-4.0 (non-commercial)** — surfaced
-  before you download it, and the only non-permissive thing here.
 - **No cloud required**: nothing leaves the machine, and no model is
-  bundled. whisper.cpp and the per-language model catalog are still shipped
-  for narration-language detection, for the legacy transcribe-and-match
-  engine, and for Hebrew via the ivrit.ai fine-tune. Sidecar word-timestamp
-  transcripts you produced elsewhere always win over any model.
+  bundled. The one download is Meta's MMS forced aligner, **CC-BY-NC-4.0
+  (non-commercial)** — the only non-permissive thing here, and never fetched
+  behind your back: the setup wizard offers it, Settings → Alignment has it
+  with a progress bar, and `versovox-model install` gets it on a server with
+  no browser attached. What language a book is in is read from the book
+  itself — its script, then its function words — so nothing is downloaded to
+  answer that either.
 - **Plays well with your reverse proxy**: optional header-based single
   sign-on from Authentik / Authelia / oauth2-proxy, trusted only from the
   proxy's own address (docs/security.md).
@@ -80,6 +102,16 @@ loss-resistant progress.)
   folders and creates the admin; after that you add people or send one-time
   invite links, with three roles (admin, curator, reader) and per-person
   progress, bookmarks and downloads. No open sign-up.
+
+## What it needs
+
+Docker, your existing library folders, and enough CPU to be patient with.
+The image carries ffmpeg and the alignment runtime; the stock compose file
+caps the app at 1 GB of memory and the optional dedicated worker at 2 GB.
+Alignment is the only heavy thing here: give it as many threads as the
+container really has (`VX_ALIGN_THREADS`, default 4) and 317 MB of disk for
+the model. Reading and listening need none of that — a library with no model
+installed still scans, reads, plays and pairs.
 
 ## Quick start
 
@@ -90,10 +122,20 @@ docker compose up -d --build
 # printed in the log, creates the admin, and tests your library folders
 ```
 
+The wizard asks for three things: where your EPUBs are, where your
+audiobooks are, and where alignments may be written. The third is the one
+worth a thought — point it at a folder in your library and your alignments
+survive a rebuild; leave it empty and they live in the app's data volume,
+which a discarded volume takes with it. It also offers the 317 MB model
+download, and shows the server's own check of ffmpeg, free space, folder
+permissions and the alignment runtime before anything is saved.
+
 The stock compose file mounts a bundled sample library — original short
-stories with synthetic narration and a pre-aligned pair — so the reader,
-player, pairing review, and sentence-exact switching are demonstrable
-immediately. Point the mounts at your real folders when ready. Full guide:
+stories with synthetic narration — so the reader, player and pairing review
+are usable within a minute of starting; the samples align like any other
+book once the model is here. Point the mounts at your real folders when
+ready, and note that `./alignments` is mounted read-write on purpose while
+the library mounts are `:ro`. Full guide:
 [docs/self-hosting.md](docs/self-hosting.md) (reverse proxy/HTTPS for PWA
 install, backups, upgrades, PUID/PGID, troubleshooting).
 
@@ -105,33 +147,36 @@ Node ≥ 22.5 and ffmpeg:
 npm ci && npm run build
 VX_EBOOK_DIRS=fixtures/library/ebooks \
 VX_AUDIOBOOK_DIRS=fixtures/library/audiobooks \
-VX_TRANSCRIBE_PROVIDER=fixture node server/dist/index.js
+VX_ALIGNMENT_DIRS=./alignments \
+node server/dist/index.js
 ```
+
+Alignment additionally wants the model in `VX_MODELS_DIR` (`./models` by
+default); download it from Settings → Alignment once the server is up.
 
 ## Documentation
 
-|                                                                                                       |                                                           |
-| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| [Self-hosting](docs/self-hosting.md)                                                                  | Compose, volumes, HTTPS/PWA, backup/restore, upgrades     |
-| [Configuration](docs/configuration.md)                                                                | Every env var, precedence, secret files                   |
-| [Security model](docs/security.md)                                                                    | Auth, CSRF, sanitization, containment, container posture  |
-| [Pairing & alignment](docs/alignment.md)                                                              | The three gates, forced alignment, engines, failure modes |
-| [Reader & player](docs/reader-and-player.md)                                                          | Features and honest limitations                           |
-| [Progress durability](docs/progress.md)                                                               | The event model and reconciliation rules                  |
-| [HTTP API](docs/api.md)                                                                               | Endpoint reference                                        |
-| [Contributing](docs/contributing.md)                                                                  | Dev setup, tests, repo layout                             |
-| [Product brief](docs/product-brief.md) · [Research & architecture](docs/research-and-architecture.md) | Why it is built this way                                  |
+|                                                                                                       |                                                          |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| [Self-hosting](docs/self-hosting.md)                                                                  | Compose, volumes, HTTPS/PWA, backup/restore, upgrades    |
+| [Configuration](docs/configuration.md)                                                                | Every env var, precedence, secret files                  |
+| [Security model](docs/security.md)                                                                    | Auth, CSRF, sanitization, containment, container posture |
+| [Pairing & alignment](docs/alignment.md)                                                              | The three gates, forced alignment, failure modes         |
+| [Reader & player](docs/reader-and-player.md)                                                          | Features and honest limitations                          |
+| [Progress durability](docs/progress.md)                                                               | The event model and reconciliation rules                 |
+| [HTTP API](docs/api.md)                                                                               | Endpoint reference                                       |
+| [Contributing](docs/contributing.md)                                                                  | Dev setup, tests, repo layout                            |
+| [Product brief](docs/product-brief.md) · [Research & architecture](docs/research-and-architecture.md) | Why it is built this way                                 |
 
 ## Status
 
 V1 foundation: the surfaces above are implemented, tested (unit +
 integration + browser QA), and runnable today. Forced alignment has been
-validated end to end on one full-length, human-narrated audiobook — not on a
-corpus, and not yet across all ten languages — so treat the numbers as
-evidence that the approach works rather than as a guarantee for your
-library. Transcribing a full audiobook from scratch (`whisper-cli`) remains
-explicitly experimental. [docs/alignment.md](docs/alignment.md) says exactly
-where each line is.
+validated end to end on full-length, human-narrated audiobooks in English
+and Russian — not on a corpus, and not across every language the romanizer
+knows — so treat the numbers as evidence that the approach works rather than
+as a guarantee for your library. [docs/alignment.md](docs/alignment.md) says
+exactly where each line is.
 
 ## License
 

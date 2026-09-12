@@ -2823,3 +2823,20 @@ select.input {
     opacity: 1;
   }
 }
+
+/* The alignment folder's state, under the folder list it describes. */
+.align-store {
+  margin-block-start: var(--sp-3);
+  display: grid;
+  gap: var(--sp-2);
+}
+.align-store__stat {
+  margin: 0;
+  font-size: 13px;
+  color: var(--vx-text-soft);
+}
+.align-store__actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}

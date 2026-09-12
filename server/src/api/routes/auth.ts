@@ -8,7 +8,7 @@ import { newId } from '../../util/ids.js';
 import { nowIso } from '../../db/index.js';
 import { SESSION_COOKIE } from '../guards.js';
 import { enqueueJob } from '../../jobs/queue.js';
-import { libraryRoots, saveSettings } from '../../domain/settings.js';
+import { alignmentRoots, libraryRoots, saveSettings } from '../../domain/settings.js';
 import { browseDirectories, checkLibraryPath } from '../../setup/paths.js';
 import { hasRole } from '../../auth/roles.js';
 
@@ -44,9 +44,11 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
         ? {
             ebookDirs: roots.ebookDirs,
             audiobookDirs: roots.audiobookDirs,
+            alignmentDirs: alignmentRoots(db, config),
             envPinned: {
               ebookDirs: config.envPinned.includes('ebookDirs'),
               audiobookDirs: config.envPinned.includes('audiobookDirs'),
+              alignmentDirs: config.envPinned.includes('alignmentDirs'),
             },
           }
         : null,

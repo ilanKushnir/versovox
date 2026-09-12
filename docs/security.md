@@ -32,15 +32,17 @@
 - **Route guarding is keyed on the matched route, not the raw URL.** The
   router matches the percent-decoded path, so a guard that inspected
   `req.url` could be bypassed with `/%61pi/...`. Versovox checks the
-  resolved route pattern and the decoded path, marks the four public routes
-  explicitly (`config.public`), and rejects malformed encodings with 400;
-  a regression test covers the encoded-prefix case.
+  resolved route pattern and the decoded path, marks every route that may
+  answer without a session explicitly (`config.public`: health, login, the
+  two invite endpoints, and the first-run wizard and preflight helpers, each
+  of which then applies its own gate), and rejects malformed encodings with
+  400; a regression test covers the encoded-prefix case.
 - **Roles.** `admin` (everything: people, libraries, models, settings),
   `curator` (pairing decisions — link/unlink/confirm/reject/align — and job
   cancel/retry), `reader` (read and listen). Rescans, settings, model
-  downloads, and people management stay admin-only. Every account keeps its
-  own progress, annotations, and offline copies; nothing is shared between
-  users.
+  downloads, the bulk import and export of alignment files, and people
+  management stay admin-only. Every account keeps its own progress,
+  annotations, and offline copies; nothing is shared between users.
 - **No open registration.** Accounts exist only because an admin created
   them (with a password told in person) or issued a one-time **invite
   link** (`/join/<token>`). Invite tokens are 192-bit random values stored
@@ -52,11 +54,19 @@
   login (`403 account-disabled`); role changes and admin password resets
   also sign the user out everywhere. The last active admin can be neither
   demoted, disabled, nor deleted, and admins cannot lock themselves out.
-- **Setup wizard helpers** (`/api/setup/test-paths`, `/api/setup/browse`)
-  answer only for an admin session or, before an admin exists, a request
-  carrying the bootstrap token in the `x-vx-setup-token` header. They are
-  read-only directory probes (existence, readability, a capped shallow
-  count of book files) and never write to disk.
+- **Setup wizard helpers** (`/api/setup/test-paths`, `/api/setup/browse`,
+  `/api/preflight`) answer only for an admin session or, before an admin
+  exists, a request carrying the bootstrap token in the `x-vx-setup-token`
+  header. They report what a folder is (existence, readability, a capped
+  shallow count of book files) and what the server has (audio tools, the
+  alignment runtime, free space, whether its own volumes are writable). All
+  of it is read-only but for one deliberate write: asked about a folder of
+  kind `alignment`, the check creates a zero-byte
+  `.versovox-write-test-<pid>` and deletes it again. Permission bits cannot
+  answer the question that matters there — a `:ro` bind mount shows exactly
+  the bits it would show read-write and then refuses the write — and an
+  operator should find that out during setup rather than after the first
+  alignment has nowhere to go.
 
 ## Reverse-proxy single sign-on (optional)
 
@@ -88,15 +98,26 @@ password.
 ## Offline data and logout
 
 Logout is revocation. Signing out (or discovering the session invalid)
-purges this browser's per-user offline data: the downloaded-books Cache
-Storage bucket and the per-user IndexedDB state (queued progress events,
-cached server state, the download registry). Active downloads are aborted
-and awaited before the purge, so a logout racing a download cannot leave
-freshly written content behind. Downloaded books therefore do not remain
-readable in a browser profile after logout; sign in again and re-download
-to restore offline copies. Device-level reader preferences (font, theme)
-are not user content and are kept. An encrypted survive-logout offline
-mode is not implemented in V1 and is not claimed.
+purges every copy of server **content** this browser holds: the
+downloaded-books Cache Storage bucket, the cached server progress state and
+the download registry. Active downloads are aborted and awaited before the
+purge, so a logout racing a download cannot leave freshly written content
+behind. Downloaded books therefore do not remain readable in a browser
+profile after logout; sign in again and re-download to restore offline
+copies. Device-level reader preferences (font, theme) are not user content
+and are kept. An encrypted survive-logout offline mode is not implemented in
+V1 and is not claimed.
+
+One thing is deliberately **not** purged by revocation: reading positions
+recorded on this device and not yet delivered. They are the reader's own
+writing, not content they have lost the right to see, and an hour read on a
+plane must not die because the session expired while the device was in the
+air. The queue is stamped with the account that recorded it, so it is only
+ever delivered to that account; it is discarded on a deliberate logout
+(after a last flush attempt) and when a different account signs in on this
+browser. Where a queue predates the stamp its ownership cannot be proven, and
+it is adopted by the next account to sign in — the one case where an
+account switch across that upgrade boundary can carry positions over.
 
 Revocation fails closed while online, through two independent paths:
 
@@ -117,13 +138,25 @@ Revocation fails closed while online, through two independent paths:
   (which clear their IndexedDB state and drop to the login screen), and
   cached serving stops — so an app that was already open when the session
   was revoked server-side cannot keep reading cached books online.
+- That same check reads **who** is signed in, not merely that someone is.
+  The offline cache carries the account id it belongs to, and cached book
+  content is served only to that account. This matters where no request
+  ever fails: a reverse-proxy SSO deployment has no cookie and no logout, so
+  a shared tablet moving from one reader to the next would otherwise hand
+  the second one the first one's downloaded books, reading positions and
+  bookmarks. Content belonging to another account — or predating the stamp,
+  and so of unprovable ownership — is deleted from the device rather than
+  served, and open pages are told so they stop advertising those titles as
+  available offline. Upgrading to this behaviour purges any offline cache
+  that has no stamp yet; those titles need downloading once more.
 
 Deliberate airplane-mode offline access is preserved: when the network is
 unreachable, the service worker keeps its last known authorization state
 and downloaded books stay readable.
 
 **Exact limitation:** a device that is already offline cannot learn about
-a server-side revocation until it reconnects. Offline access on such a
+a server-side revocation — or about a change of account — until it
+reconnects. Offline access on such a
 device continues (by design — that is what offline downloads are for)
 until the first moment the app can reach the server again, at which point
 the 401 triggers the purge. There is no cryptographic offline expiry in
@@ -184,7 +217,9 @@ strict allowlist over a spec-compliant HTML parser (parse5):
 
 ## Filesystem containment
 
-- Library roots are mounted read-only; Versovox never writes into them.
+- Source libraries are mounted read-only and Versovox never writes into
+  them. The alignment folder is the one deliberate exception, and it has its
+  own section below.
 - Every path derived from the database or user input resolves through
   containment checks (`resolveWithin`/`realResolveWithin`) that reject
   absolute paths, `..` traversal, prefix-sibling escapes, and symlinks that
@@ -196,27 +231,94 @@ strict allowlist over a spec-compliant HTML parser (parse5):
   and must carry a genuine JPEG/PNG signature before any bytes are copied —
   a symlinked "cover" cannot exfiltrate files from outside (or inside) the
   library.
-- Whisper transcription output lives in a private temp directory under the
-  Versovox cache and is removed in `finally`; source libraries are never
-  written to, so read-only mounts work.
-- The whisper binary and model paths an **admin** sets in the web UI must
-  resolve (after symlinks) inside `VX_MODELS_DIR`. A web session can
-  therefore only run executables the operator placed in the models volume,
-  never arbitrary paths in the container. Environment-pinned paths
-  (`VX_WHISPER_BIN`) are the operator's and are not restricted.
-- External tools (`ffprobe`, `ffmpeg`, whisper) always run via `execFile`
-  with argument arrays (no shell), on `realpath`-resolved absolute file
-  paths, with timeouts and `SIGKILL`.
+- Everything else Versovox derives — the extracted EPUB indexes, cover
+  thumbnails, a cover extraction's temporary file — lives under its own data
+  and cache volumes. The aligner itself writes nothing at all while it works:
+  the narration is streamed through memory in chunks, never staged on disk.
+- **The alignment model is the only thing fetched from the network, and its
+  URL is a constant in the image rather than a setting.** No web session can
+  aim the downloader anywhere else; an admin can start the download or delete
+  the files, and that is the whole of it. The transfer is HTTPS to the
+  published repository and the finished file is accepted on its size rather
+  than a signature, so the trust here is trust in that repository and in TLS —
+  one more reason nothing is downloaded until someone asks for it.
+- `ffprobe` and `ffmpeg` are the only subprocesses left. Both are invoked with
+  argument arrays and no shell — `execFile` for metadata and cover extraction,
+  `spawn` with `-nostdin` and no stdin for the decode stream — always on
+  `realpath`-resolved absolute paths already proved to lie inside a library
+  root. The short runs carry a timeout and a `SIGKILL`; the decode has no
+  clock of its own, because a legitimate audiobook streams for hours, and is
+  killed instead the moment the alignment job's lease is lost or the job is
+  cancelled.
+
+## The alignment folder
+
+Finished alignments are written out as `.vxalign` files so that the hours of
+CPU they cost survive a rebuild of the container. That makes one folder inside
+a mount the operator supplies the only writable path Versovox has, and it is
+worth being exact about what that buys and what it costs.
+
+**Where it is is an admin decision, and it is not a contained path.** The
+folder comes from `VX_ALIGNMENT_DIRS`, or from the list an admin sets in the
+setup wizard or under Settings → Libraries; with neither, alignments go to
+`<data>/alignments`, which survives a restart but not a rebuild that discards
+the volume — and that folder catches them anyway if every configured one
+refuses a write, because losing an alignment over a mount option would throw
+away the expensive half of the work. These are absolute paths and they
+deliberately do not go through the library containment checks — they name a
+mount, they do not sit inside one — so an admin can point them at anything the
+container user can write to. That is an admin capability by construction, the
+same class of decision as choosing the library roots: a `curator` or a
+`reader` cannot reach the setting, and pinning it in the environment takes it
+away from the web UI entirely. What bounds it is the container — a non-root
+user, `no-new-privileges`, and only the volumes the compose file mounts.
+
+**What lands there.** One gzipped JSON document per aligned pair, named
+`<author> - <title> [<pair key>].vxalign`, written first to a dot-prefixed
+temporary in the same directory, fsynced, then renamed into place, so the sync
+client or backup job watching that folder never replicates half a file. The
+only file ever deleted is one whose name ends in the same bracketed pair key —
+the stale copy a retitled book leaves behind — and the temporary itself.
+Nothing else in the folder is read, moved or removed, and the entrypoint's
+ownership fix-up does not touch it either, which is why a folder the container
+user cannot write to is reported as a problem instead of being forced.
+
+**What comes back out of it is untrusted input**, exactly as an EPUB is: the
+folder belongs to the operator, their sync client, and whoever else can reach
+the share. A file is used only if it ends in `.vxalign`, gunzips, parses as
+JSON, carries the Versovox format tag, declares a format version this build
+understands, satisfies the schema, uses fingerprint schemes this build
+implements, and has segment columns that all agree on their length. Identity
+is never taken from a filename, a path or an id — a file is matched to a pair
+by a fingerprint of the ebook's sentence ids and one of the audiobook's track
+durations. Import is all-or-nothing, an alignment already in the database
+always wins over a file, and a pair that already holds segments rejects any
+document naming a sentence it does not know. Nothing in a document is executed
+or rendered: the timings are numbers, and the free-form provenance block is
+only ever read back as a count.
+
+What remains is worth saying plainly. On a fresh install a file whose
+fingerprints match a real pair is believed, and the worst a planted one can do
+is send a listener to the wrong place in the narration — visible immediately,
+and undone by aligning the pair again. Decompression is bounded by the
+container's memory limit rather than by a cap of its own, so a file crafted to
+expand enormously costs an import job rather than being rejected outright.
+Both are accepted V1 limitations of trusting a folder the operator chose.
 
 ## Container posture
 
 - Runs as a non-root user (`PUID`/`PGID`), privileges dropped via `gosu`
-  after volume ownership alignment (`chown -h`, never following symlinks,
-  and never touching library mounts); `no-new-privileges` in compose.
+  after volume ownership alignment (`chown -h`, never following symlinks, and
+  never touching a library mount — the alignment folder included, which is
+  why that one has to be writable by the container user already);
+  `no-new-privileges` in compose.
 - No Docker socket, no privileged mode, no host network.
-- No native Node modules (SQLite is Node's built-in `node:sqlite`), keeping
-  the supply-chain surface small; dependencies are pinned via
-  `package-lock.json`.
+- One native dependency, `onnxruntime-node`, which runs the alignment model;
+  SQLite is Node's built-in `node:sqlite` and nothing else compiles. The
+  supply-chain surface is therefore that one prebuilt runtime plus a short
+  list of pure-JavaScript packages, all pinned by `package-lock.json` and
+  installed with `--ignore-scripts` in both image stages, so no dependency's
+  install script runs during the build.
 
 ## Secrets and logging
 

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { type AudioLocator, type EbookLocator } from '@versovox/shared';
-import { api } from '../api/client';
+import { api, isOffline } from '../api/client';
+import { cachedSwitch } from '../offline/downloads';
 import { type Annotation, type BookDetail, type ResolveResponse } from '../lib/types';
 import { recordCheckpoint, resumeLocator, setActiveLocatorProvider } from '../progress/engine';
 import { bookAudioSupport } from '../lib/audioSupport';
@@ -427,6 +428,19 @@ export function PlayerPage() {
     else el.pause();
   }, [toast]);
 
+  // Play → durable checkpoint with explicit intent. Pressing play is a
+  // deliberate act, so it takes the progress claim back for this session:
+  // without it, a tab that lost the claim to another device only emits
+  // heartbeats, which are recorded and never applied — a whole listening
+  // session would vanish if the tab is killed before it can pause.
+  const onPlay = () => {
+    setPlaying(true);
+    lastHeartbeatRef.current = Date.now();
+    const el = audioRef.current;
+    const ms = el && Number.isFinite(el.currentTime) ? el.currentTime * 1000 : positionMs;
+    void recordCheckpoint(id, 'seek', locatorFor(trackIdx, ms));
+  };
+
   // Pause → durable checkpoint with explicit intent.
   const onPause = () => {
     setPlaying(false);
@@ -533,11 +547,25 @@ export function PlayerPage() {
 
   const switchToText = useCallback(async () => {
     if (!detail?.book.pair) return;
+    const from = locatorNow();
     try {
-      const res = await api<ResolveResponse>(`/api/pairs/${detail.book.pair.pairId}/resolve`, {
-        method: 'POST',
-        body: { from: locatorNow() },
-      });
+      let res: ResolveResponse;
+      try {
+        res = await api<ResolveResponse>(`/api/pairs/${detail.book.pair.pairId}/resolve`, {
+          method: 'POST',
+          body: { from },
+        });
+      } catch (err) {
+        if (!isOffline(err)) throw err;
+        // No network. The downloaded package carries the server's own
+        // answers, so the handoff lands where it would online.
+        const stored = await cachedSwitch(id, from);
+        if (!stored) {
+          toast.show('This spot was not stored for offline switching.');
+          return;
+        }
+        res = stored;
+      }
       if (!res.to || res.to.medium !== 'ebook') {
         // Never silently cross an alignment gap: explain, and point at the
         // nearest verified aligned passage instead.
@@ -550,7 +578,7 @@ export function PlayerPage() {
         return;
       }
       audioRef.current?.pause();
-      void recordCheckpoint(id, 'switch', locatorNow());
+      void recordCheckpoint(id, 'switch', from);
       const to = res.to as EbookLocator;
       navigate(
         `/read/${detail.book.pair.otherBookId}?spine=${to.spineIdx}&char=${to.charOffset ?? 0}${
@@ -662,7 +690,7 @@ export function PlayerPage() {
         ref={audioRef}
         src={src}
         preload="metadata"
-        onPlay={() => setPlaying(true)}
+        onPlay={onPlay}
         onPause={onPause}
         onTimeUpdate={onTimeUpdate}
         onEnded={onEnded}

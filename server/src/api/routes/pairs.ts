@@ -347,6 +347,40 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
     return resolveSwitch(rctx, parsed.data.from);
   });
 
+  /**
+   * A chapter's timings, for reading along with the narration.
+   *
+   * Per chapter rather than per book: a long audiobook has tens of thousands
+   * of segments and the reader only ever needs the one it is showing, so this
+   * stays small enough to fetch on a page turn and to sit in an offline
+   * package. Ordered by position in the text, which is also the order the
+   * player moves through them.
+   */
+  app.get('/api/pairs/:id/segments/:spineIdx', async (req, reply) => {
+    const { id, spineIdx } = req.params as { id: string; spineIdx: string };
+    const handle = latestAlignment(db, id);
+    if (!handle) return reply.code(404).send({ error: 'no-alignment' });
+    const rows = db
+      .prepare(
+        `SELECT sentence_id, sentence_ord, start_ms, end_ms, confidence, source, uncertainty_ms
+           FROM alignment_segments WHERE alignment_id = ? AND spine_idx = ?
+          ORDER BY sentence_ord`,
+      )
+      .all(handle.alignmentId, Number(spineIdx)) as Record<string, unknown>[];
+    return {
+      spineIdx: Number(spineIdx),
+      segments: rows.map((r) => ({
+        sentenceId: String(r.sentence_id),
+        sentenceOrd: Number(r.sentence_ord),
+        startMs: Number(r.start_ms),
+        endMs: Number(r.end_ms),
+        confidence: Number(r.confidence),
+        source: String(r.source),
+        uncertaintyMs: Number(r.uncertainty_ms ?? 0),
+      })),
+    };
+  });
+
   /** Alignment coverage detail for the pairing review screen. */
   app.get('/api/pairs/:id/alignment', async (req, reply) => {
     const { id } = req.params as { id: string };

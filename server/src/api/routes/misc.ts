@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import posix from 'node:path/posix';
 import { type FastifyInstance } from 'fastify';
-import { settingsSchema } from '@versovox/shared';
+import { settingsSchema, type Locator, type SwitchResolution } from '@versovox/shared';
 import { requireRole } from '../../auth/roles.js';
+import { enqueueJob } from '../../jobs/queue.js';
 import { type AppContext, activeDerivedDir } from '../../context.js';
 import { loadManifest, loadSentences } from '../../epub/extract.js';
 import {
@@ -13,9 +14,22 @@ import {
   trackSourceVersion,
 } from '../../audio/integrity.js';
 import { realResolveWithin } from '../../util/paths.js';
-import { alignmentRoots, libraryRoots, resolveSettings, saveSettings } from '../../domain/settings.js';
+import {
+  alignmentRoots,
+  libraryRoots,
+  resolveSettings,
+  saveSettings,
+} from '../../domain/settings.js';
+import { alignmentFolderSummary } from '../../alignment/library.js';
 import { cancelJob, retryJob } from '../../jobs/queue.js';
 import { modelById } from '../../alignment/model.js';
+import {
+  isSwitchable,
+  latestAlignment,
+  resolveAudioToEbook,
+  resolveEbookToAudio,
+  type ResolveContext,
+} from '../../alignment/service.js';
 
 export function registerJobRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
@@ -144,6 +158,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
         ...libraryRoots(db, config),
         alignmentDirs: alignmentRoots(db, config),
       },
+      alignments: alignmentFolderSummary(ctx),
       precedence:
         'Environment variables override in-app settings; in-app settings override defaults.',
     };
@@ -168,6 +183,59 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
     const { values } = resolveSettings(db, config);
     return { settings: values, envPinned };
   });
+
+  /**
+   * Take any saved alignment on disk that belongs to a pair here. Runs by
+   * itself after every scan; this is for the operator who just mounted a
+   * second folder and does not want to wait for one.
+   */
+  app.post('/api/alignments/import', async (req, reply) => {
+    if (!requireRole(req, reply, 'admin')) return reply;
+    const id = enqueueJob(db, 'import-alignments', {}, { dedupeKey: 'import-alignments' });
+    return { queued: Boolean(id) };
+  });
+
+  /** Write out every alignment this server holds that is not already saved. */
+  app.post('/api/alignments/export', async (req, reply) => {
+    if (!requireRole(req, reply, 'admin')) return reply;
+    const id = enqueueJob(db, 'export-alignments', {}, { dedupeKey: 'export-alignments' });
+    return { queued: Boolean(id) };
+  });
+}
+
+/**
+ * Sampling step for an audiobook's offline switch answers. Coarser than a
+ * sentence, but the client always takes the entry at or BEFORE its position,
+ * so the rounding error only ever lands the reader earlier in the text —
+ * the same direction the resolver's own rewind margin errs in, and the only
+ * direction that cannot spoil what has not been heard yet.
+ */
+const OFFLINE_SWITCH_GRID_MS = 5_000;
+
+/**
+ * Upper bound on precomputed switch answers per title, so a pathological
+ * book cannot turn its offline package into a hundred-megabyte JSON. Past
+ * the cap the remaining positions simply have no offline answer.
+ */
+const OFFLINE_SWITCH_MAX_ENTRIES = 60_000;
+
+/** One precomputed cross-medium switch answer. */
+interface OfflineSwitchEntry {
+  /** Ebook packages: the sentence this answer belongs to. */
+  sentenceId?: string;
+  /** Audio packages: whole-book milliseconds from which this answer applies. */
+  atMs?: number;
+  to: Locator | null;
+  resolution: SwitchResolution;
+}
+
+interface OfflineSwitchTable {
+  pairId: string;
+  otherBookId: string;
+  direction: 'ebook-to-audio' | 'audio-to-ebook';
+  /** Audio packages only: the step `atMs` was sampled on. */
+  gridMs?: number;
+  entries: OfflineSwitchEntry[];
 }
 
 /**
@@ -228,6 +296,116 @@ export function registerOfflineRoutes(app: FastifyInstance, ctx: AppContext): vo
     return out;
   };
 
+  /**
+   * Precompute every cross-medium switch answer for a paired title, so the
+   * handoff that is the point of owning both editions still works with no
+   * network.
+   *
+   * The SERVER's resolver produces each answer and the client only looks one
+   * up: the confidence thresholds, gap handling and spoiler-rewind margin
+   * that decide where a switch lands must have exactly one implementation,
+   * and a second one written against a cached segment table would drift from
+   * it silently. Ebook packages are keyed by sentence id (the reader's saved
+   * position always carries one); audio packages are sampled on a time grid
+   * and run-length encoded — an entry is emitted only where the answer
+   * changes, including where it changes to "no aligned position here", so an
+   * unaligned stretch can never inherit the previous entry's answer.
+   */
+  const buildSwitchTable = (bookId: string): OfflineSwitchTable | null => {
+    const pairRow = db
+      .prepare(
+        `SELECT * FROM pairs WHERE (ebook_id = ? OR audio_id = ?) AND status IN ('auto','confirmed')
+         ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END, score DESC LIMIT 1`,
+      )
+      .get(bookId, bookId) as Record<string, unknown> | undefined;
+    if (!pairRow) return null;
+    const pairId = String(pairRow.id);
+    const handle = latestAlignment(db, pairId);
+    if (!handle || !isSwitchable(handle)) return null;
+    const ebookId = String(pairRow.ebook_id);
+    const audioId = String(pairRow.audio_id);
+    const derived = activeDerivedDir(ctx, ebookId);
+    const manifest = loadManifest(derived);
+    const sentences = loadSentences(derived);
+    if (!manifest || !sentences) return null;
+    const tracks = (
+      db
+        .prepare(
+          'SELECT start_ms_absolute, duration_ms FROM audio_tracks WHERE book_id = ? ORDER BY idx',
+        )
+        .all(audioId) as { start_ms_absolute: number; duration_ms: number }[]
+    ).map((t) => ({
+      startMsAbsolute: Number(t.start_ms_absolute),
+      durationMs: Number(t.duration_ms),
+    }));
+    if (tracks.length === 0) return null;
+    const rctx: ResolveContext = {
+      db,
+      alignmentId: handle.alignmentId,
+      gaps: handle.summary.gaps,
+      tracks,
+      sentences,
+      chapterCumChars: manifest.chapters.map((c) => c.cumChars),
+      totalChars: manifest.totalChars,
+    };
+
+    const entries: OfflineSwitchEntry[] = [];
+    const fromEbook = bookId === ebookId;
+    if (fromEbook) {
+      for (let spineIdx = 0; spineIdx < sentences.length; spineIdx++) {
+        for (const s of sentences[spineIdx] ?? []) {
+          if (entries.length >= OFFLINE_SWITCH_MAX_ENTRIES) break;
+          const out = resolveEbookToAudio(rctx, {
+            medium: 'ebook',
+            spineIdx,
+            sentenceId: s.id,
+            charOffset: s.start,
+            pct: 0,
+          });
+          // A sentence with no answer is simply absent: the client treats a
+          // miss and a stored "unavailable" the same way.
+          if (!out.to) continue;
+          entries.push({ sentenceId: s.id, to: out.to, resolution: out.resolution });
+        }
+      }
+    } else {
+      const totalMs = tracks.reduce((a, t) => a + t.durationMs, 0);
+      let previous: string | null = null;
+      for (let atMs = 0; atMs <= totalMs; atMs += OFFLINE_SWITCH_GRID_MS) {
+        if (entries.length >= OFFLINE_SWITCH_MAX_ENTRIES) break;
+        const out = resolveAudioToEbook(rctx, {
+          medium: 'audio',
+          trackIdx: 0,
+          positionMs: 0,
+          bookMs: atMs,
+          pct: 0,
+        });
+        const answer = JSON.stringify([out.to, out.resolution]);
+        if (answer === previous) continue;
+        previous = answer;
+        entries.push({ atMs, to: out.to, resolution: out.resolution });
+      }
+    }
+    if (entries.length === 0) return null;
+    return {
+      pairId,
+      otherBookId: fromEbook ? audioId : ebookId,
+      direction: fromEbook ? 'ebook-to-audio' : 'audio-to-ebook',
+      ...(fromEbook ? {} : { gridMs: OFFLINE_SWITCH_GRID_MS }),
+      entries,
+    };
+  };
+
+  app.get('/api/books/:id/offline-switch', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const exists = db.prepare('SELECT id FROM books WHERE id = ?').get(id);
+    if (!exists) return reply.code(404).send({ error: 'not-found' });
+    const table = buildSwitchTable(id);
+    if (!table) return reply.code(404).send({ error: 'no-alignment' });
+    reply.header('cache-control', 'private, max-age=3600');
+    return table;
+  });
+
   app.get('/api/books/:id/offline-manifest', async (req, reply) => {
     const { id } = req.params as { id: string };
     const book = db.prepare('SELECT * FROM books WHERE id = ?').get(id) as
@@ -261,11 +439,16 @@ export function registerOfflineRoutes(app: FastifyInstance, ctx: AppContext): vo
         }
       }
       // Every referenced derived asset (images) is part of the package, so
-      // an illustrated book is genuinely complete offline.
+      // an illustrated book is genuinely complete offline. The URL must be
+      // spelled EXACTLY as the sanitizer wrote it into the chapter HTML —
+      // one percent-encoded path segment, separators included (see
+      // sanitize.ts) — because Cache Storage matches on the literal URL: an
+      // entry stored under `.../asset/img/pic.png` is invisible to a reader
+      // asking for `.../asset/img%2Fpic.png`.
       const assetDir = path.join(dir, 'assets');
       for (const rel of walkAssets(assetDir)) {
         const asset = fileEntry(
-          `/api/books/${id}/asset/${rel.split('/').map(encodeURIComponent).join('/')}`,
+          `/api/books/${id}/asset/${encodeURIComponent(rel)}`,
           'asset',
           path.join(assetDir, ...rel.split('/')),
         );
@@ -299,6 +482,13 @@ export function registerOfflineRoutes(app: FastifyInstance, ctx: AppContext): vo
           chunkHashes: await hashFileChunks(abs, OFFLINE_AUDIO_CHUNK_BYTES),
         });
       }
+    }
+    // The alignment travels with the package: without it, a downloaded pair
+    // can be read or listened to offline but not switched between, which is
+    // the one thing owning both editions is for.
+    const switchTable = buildSwitchTable(id);
+    if (switchTable) {
+      urls.push(jsonEntry(`/api/books/${id}/offline-switch`, 'switch', switchTable));
     }
     urls.push({ url: `/api/books/${id}`, sizeBytes: 10_000, kind: 'detail', dynamic: true });
     const totalBytes = urls.reduce((a, u) => a + u.sizeBytes, 0);

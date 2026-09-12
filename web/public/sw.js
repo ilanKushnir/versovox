@@ -28,6 +28,15 @@ const PRECACHE = /*__VX_PRECACHE__*/ [
 const SHELL_CACHE = `vx-shell-${BUILD}`;
 const OFFLINE_CACHE = 'vx-offline-v1'; // written by the app's download manager
 
+/* Names the account whose downloads the offline cache holds. Kept inside
+   that cache so the stamp can never outlive the content it describes. */
+const OWNER_KEY = '/__vx/offline-owner';
+
+/* Does the offline cache belong to the account that is signed in right now?
+   Starts true so a cold start with no network still opens downloaded books;
+   a reachable server settles it on the first check. */
+let cacheOwnedByViewer = true;
+
 /* Revocation gate for cache-first book content: while online, the session
    is revalidated against the server (at most once per TTL) before cached
    per-user content is served; a 401/403 purges the offline cache, notifies
@@ -36,12 +45,22 @@ const OFFLINE_CACHE = 'vx-offline-v1'; // written by the app's download manager
    already offline learns about revocation only on reconnect — documented
    in docs/security.md). */
 const authGate = self.vxAuth.createAuthGate({
-  fetchFn: () =>
-    fetch('/api/auth/me', {
+  fetchFn: async () => {
+    const res = await fetch('/api/auth/me', {
       credentials: 'same-origin',
       cache: 'no-store',
       headers: { 'x-vx-csrf': '1' },
-    }),
+    });
+    // WHO is signed in decides this, not merely THAT someone is.
+    if (res.ok) {
+      try {
+        cacheOwnedByViewer = await reconcileCacheOwner(res.clone());
+      } catch {
+        cacheOwnedByViewer = false; // ownership unproven: serve nothing private
+      }
+    }
+    return res;
+  },
   onRevoked: async () => {
     try {
       await caches.delete(OFFLINE_CACHE);
@@ -52,6 +71,75 @@ const authGate = self.vxAuth.createAuthGate({
     for (const c of clients) c.postMessage({ type: 'vx-unauthorized' });
   },
 });
+
+/**
+ * Bind the offline cache to the signed-in account, and report whether its
+ * contents may be served to them.
+ *
+ * A shared device (a family tablet, a kiosk) can move from one account to
+ * the next without a single request ever failing — reverse-proxy SSO has no
+ * cookie and no logout, so nothing ever answers 401 — and the downloaded
+ * books of whoever used it last carry that person's reading progress and
+ * bookmarks. Content that cannot be shown to belong to the current account
+ * is therefore removed from the device rather than served, and the emptied
+ * cache is handed to them.
+ */
+async function reconcileCacheOwner(meRes) {
+  let viewer = null;
+  try {
+    const body = await meRes.json();
+    viewer = body && body.user && body.user.id ? String(body.user.id) : null;
+  } catch {
+    /* unreadable body: the identity stays unknown */
+  }
+  if (!viewer) return false; // fail closed rather than guess who is reading
+
+  const cache = await caches.open(OFFLINE_CACHE);
+  const stamp = await cache.match(OWNER_KEY);
+  if (stamp) {
+    let owner = null;
+    try {
+      owner = (await stamp.json()).userId ?? null;
+    } catch {
+      /* corrupt stamp: treat the cache as unowned */
+    }
+    if (owner === viewer) return true;
+  } else if (!(await hasOfflineContent(cache))) {
+    await stampOwner(viewer);
+    return true;
+  }
+
+  // Another account's downloads, or content from before this stamp existed
+  // and so of unprovable ownership.
+  await caches.delete(OFFLINE_CACHE);
+  await stampOwner(viewer);
+  const clients = await self.clients.matchAll({ includeUncontrolled: true });
+  for (const c of clients) c.postMessage({ type: 'vx-offline-purged', reason: 'account-changed' });
+  // The cache is this account's now, but the caller is holding a response
+  // read before the purge: refuse this one request.
+  return false;
+}
+
+async function hasOfflineContent(cache) {
+  const keys = await cache.keys();
+  return keys.some((r) => new URL(r.url).pathname !== OWNER_KEY);
+}
+
+async function stampOwner(userId) {
+  const cache = await caches.open(OFFLINE_CACHE);
+  await cache.put(
+    OWNER_KEY,
+    new Response(JSON.stringify({ userId }), {
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+}
+
+/** May cached private (per-user) content be served right now? */
+async function allowCachedPrivate() {
+  const sessionOk = await authGate.allowCachedPrivate();
+  return sessionOk && cacheOwnedByViewer;
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -89,15 +177,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          // Only a real app shell may become the offline fallback — never a
-          // proxy's 502 page while the container restarts.
           const type = res.headers.get('content-type') || '';
           if (res.ok && type.includes('text/html')) {
             const copy = res.clone();
-            caches
-              .open(SHELL_CACHE)
-              .then((c) => c.put('/', copy))
-              .catch(() => {});
+            event.waitUntil(cacheShell(copy).catch(() => {}));
           }
           return res;
         })
@@ -123,15 +206,34 @@ self.addEventListener('fetch', (event) => {
       fetch(req)
         .then(async (res) => {
           if (res.ok) {
+            const type = res.headers.get('content-type') || '';
             const cache = await caches.open(OFFLINE_CACHE);
-            // Refresh only titles that were explicitly downloaded.
-            if (await cache.match(req, { ignoreVary: true })) await cache.put(req, res.clone());
+            // Refresh only titles that were explicitly downloaded, and only
+            // from real book JSON: a proxy's 200 maintenance page would
+            // otherwise overwrite a downloaded title's one offline copy,
+            // and nothing short of re-downloading would repair it.
+            if (
+              type.includes('json') &&
+              (await cache.match(req, { ignoreVary: true })) &&
+              (await allowCachedPrivate())
+            ) {
+              await cache.put(req, res.clone());
+            }
+            return res;
+          }
+          // The server answered, badly — a container restart, a failing
+          // proxy. A downloaded title stays readable through it. A 401/403
+          // or 404 is a real answer and is passed through, so the app can
+          // purge or show the title as gone.
+          if (res.status >= 500) {
+            const hit = await caches.match(req, { cacheName: OFFLINE_CACHE, ignoreVary: true });
+            if (hit && (await allowCachedPrivate())) return hit;
           }
           return res;
         })
         .catch(async () => {
           const hit = await caches.match(req, { cacheName: OFFLINE_CACHE, ignoreVary: true });
-          if (hit && (await authGate.allowCachedPrivate())) return hit;
+          if (hit && (await allowCachedPrivate())) return hit;
           return Response.error();
         }),
     );
@@ -140,8 +242,11 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/books/')) {
     event.respondWith(
       caches.match(req, { cacheName: OFFLINE_CACHE, ignoreVary: true }).then(async (hit) => {
-        if (!hit) return fetch(req);
-        if (!(await authGate.allowCachedPrivate())) return fetch(req);
+        // Consulted even on a miss: the first request of a download claims
+        // the still-empty cache for the account making it, so its own
+        // content is never later mistaken for someone else's.
+        const allowed = await allowCachedPrivate();
+        if (!hit || !allowed) return fetch(req);
         return hit;
       }),
     );
@@ -154,14 +259,19 @@ self.addEventListener('fetch', (event) => {
   if (
     url.pathname.startsWith('/assets/') ||
     url.pathname.startsWith('/fonts/') ||
-    url.pathname.startsWith('/icons/')
+    url.pathname.startsWith('/icons/') ||
+    url.pathname === '/manifest.webmanifest'
   ) {
     event.respondWith(
       caches.match(req, { cacheName: SHELL_CACHE }).then(
         (hit) =>
           hit ??
           fetch(req).then((res) => {
-            if (res.ok) {
+            // A hashed bundle answered with the app's index.html is the
+            // server's catch-all route, not the file: storing that HTML
+            // under the file's URL would serve it forever, since these
+            // entries are never revalidated.
+            if (res.ok && !isCatchAllHtml(url, res)) {
               const copy = res.clone();
               caches
                 .open(SHELL_CACHE)
@@ -176,6 +286,29 @@ self.addEventListener('fetch', (event) => {
 });
 
 /**
+ * Store an app shell as the offline navigation fallback — but only a real
+ * shell for THIS build. A newer deploy's index.html points at hashed
+ * bundles that this build's cache does not hold and never will, so keeping
+ * it would turn the next offline cold start into a blank page.
+ */
+async function cacheShell(res) {
+  const html = await res.text();
+  const refs = html.match(/\/assets\/[A-Za-z0-9._~-]+/g);
+  if (refs && !refs.every((u) => PRECACHE.includes(u))) return;
+  const cache = await caches.open(SHELL_CACHE);
+  await cache.put(
+    '/',
+    new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+  );
+}
+
+/** A non-HTML file answered with HTML: the SPA catch-all, not the file. */
+function isCatchAllHtml(url, res) {
+  const type = res.headers.get('content-type') || '';
+  return type.includes('text/html') && !url.pathname.endsWith('.html');
+}
+
+/**
  * Serve a (possibly ranged) audio track request. Prefers the chunked
  * offline copy; falls through to the network when the track has not been
  * downloaded. Never buffers more than one chunk at a time.
@@ -184,7 +317,7 @@ async function serveTrack(req, url) {
   const cache = await caches.open(OFFLINE_CACHE);
   const metaRes = await cache.match(self.vxRange.metaKey(url.pathname));
   if (!metaRes) return fetch(req);
-  if (!(await authGate.allowCachedPrivate())) return fetch(req);
+  if (!(await allowCachedPrivate())) return fetch(req);
   const meta = await metaRes.json(); // { size, chunkSize, contentType }
 
   const rangeHeader = req.headers.get('range');
@@ -207,6 +340,18 @@ async function serveTrack(req, url) {
   }
 
   const span = self.vxRange.chunkSpan(start, end, meta.chunkSize);
+  // Prove every chunk this response promises is present before promising
+  // it. A damaged package (an interrupted download, a chunk evicted under
+  // storage pressure) must fall through to the network rather than hand the
+  // player a valid-looking 206 whose body dies mid-stream, which surfaces
+  // only as a generic decode error.
+  const chunks = [];
+  for (let i = span.first; i <= span.last; i++) {
+    const chunkRes = await cache.match(self.vxRange.chunkKey(url.pathname, i));
+    if (!chunkRes) return fetch(req);
+    chunks.push(chunkRes);
+  }
+
   let idx = span.first;
   const pathname = url.pathname;
   const chunkSize = meta.chunkSize;
@@ -216,12 +361,14 @@ async function serveTrack(req, url) {
         controller.close();
         return;
       }
-      const chunkRes = await cache.match(self.vxRange.chunkKey(pathname, idx));
-      if (!chunkRes) {
-        controller.error(new Error(`missing offline chunk ${idx} for ${pathname}`));
+      let buf;
+      try {
+        buf = new Uint8Array(await chunks[idx - span.first].arrayBuffer());
+      } catch {
+        // Evicted between the check above and now.
+        controller.error(new Error(`unreadable offline chunk ${idx} for ${pathname}`));
         return;
       }
-      const buf = new Uint8Array(await chunkRes.arrayBuffer());
       const bounds = self.vxRange.sliceWithin(idx, chunkSize, buf.length, start, end);
       controller.enqueue(buf.subarray(bounds.from, bounds.to));
       idx += 1;

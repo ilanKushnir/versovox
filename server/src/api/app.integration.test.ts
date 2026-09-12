@@ -844,6 +844,109 @@ describe('Versovox API', () => {
     expect(ranged.headers.etag).toBe(`"${t0.sourceVersion}"`);
   });
 
+  it('offline asset URLs are spelled exactly as the reader requests them', async () => {
+    const em = (await authed({ url: `/api/books/${lanternEbookId}/offline-manifest` })).json() as {
+      urls: { kind: string; url: string }[];
+    };
+    const assets = em.urls.filter((u) => u.kind === 'asset');
+    expect(assets.length).toBeGreaterThan(0);
+    // The sample book's image lives in a subdirectory, which is the case
+    // where a per-segment encoding and the sanitizer's whole-path encoding
+    // disagree: one keeps the separators, the other escapes them.
+    expect(assets.some((a) => a.url.includes('%2F'))).toBe(true);
+    const chapterHtml = (
+      await Promise.all(
+        [0, 1, 2, 3].map((i) => authed({ url: `/api/books/${lanternEbookId}/chapter/${i}` })),
+      )
+    )
+      .map((r) => r.body)
+      .join('');
+    for (const asset of assets) {
+      // Cache Storage matches on the literal URL, so an entry downloaded
+      // under a spelling no chapter asks for is an image that is simply
+      // missing offline.
+      const relative = asset.url.replace(`/api/books/${lanternEbookId}/`, '');
+      expect(chapterHtml).toContain(`src="${relative}"`);
+      expect((await authed({ url: asset.url })).statusCode).toBe(200);
+    }
+  });
+
+  it('the offline package carries the alignment, so a switch works with no network', async () => {
+    const em = (await authed({ url: `/api/books/${lanternEbookId}/offline-manifest` })).json() as {
+      urls: { kind: string; url: string; sizeBytes: number; sha256?: string }[];
+    };
+    const entry = em.urls.find((u) => u.kind === 'switch');
+    expect(entry).toBeDefined();
+    expect(entry!.url).toBe(`/api/books/${lanternEbookId}/offline-switch`);
+
+    const res = await authed({ url: entry!.url });
+    expect(res.statusCode).toBe(200);
+    // The manifest's size and hash must describe the bytes this route serves,
+    // or the downloader refuses the package as tampered with.
+    expect(res.rawPayload.length).toBe(entry!.sizeBytes);
+    const { createHash } = await import('node:crypto');
+    expect(createHash('sha256').update(res.rawPayload).digest('hex')).toBe(entry!.sha256);
+
+    const table = res.json() as {
+      direction: string;
+      otherBookId: string;
+      entries: {
+        sentenceId?: string;
+        to: AudioLocator | null;
+        resolution: { granularity: string };
+      }[];
+    };
+    expect(table.direction).toBe('ebook-to-audio');
+    expect(table.otherBookId).toBe(lanternAudioId);
+
+    // The stored answer for a sentence is the SAME answer the online switch
+    // gives, or an offline handoff lands somewhere else than an online one.
+    const sentences = (
+      await authed({ url: `/api/books/${lanternEbookId}/sentences/1` })
+    ).json() as { sentences: { id: string; start: number }[] };
+    const target = sentences.sentences[2]!;
+    const online = (
+      await authed({
+        method: 'POST',
+        url: `/api/pairs/${pairId}/resolve`,
+        payload: {
+          from: {
+            medium: 'ebook',
+            spineIdx: 1,
+            sentenceId: target.id,
+            charOffset: target.start,
+            pct: 0.3,
+          } satisfies EbookLocator,
+        },
+      })
+    ).json() as { to: AudioLocator | null; resolution: unknown };
+    const stored = table.entries.find((e) => e.sentenceId === target.id);
+    expect(stored).toBeDefined();
+    expect(stored!.to).toEqual(online.to);
+    expect(stored!.resolution).toEqual(online.resolution);
+
+    // The audiobook's package answers the other direction, sampled in time.
+    const am = (await authed({ url: `/api/books/${lanternAudioId}/offline-manifest` })).json() as {
+      urls: { kind: string; url: string }[];
+    };
+    const audioEntry = am.urls.find((u) => u.kind === 'switch');
+    expect(audioEntry).toBeDefined();
+    const audioTable = (await authed({ url: audioEntry!.url })).json() as {
+      direction: string;
+      gridMs: number;
+      otherBookId: string;
+      entries: { atMs: number }[];
+    };
+    expect(audioTable.direction).toBe('audio-to-ebook');
+    expect(audioTable.otherBookId).toBe(lanternEbookId);
+    expect(audioTable.gridMs).toBeGreaterThan(0);
+    // Run-length encoded in time order, so "the answer at or before here" is
+    // well defined.
+    const times = audioTable.entries.map((e) => e.atMs);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(new Set(times).size).toBe(times.length);
+  });
+
   it('unlink makes the pair rejected and pair-scan does not resurrect it', async () => {
     const un = await authed({ method: 'POST', url: `/api/pairs/${pairId}/unlink` });
     expect(un.statusCode).toBe(200);

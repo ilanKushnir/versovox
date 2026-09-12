@@ -15,6 +15,8 @@ import { extractEpub, loadManifest, loadSentences, loadSentencesText } from '../
 import { extractCover, probeAudio } from '../audio/probe.js';
 import { CANDIDATE_THRESHOLD, scorePair } from '../pairing/score.js';
 import { storeAlignment } from '../alignment/service.js';
+import { textFingerprint, timelineFingerprint } from '../alignment/portable.js';
+import { exportAlignments, importAlignments, saveAlignmentFile } from '../alignment/library.js';
 import { detectLanguageFromText } from '../alignment/detect-language.js';
 import {
   isInstalled,
@@ -61,7 +63,59 @@ export const JOB_HANDLERS: Record<string, JobHandler> = {
   'pair-scan': runPairScan,
   align: runAlign,
   'model-download': runModelDownload,
+  'import-alignments': runImportAlignments,
+  'export-alignments': runExportAlignments,
 };
+
+/**
+ * Take back any saved alignment that belongs to a pair on this server.
+ *
+ * Runs after every pairing scan, which is what makes a from-scratch redeploy
+ * quietly restore itself: the books are found, the pairs are re-made, and the
+ * timings that already exist on disk are picked up instead of recomputed. A
+ * pair that already has an alignment here is left alone, so this is a no-op on
+ * every run but the first.
+ */
+export async function runImportAlignments(
+  ctx: AppContext,
+  job: JobRow,
+  guard: LeaseGuard,
+): Promise<void> {
+  const { db } = ctx;
+  jobProgress(db, job.id, job.lease_token, 0.05, 'Looking for saved alignments');
+  const out = importAlignments(ctx, (done, total) => {
+    guard.assertHeld();
+    jobProgress(db, job.id, job.lease_token, total ? (0.05 + 0.9 * done) / total : 1, `Checking ${done} of ${total}`);
+  });
+  guard.assertHeld();
+  const parts = [`Restored ${out.imported}`];
+  if (out.unmatched) parts.push(`${out.unmatched} for books not in this library`);
+  if (out.rejected.length) parts.push(`${out.rejected.length} could not be used`);
+  jobProgress(db, job.id, job.lease_token, 1, out.scanned === 0 ? 'No saved alignments found' : parts.join(' · '));
+  for (const r of out.rejected) ctx.log.warn(`${path.basename(r.file)}: ${r.reason}`);
+}
+
+/** Write out every alignment this server holds that is not already on disk. */
+export async function runExportAlignments(
+  ctx: AppContext,
+  job: JobRow,
+  guard: LeaseGuard,
+): Promise<void> {
+  const { db } = ctx;
+  const out = exportAlignments(ctx, (done, total) => {
+    guard.assertHeld();
+    jobProgress(db, job.id, job.lease_token, total ? done / total : 1, `Saving ${done} of ${total}`);
+  });
+  guard.assertHeld();
+  if (out.problem) ctx.log.warn(out.problem);
+  jobProgress(
+    db,
+    job.id,
+    job.lease_token,
+    1,
+    out.written === 0 ? 'Everything was already saved' : `Saved ${out.written} alignments`,
+  );
+}
 
 /**
  * Stream a catalog speech model into VX_MODELS_DIR. Writes to `<file>.part`
@@ -530,10 +584,16 @@ export async function runIndexEbook(
       }
 
       const prevMeta = JSON.parse(String(book.meta_json ?? '{}'));
+      // What a saved alignment recognises this book by. Computed here because
+      // this is where the sentence index is built, and it is the sentence ids
+      // — not the file's bytes — that a stored timing actually depends on.
+      const textFp = textFingerprint(
+        result.sentencesByChapter.flatMap((chapter) => chapter.map((sent) => sent.id)),
+      );
       db.prepare(
         `UPDATE books SET title = ?, author = ?, language = ?, series = ?, series_idx = ?,
            identifiers_json = ?, cover_path = ?, scan_state = 'ready', scanned_at = ?,
-           meta_json = ?, derived_rev = ?
+           meta_json = ?, derived_rev = ?, text_fingerprint = ?
          WHERE id = ?`,
       ).run(
         result.meta.title,
@@ -553,6 +613,7 @@ export async function runIndexEbook(
           description: result.meta.description,
         }),
         rev,
+        textFp,
         bookId,
       );
       db.exec('COMMIT');
@@ -650,6 +711,7 @@ export async function runIndexAudio(
     const chapters: { title: string; startMs: number; endMs: number }[] = [];
     let hasEmbeddedCover = false;
     let firstTrackAbs: string | null = null;
+    const trackDurationsMs: number[] = [];
 
     for (const [i, t] of trackRows.entries()) {
       const abs = realResolveWithin(String(book.root_dir), String(t.rel_path));
@@ -681,6 +743,7 @@ export async function runIndexAudio(
           endMs: absoluteMs + probe.durationMs,
         });
       }
+      trackDurationsMs.push(probe.durationMs);
       absoluteMs += probe.durationMs;
       title = title ?? probe.album ?? probe.title;
       author = author ?? probe.artist;
@@ -716,7 +779,8 @@ export async function runIndexAudio(
     db.prepare(
       `UPDATE books SET title = COALESCE(?, title), author = COALESCE(?, author),
          language = COALESCE(?, language), duration_ms = ?, cover_path = ?,
-         scan_state = 'ready', scanned_at = ? WHERE id = ?`,
+         scan_state = 'ready', scanned_at = ?, audio_timeline_fingerprint = ?
+       WHERE id = ?`,
     ).run(
       title,
       author,
@@ -724,6 +788,10 @@ export async function runIndexAudio(
       absoluteMs,
       coverPath,
       nowIso(),
+      // Timings are milliseconds on a line made by laying these files end to
+      // end, so it is the sequence of lengths that has to be unchanged for a
+      // saved alignment to still be true of this audiobook.
+      timelineFingerprint(trackDurationsMs),
       bookId,
     );
   } catch (err) {
@@ -811,6 +879,12 @@ export async function runPairScan(ctx: AppContext, job: JobRow, guard: LeaseGuar
       }
     }
   }
+
+  // Before anything is computed: an alignment that already exists on disk for
+  // one of these pairs is hours of work this server does not have to redo.
+  // Higher priority than the align jobs just queued, so a redeploy restores
+  // rather than recomputes.
+  enqueueJob(db, 'import-alignments', {}, { dedupeKey: 'import-alignments', priority: 5 });
 }
 
 export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard): Promise<void> {
@@ -999,6 +1073,10 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
       probes: ctc.probes,
       decodedMs: ctc.decodedMs,
     });
+    // A copy in the library folder, so the work outlives this container.
+    // Deliberately after the database write and deliberately unable to fail
+    // the job: the expensive half is already safe.
+    saveAlignmentFile(ctx, pairId);
     jobProgress(
       db,
       job.id,

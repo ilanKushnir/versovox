@@ -73,6 +73,7 @@ describe('preflight', () => {
       'disk',
       'writable',
       'libraries',
+      'alignments',
     ]);
     // The wizard renders a check by its state and offers the fix as the next
     // step, so a stateless check or an unactionable failure is a dead end.

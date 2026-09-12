@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, ApiError, setUnauthorizedHandler } from './client';
+import { api, ApiError, isOffline, notifyUnauthorized, setUnauthorizedHandler } from './client';
 
 /**
  * Revocation fails closed at the fetch wrapper: EVERY API 401 runs the
@@ -172,6 +172,34 @@ describe('global unauthorized handling', () => {
     expect(purgeRuns).toBe(1);
   });
 
+  it('a raw fetch that reports its own 401 joins the same purge', async () => {
+    // The reader loads chapter HTML with a bare fetch (api() parses JSON),
+    // so revocation discovered there must still fail closed.
+    const order: string[] = [];
+    const unset = setUnauthorizedHandler(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      order.push('purged');
+    });
+    try {
+      await notifyUnauthorized('/api/books/abc123/chapter/4');
+      order.push('caller-continued');
+    } finally {
+      unset();
+    }
+    expect(order).toEqual(['purged', 'caller-continued']);
+  });
+
+  it('notifyUnauthorized honours the credential-entry exemptions', async () => {
+    const handler = vi.fn();
+    const unset = setUnauthorizedHandler(handler);
+    try {
+      await notifyUnauthorized('/api/auth/login');
+    } finally {
+      unset();
+    }
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('a handler failure never masks the original 401', async () => {
     vi.stubGlobal(
       'fetch',
@@ -187,5 +215,25 @@ describe('global unauthorized handling', () => {
     } finally {
       unset();
     }
+  });
+});
+
+describe('bounded requests', () => {
+  it('a connection that accepts but never answers surfaces as offline, not a hang', async () => {
+    // Captive portal / half-open VPN: fetch neither resolves nor rejects on
+    // its own. The caller passes a deadline and gets the offline path.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            );
+          }),
+      ),
+    );
+    const err = await api('/api/auth/me', { signal: AbortSignal.timeout(20) }).catch((e) => e);
+    expect(isOffline(err)).toBe(true);
   });
 });

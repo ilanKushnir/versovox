@@ -6,11 +6,7 @@ import { useToast } from '../components/ui';
 import { IconAlert, IconCheck, IconDownload, IconTrash } from '../components/icons';
 import { formatBytes, formatDate, formatSpan } from '../lib/format';
 import { storageEstimate } from '../offline/downloads';
-import {
-  alignerModel,
-  type ModelInfo,
-  type ModelsResponse,
-} from '../lib/types';
+import { alignerModel, type ModelInfo, type ModelsResponse } from '../lib/types';
 import { applyAppThemeColor } from '../lib/themeColor';
 import { Link } from 'react-router-dom';
 import { folderApi, LibraryFolders } from '../components/LibraryFolders';
@@ -41,6 +37,13 @@ interface SettingsResponse {
     audiobookDirs: string[];
     alignmentDirs: string[];
   };
+  alignments?: {
+    dirs: string[];
+    writeDir: string;
+    files: number;
+    bytes: number;
+    problem: string | null;
+  };
   precedence: string;
 }
 
@@ -51,6 +54,7 @@ export function SettingsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [draft, setDraft] = useState<Partial<Settings>>({});
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [appTheme, setAppTheme] = useState<string>(
     () => localStorage.getItem('vx-app-theme') ?? 'auto',
@@ -65,10 +69,11 @@ export function SettingsPage() {
   const load = useCallback(async () => {
     try {
       setData(await api<SettingsResponse>('/api/settings'));
+      setLoadFailed(false);
       const j = await api<{ jobs: Job[] }>('/api/jobs');
       setJobs(j.jobs);
     } catch {
-      /* handled by empty state below */
+      setLoadFailed(true);
     }
     setStorage(await storageEstimate());
   }, []);
@@ -118,10 +123,33 @@ export function SettingsPage() {
     }
   };
 
+  // Settings is one of the three permanent tabs, so it has to answer for
+  // itself with no server: what is on this device, and why the rest is
+  // missing. A spinner that never resolves is not an answer.
   if (!data) {
+    if (!loadFailed) {
+      return (
+        <main className="app-main" aria-busy="true">
+          <div className="skeleton" style={{ height: 200 }} />
+        </main>
+      );
+    }
     return (
-      <main className="app-main" aria-busy="true">
-        <div className="skeleton" style={{ height: 200 }} />
+      <main className="app-main settings-page" style={{ maxWidth: 900 }}>
+        <header className="page-head">
+          <h1>Settings</h1>
+        </header>
+        <div className="banner banner--error" role="alert">
+          <IconAlert size={16} />
+          <span style={{ flex: 1 }}>
+            Could not reach the server, so server settings are unavailable. Downloaded books still
+            work.
+          </span>
+          <button className="btn btn--ghost" style={{ minHeight: 36 }} onClick={() => void load()}>
+            Try again
+          </button>
+        </div>
+        <OfflineStorageSection storage={storage} />
       </main>
     );
   }
@@ -188,11 +216,7 @@ export function SettingsPage() {
             value={!models ? '—' : modelsReady ? 'Ready' : 'Set up'}
             unit={modelsReady ? 'to align' : 'needed'}
             detail={
-              !models
-                ? 'Unavailable'
-                : modelsReady
-                  ? 'Model installed'
-                  : 'Model not installed yet'
+              !models ? 'Unavailable' : modelsReady ? 'Model installed' : 'Model not installed yet'
             }
             warn={Boolean(models) && !modelsReady}
           />
@@ -280,22 +304,7 @@ export function SettingsPage() {
         speedRatio={s.alignSpeedRatio}
       />
 
-      <section className="settings-section" aria-label="Offline storage" id="offline">
-        <h2>Offline storage</h2>
-        {storage ? (
-          <p style={{ fontSize: 14.5 }}>
-            This browser is using {formatBytes(storage.usage)} of about {formatBytes(storage.quota)}{' '}
-            available for offline books.
-          </p>
-        ) : (
-          <p style={{ fontSize: 14.5, color: 'var(--vx-text-soft)' }}>
-            Storage usage is not reported by this browser.
-          </p>
-        )}
-        <p style={{ color: 'var(--vx-text-soft)', fontSize: 13.5 }}>
-          Downloads are per-title and explicit — manage them from each book page.
-        </p>
-      </section>
+      <OfflineStorageSection storage={storage} />
 
       <section className="settings-section" aria-label="Background activity">
         <h2>Background activity</h2>
@@ -358,18 +367,37 @@ function LibrariesEditor({
   onSaved,
 }: {
   data: SettingsResponse;
-  onSaved: (paths: { ebookDirs: string[]; audiobookDirs: string[] }) => void;
+  onSaved: (paths: {
+    ebookDirs: string[];
+    audiobookDirs: string[];
+    alignmentDirs: string[];
+  }) => void;
 }) {
   const toast = useToast();
   const [ebookDirs, setEbookDirs] = useState(data.paths.ebookDirs);
   const [audioDirs, setAudioDirs] = useState(data.paths.audiobookDirs);
+  const [alignDirs, setAlignDirs] = useState(data.paths.alignmentDirs);
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<'import' | 'export' | null>(null);
   const folders = useMemo(() => folderApi(), []);
   const pinnedE = data.envPinned.includes('ebookDirs');
   const pinnedA = data.envPinned.includes('audiobookDirs');
+  const pinnedAl = data.envPinned.includes('alignmentDirs');
   const dirty =
     ebookDirs.join('\n') !== data.paths.ebookDirs.join('\n') ||
-    audioDirs.join('\n') !== data.paths.audiobookDirs.join('\n');
+    audioDirs.join('\n') !== data.paths.audiobookDirs.join('\n') ||
+    alignDirs.join('\n') !== data.paths.alignmentDirs.join('\n');
+  const run = async (what: 'import' | 'export') => {
+    setBusy(what);
+    try {
+      await api(`/api/alignments/${what}`, { method: 'POST' });
+      toast.show(what === 'import' ? 'Looking for saved alignments' : 'Saving alignments');
+    } catch {
+      toast.show('Could not start that (admin only)');
+    } finally {
+      setBusy(null);
+    }
+  };
   const save = async () => {
     setSaving(true);
     try {
@@ -378,9 +406,10 @@ function LibrariesEditor({
         body: {
           ...(pinnedE ? {} : { ebookDirs }),
           ...(pinnedA ? {} : { audiobookDirs: audioDirs }),
+          ...(pinnedAl ? {} : { alignmentDirs: alignDirs }),
         },
       });
-      onSaved({ ebookDirs, audiobookDirs: audioDirs });
+      onSaved({ ebookDirs, audiobookDirs: audioDirs, alignmentDirs: alignDirs });
       await api('/api/library/rescan', { method: 'POST' }).catch(() => {});
       toast.show('Folders saved — rescanning');
     } catch {
@@ -409,6 +438,46 @@ function LibrariesEditor({
         disabled={pinnedA}
         pinnedNote={pinnedA ? 'Pinned by VX_AUDIOBOOK_DIRS on the server.' : null}
       />
+      <h3 className="settings-h3">Alignment folder</h3>
+      <p className="settings-section__lede">
+        Where the timings are saved once a book has been lined up, so they survive rebuilding the
+        container. This is the only folder Versovox writes to — mount it read-write. Without one,
+        the timings live in the app&rsquo;s own data and a rebuild takes them with it.
+      </p>
+      <LibraryFolders
+        kind="alignment"
+        value={alignDirs}
+        onChange={setAlignDirs}
+        folders={folders}
+        disabled={pinnedAl}
+        pinnedNote={pinnedAl ? 'Pinned by VX_ALIGNMENT_DIRS on the server.' : null}
+      />
+      {data.alignments && (
+        <div className="align-store">
+          <p className="align-store__stat">
+            {data.alignments.files === 0
+              ? 'Nothing saved yet.'
+              : `${data.alignments.files} saved · ${formatBytes(data.alignments.bytes)}`}
+            {data.alignments.problem ? ` — ${data.alignments.problem}` : ''}
+          </p>
+          <div className="align-store__actions">
+            <button
+              className="btn btn--secondary"
+              disabled={busy !== null}
+              onClick={() => void run('export')}
+            >
+              Save all alignments to this folder
+            </button>
+            <button
+              className="btn btn--ghost"
+              disabled={busy !== null}
+              onClick={() => void run('import')}
+            >
+              Import what is already there
+            </button>
+          </div>
+        </div>
+      )}
       {dirty && (
         <button
           className="btn"
@@ -524,6 +593,32 @@ function AccountSelfService({ via }: { via: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * What this device is holding. Reads nothing but the browser's own storage
+ * estimate, so it is also the one part of Settings that still answers when
+ * the server cannot be reached.
+ */
+function OfflineStorageSection({ storage }: { storage: { usage: number; quota: number } | null }) {
+  return (
+    <section className="settings-section" aria-label="Offline storage" id="offline">
+      <h2>Offline storage</h2>
+      {storage ? (
+        <p style={{ fontSize: 14.5 }}>
+          This browser is using {formatBytes(storage.usage)} of about {formatBytes(storage.quota)}{' '}
+          available for offline books.
+        </p>
+      ) : (
+        <p style={{ fontSize: 14.5, color: 'var(--vx-text-soft)' }}>
+          Storage usage is not reported by this browser.
+        </p>
+      )}
+      <p style={{ color: 'var(--vx-text-soft)', fontSize: 13.5 }}>
+        Downloads are per-title and explicit — manage them from each book page.
+      </p>
+    </section>
   );
 }
 
@@ -671,9 +766,9 @@ function AlignmentSection({
     <section className="settings-section" aria-label="Alignment" id="alignment">
       <h2>Alignment</h2>
       <p className="settings-section__lede">
-        Lining a book up with its audiobook is what lets you switch between reading and listening
-        at the same place. It happens once per book, here on this server — no audio, text or
-        metadata ever leaves it.
+        Lining a book up with its audiobook is what lets you switch between reading and listening at
+        the same place. It happens once per book, here on this server — no audio, text or metadata
+        ever leaves it.
       </p>
 
       {model && (
@@ -689,7 +784,9 @@ function AlignmentSection({
       {models && !model && (
         <div className="banner banner--error" role="alert">
           <IconAlert size={16} />
-          <span className="grow">This server&rsquo;s catalog is out of date — update Versovox.</span>
+          <span className="grow">
+            This server&rsquo;s catalog is out of date — update Versovox.
+          </span>
         </div>
       )}
       {model?.installed && runtime && !runtime.available && (

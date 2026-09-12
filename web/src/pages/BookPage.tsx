@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { type AudioLocator, type EbookLocator } from '@versovox/shared';
-import { api } from '../api/client';
+import { api, isOffline } from '../api/client';
 import { type Annotation, type BookDetail, type ResolveResponse } from '../lib/types';
 import { Cover, EmptyState, Sheet, useToast } from '../components/ui';
 import {
@@ -17,6 +17,7 @@ import {
 } from '../components/icons';
 import { formatBytes, formatDuration, formatPct } from '../lib/format';
 import {
+  cachedSwitch,
   cancelDownload,
   getDownloadState,
   removeDownload,
@@ -28,6 +29,13 @@ import { pairStatusLabel } from '../lib/pairLabel';
 import { ambientColorFromImage } from '../lib/ambient';
 import { recordCheckpoint } from '../progress/engine';
 
+/** The paired edition, as far as the offline sheet needs to describe it. */
+interface Companion {
+  id: string;
+  kind: 'ebook' | 'audio';
+  sizeBytes: number;
+}
+
 export function BookPage() {
   const { id = '' } = useParams();
   const [searchParams] = useSearchParams();
@@ -37,6 +45,9 @@ export function BookPage() {
   const [error, setError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [dl, setDl] = useState<DownloadState | null>(null);
+  const [companion, setCompanion] = useState<Companion | null>(null);
+  // `undefined` until this device has been asked; null means never downloaded.
+  const [companionDl, setCompanionDl] = useState<DownloadState | null | undefined>(undefined);
   const [ambient, setAmbient] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
   const [offlineSheet, setOfflineSheet] = useState(false);
@@ -60,6 +71,21 @@ export function BookPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Whether the paired edition is on this device decides what the tandem
+  // card may promise, so it is read (from local storage only) up front.
+  const otherBookId = detail?.book.pair?.otherBookId ?? null;
+  useEffect(() => {
+    setCompanionDl(undefined);
+    if (!otherBookId) return;
+    let cancelled = false;
+    void getDownloadState(otherBookId).then((s) => {
+      if (!cancelled) setCompanionDl(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [otherBookId]);
 
   useEffect(() => {
     if (!detail?.book.hasCover) return;
@@ -89,10 +115,24 @@ export function BookPage() {
     }
     setSwitching(true);
     try {
-      const res = await api<ResolveResponse>(`/api/pairs/${pair.pairId}/resolve`, {
-        method: 'POST',
-        body: { from: progress.locator },
-      });
+      let res: ResolveResponse;
+      try {
+        res = await api<ResolveResponse>(`/api/pairs/${pair.pairId}/resolve`, {
+          method: 'POST',
+          body: { from: progress.locator },
+        });
+      } catch (err) {
+        if (!isOffline(err)) throw err;
+        // No network. The downloaded package carries the server's own
+        // answers for this book, so the handoff lands where it would online.
+        const stored = await cachedSwitch(id, progress.locator);
+        if (!stored) {
+          toast.show('This spot was not stored for offline switching — opening the other edition.');
+          navigate(otherRoute);
+          return;
+        }
+        res = stored;
+      }
       if (!res.to) {
         toast.show(
           res.resolution.reason ?? 'No aligned position here — opening the other edition.',
@@ -162,20 +202,61 @@ export function BookPage() {
         detail.tracks.length > 0 ? detail.tracks.map((t) => t.format) : [book.format],
       );
 
-  const download = async () => {
+  /**
+   * A paired title is two packages. Downloading them one after the other
+   * (rather than in parallel) keeps the progress the sheet shows honest and
+   * stops a large audiobook from starving the small ebook beside it.
+   */
+  const download = async (withCompanion: boolean) => {
+    const wanted: { id: string; onUpdate: (s: DownloadState) => void }[] = [
+      { id, onUpdate: setDl },
+    ];
+    if (withCompanion && companion) wanted.push({ id: companion.id, onUpdate: setCompanionDl });
+    const targets: typeof wanted = [];
+    for (const target of wanted) {
+      if ((await getDownloadState(target.id))?.status !== 'done') targets.push(target);
+    }
     try {
-      toast.show('Downloading for offline…');
-      await startDownload(id, setDl);
-      const final = await getDownloadState(id);
-      if (final?.status === 'done') toast.show('Available offline');
-      else if (final?.status === 'error')
-        toast.show(`Download failed: ${final.error ?? 'unknown'}`);
+      toast.show(targets.length > 1 ? 'Downloading both editions…' : 'Downloading for offline…');
+      for (const target of targets) {
+        await startDownload(target.id, target.onUpdate);
+        const state = await getDownloadState(target.id);
+        if (state?.status === 'done') continue;
+        if (state?.status === 'cancelled') toast.show('Download stopped');
+        else toast.show(`Download failed: ${state?.error ?? 'unknown'}`);
+        return;
+      }
+      toast.show(wanted.length > 1 ? 'Both editions are available offline' : 'Available offline');
     } catch (err) {
       toast.show(
         (err as Error).message.includes('Cache Storage')
           ? 'Offline downloads need HTTPS (or localhost) — see docs/self-hosting.md.'
           : `Download failed: ${(err as Error).message}`,
       );
+    } finally {
+      setDl(await getDownloadState(id));
+      if (companion) setCompanionDl(await getDownloadState(companion.id));
+    }
+  };
+
+  /**
+   * The paired edition's size is not part of this book's detail, and the
+   * sheet must quote it before the user commits — so it is fetched when the
+   * sheet opens. Offline the fetch fails and the sheet simply says the
+   * edition is not on this device without a number.
+   */
+  const openOfflineSheet = async () => {
+    setOfflineSheet(true);
+    const other = book.pair?.otherBookId;
+    if (!other || companion?.id === other) return;
+    setCompanionDl(await getDownloadState(other));
+    try {
+      const d = await api<BookDetail>(`/api/books/${other}`);
+      setCompanion({ id: other, kind: d.book.kind, sizeBytes: d.book.sizeBytes });
+    } catch {
+      // Offline: the edition still exists and still needs downloading, so
+      // say so without a size rather than pretending there is nothing else.
+      setCompanion({ id: other, kind: isEbook ? 'audio' : 'ebook', sizeBytes: 0 });
     }
   };
 
@@ -255,7 +336,7 @@ export function BookPage() {
                 <IconHeadphones size={18} /> {pct > 0.001 ? 'Continue listening' : 'Listen'}
               </Link>
             )}
-            <OfflineIconButton dl={dl} onClick={() => setOfflineSheet(true)} />
+            <OfflineButton dl={dl} onClick={() => void openOfflineSheet()} />
           </div>
         </div>
       </div>
@@ -274,6 +355,14 @@ export function BookPage() {
             <div className="tandem-card__sub">
               {pairStatusLabel(pair)} <Link to="/pairs">Review pairing</Link>
             </div>
+            {dl?.status === 'done' &&
+              companionDl !== undefined &&
+              companionDl?.status !== 'done' && (
+                <div className="tandem-card__sub">
+                  The {isEbook ? 'audiobook' : 'ebook'} is not on this device — switching to it
+                  needs a connection.
+                </div>
+              )}
           </div>
           <button
             className="btn btn--secondary"
@@ -384,10 +473,12 @@ export function BookPage() {
         <OfflineSheet
           book={{ title: book.title, kind: book.kind, sizeBytes: book.sizeBytes }}
           dl={dl}
+          companion={book.pair ? companion : null}
+          companionDl={book.pair ? (companionDl ?? null) : null}
           onClose={() => setOfflineSheet(false)}
-          onDownload={() => {
+          onDownload={(withCompanion) => {
             setOfflineSheet(false);
-            void download();
+            void download(withCompanion);
           }}
           onCancel={() => {
             cancelDownload(id);
@@ -405,27 +496,28 @@ export function BookPage() {
   );
 }
 
-function OfflineIconButton({ dl, onClick }: { dl: DownloadState | null; onClick: () => void }) {
+/**
+ * The one entry point to offline downloads, so it carries a visible word —
+ * an icon alone has no tooltip on touch, which is where most reading and
+ * most flights happen.
+ */
+function OfflineButton({ dl, onClick }: { dl: DownloadState | null; onClick: () => void }) {
   const downloading = dl?.status === 'downloading';
   const done = dl?.status === 'done';
+  const failed = dl?.status === 'error';
   const pctDone = downloading && dl.totalUrls ? Math.round((dl.doneUrls / dl.totalUrls) * 100) : 0;
   return (
     <button
-      className={`btn btn--icon offline-btn ${done ? 'is-done' : ''} ${downloading ? 'is-busy' : ''}`}
+      className={`btn btn--secondary offline-btn ${done ? 'is-done' : ''} ${downloading ? 'is-busy' : ''}`}
       onClick={onClick}
       aria-label={
         done
-          ? 'Available offline — manage'
+          ? 'Available offline — manage the download'
           : downloading
             ? `Downloading for offline, ${pctDone}%`
-            : 'Download for offline'
-      }
-      title={
-        done
-          ? 'Available offline'
-          : downloading
-            ? `Downloading ${pctDone}%`
-            : 'Download for offline'
+            : failed
+              ? 'Download for offline — the last attempt failed'
+              : 'Download for offline'
       }
     >
       {downloading ? (
@@ -433,23 +525,27 @@ function OfflineIconButton({ dl, onClick }: { dl: DownloadState | null; onClick:
           <span className="offline-btn__pct">{pctDone}</span>
         </span>
       ) : done ? (
-        <IconOffline size={20} />
-      ) : dl?.status === 'error' ? (
-        <IconAlert size={20} />
+        <IconOffline size={18} />
+      ) : failed ? (
+        <IconAlert size={18} />
       ) : (
-        <IconDownload size={20} />
+        <IconDownload size={18} />
       )}
+      {downloading ? 'Downloading' : done ? 'Downloaded' : failed ? 'Retry' : 'Download'}
     </button>
   );
 }
 
 /**
  * One sheet for the whole offline lifecycle: explain + confirm the download,
- * show progress with a cancel, or offer removal once the copy is complete.
+ * show progress with a cancel, or offer removal — of a finished copy or of
+ * whatever a stopped attempt left behind.
  */
 function OfflineSheet({
   book,
   dl,
+  companion,
+  companionDl,
   onClose,
   onDownload,
   onCancel,
@@ -457,14 +553,21 @@ function OfflineSheet({
 }: {
   book: { title: string; kind: 'ebook' | 'audio'; sizeBytes: number };
   dl: DownloadState | null;
+  companion: Companion | null;
+  companionDl: DownloadState | null;
   onClose: () => void;
-  onDownload: () => void;
+  onDownload: (withCompanion: boolean) => void;
   onCancel: () => void;
   onRemove: () => void;
 }) {
   const downloading = dl?.status === 'downloading';
   const done = dl?.status === 'done';
   const isEbook = book.kind === 'ebook';
+  const otherMedium = isEbook ? 'audiobook' : 'ebook';
+  const companionStored = companionDl?.status === 'done';
+  // Bytes a stopped or failed attempt left on the device. They are reused by
+  // the next attempt, but until then they are silent occupied space.
+  const partialBytes = dl && !done && !downloading ? dl.storedBytes : 0;
   return (
     <Sheet
       title={done ? 'Available offline' : downloading ? 'Downloading' : 'Download for offline?'}
@@ -477,7 +580,22 @@ function OfflineSheet({
             You can {isEbook ? 'read' : 'listen to'} it with no connection; progress syncs when you
             are back online.
           </p>
+          {companion && !companionStored && (
+            <div className="banner" role="note">
+              <IconAlert size={15} />
+              <span style={{ flex: 1 }}>
+                The {otherMedium} edition is not on this device
+                {companion.sizeBytes > 0 ? ` (${formatBytes(companion.sizeBytes)})` : ''}. Add it to
+                switch between reading and listening offline.
+              </span>
+            </div>
+          )}
           <div className="sheet__actions">
+            {companion && !companionStored && (
+              <button className="btn" onClick={() => onDownload(true)}>
+                <IconDownload size={16} /> Add the {otherMedium}
+              </button>
+            )}
             <button className="btn btn--danger" onClick={onRemove}>
               <IconTrash size={16} /> Remove offline copy
             </button>
@@ -513,16 +631,49 @@ function OfflineSheet({
             fully offline and your position syncs back when you reconnect. Signing out removes
             offline copies.
           </p>
+          {companion && !companionStored && (
+            <p className="sheet__lede">
+              The {otherMedium} edition is a separate download
+              {companion.sizeBytes > 0 ? ` of about ${formatBytes(companion.sizeBytes)}` : ''}. Take
+              only this one and you will have the {isEbook ? 'text' : 'audio'} offline but not the
+              other, and no way to switch between them until you reconnect.
+            </p>
+          )}
+          {partialBytes > 0 && (
+            <p className="sheet__lede">
+              {formatBytes(partialBytes)} from the last attempt is still on this device. Starting
+              again continues from there; removing it frees the space now.
+            </p>
+          )}
           {dl?.status === 'error' && (
             <div className="banner banner--error" role="alert">
               <IconAlert size={15} /> Last attempt failed: {dl.error ?? 'unknown error'}
             </div>
           )}
           <div className="sheet__actions">
-            <button className="btn" onClick={onDownload}>
-              <IconDownload size={16} /> {dl?.status === 'error' ? 'Retry download' : 'Download'}
-            </button>
-            <button className="btn btn--secondary" onClick={onClose}>
+            {companion && !companionStored ? (
+              <>
+                <button className="btn" onClick={() => onDownload(true)}>
+                  <IconDownload size={16} /> Download both
+                  {companion.sizeBytes > 0
+                    ? ` (${formatBytes(book.sizeBytes + companion.sizeBytes)})`
+                    : ''}
+                </button>
+                <button className="btn btn--secondary" onClick={() => onDownload(false)}>
+                  {isEbook ? 'Ebook' : 'Audiobook'} only ({formatBytes(book.sizeBytes)})
+                </button>
+              </>
+            ) : (
+              <button className="btn" onClick={() => onDownload(false)}>
+                <IconDownload size={16} /> {dl?.status === 'error' ? 'Retry download' : 'Download'}
+              </button>
+            )}
+            {partialBytes > 0 && (
+              <button className="btn btn--danger" onClick={onRemove}>
+                <IconTrash size={16} /> Remove partial download
+              </button>
+            )}
+            <button className="btn btn--ghost" onClick={onClose}>
               Not now
             </button>
           </div>

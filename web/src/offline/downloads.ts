@@ -1,6 +1,6 @@
 import { api } from '../api/client';
 import { idbAll, idbClear, idbDelete, idbGet, idbPut, STORES } from '../progress/idb';
-import { type BookSummary } from '@versovox/shared';
+import { type BookSummary, type Locator, type SwitchResolution } from '@versovox/shared';
 
 /**
  * Explicit per-title offline packages. Downloads go into a dedicated Cache
@@ -21,8 +21,8 @@ export const AUDIO_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /* Cache-key conventions — MUST stay in sync with web/public/sw-range.js
    (asserted by web/src/offline/downloads.test.ts). */
-export const chunkKey = (url: string, i: number) =>
-  `${url}${url.includes('?') ? '&' : '?'}vxchunk=${i}`;
+export const chunkPrefix = (url: string) => `${url}${url.includes('?') ? '&' : '?'}vxchunk=`;
+export const chunkKey = (url: string, i: number) => `${chunkPrefix(url)}${i}`;
 export const metaKey = (url: string) => `${url}${url.includes('?') ? '&' : '?'}vxmeta=1`;
 /** In-progress marker recording which source version partial chunks belong to
     (client-only; the service worker never serves from it). */
@@ -84,6 +84,63 @@ export async function cachedBookSummary(bookId: string): Promise<BookSummary | n
   } catch {
     return null;
   }
+}
+
+/** One precomputed cross-medium switch answer (see the offline-switch route). */
+interface OfflineSwitchEntry {
+  sentenceId?: string;
+  atMs?: number;
+  to: Locator | null;
+  resolution: SwitchResolution;
+}
+
+interface OfflineSwitchTable {
+  pairId: string;
+  otherBookId: string;
+  direction: 'ebook-to-audio' | 'audio-to-ebook';
+  gridMs?: number;
+  entries: OfflineSwitchEntry[];
+}
+
+/**
+ * Where a switch to the other edition lands, answered from the downloaded
+ * package alone.
+ *
+ * Every answer here was computed by the SERVER's resolver when the package
+ * was built, so an offline handoff lands exactly where an online one would;
+ * this only picks the right entry. Returns null when the position has no
+ * stored answer — an unaligned passage, or a saved position with no sentence
+ * id — and the caller should say so rather than guess.
+ */
+export async function cachedSwitch(
+  bookId: string,
+  from: Locator,
+): Promise<{ to: Locator | null; resolution: SwitchResolution } | null> {
+  let table: OfflineSwitchTable;
+  try {
+    if (typeof caches === 'undefined') return null;
+    const cache = await caches.open(OFFLINE_CACHE);
+    const hit = await cache.match(`/api/books/${bookId}/offline-switch`);
+    if (!hit) return null;
+    table = (await hit.json()) as OfflineSwitchTable;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(table.entries)) return null;
+  if (from.medium === 'ebook') {
+    if (table.direction !== 'ebook-to-audio' || !from.sentenceId) return null;
+    const hit = table.entries.find((e) => e.sentenceId === from.sentenceId);
+    return hit ? { to: hit.to, resolution: hit.resolution } : null;
+  }
+  if (table.direction !== 'audio-to-ebook' || from.bookMs === undefined) return null;
+  // Entries are run-length encoded in time order: the answer in force is the
+  // last one starting at or before this position.
+  let found: OfflineSwitchEntry | null = null;
+  for (const e of table.entries) {
+    if (e.atMs === undefined || e.atMs > from.bookMs) break;
+    found = e;
+  }
+  return found ? { to: found.to, resolution: found.resolution } : null;
 }
 
 const controllers = new Map<string, AbortController>();
@@ -149,14 +206,45 @@ export async function downloadEntry(
   return buf.byteLength;
 }
 
+/**
+ * Every key this cache holds, spelled the way entries were written.
+ *
+ * Enumerated ONCE per removal and passed down: a package is hundreds of
+ * URLs and the cache is thousands of entries, so re-reading the key list per
+ * URL turns removing one audiobook into thousands of full enumerations.
+ */
+async function cacheKeyPaths(cache: Cache): Promise<string[]> {
+  return (await cache.keys()).map((req) => {
+    // Cache Storage hands back absolute URLs; entries were written relative.
+    try {
+      const parsed = new URL(req.url, 'http://vx.invalid');
+      return `${parsed.pathname}${parsed.search}`;
+    } catch {
+      return req.url; // not a parseable URL: compare as given
+    }
+  });
+}
+
+/**
+ * Every chunk key this cache actually holds for `url`.
+ *
+ * Deletion must ENUMERATE rather than count upwards from zero: chunks go
+ * missing out of order (a failed resume, an eviction under storage
+ * pressure), and a scan that stops at — or a fixed window past — the first
+ * gap orphans everything beyond it, with nothing else in the app that would
+ * ever collect it.
+ */
+async function storedChunkKeys(cache: Cache, url: string, paths?: string[]): Promise<string[]> {
+  const prefix = chunkPrefix(url);
+  const all = paths ?? (await cacheKeyPaths(cache));
+  return all.filter((p) => p.startsWith(prefix) && /^\d+$/.test(p.slice(prefix.length)));
+}
+
 /** Remove a chunked track's completion meta, partial marker, and chunks. */
-async function deleteTrackChunks(cache: Cache, url: string): Promise<void> {
+async function deleteTrackChunks(cache: Cache, url: string, paths?: string[]): Promise<void> {
   await cache.delete(metaKey(url));
   await cache.delete(partialMetaKey(url));
-  let i = 0;
-  for (; await cache.delete(chunkKey(url, i)); i++);
-  // A gap can exist after a failed resume: sweep a bounded window past it.
-  for (let j = i + 1; j < i + 64; j++) await cache.delete(chunkKey(url, j));
+  for (const key of await storedChunkKeys(cache, url, paths)) await cache.delete(key);
 }
 
 /**
@@ -283,6 +371,28 @@ export async function downloadTrackChunked(
 const activeDownloads = new Map<string, Promise<void>>();
 
 /**
+ * Slack demanded on top of a package's own size before starting it. Cache
+ * Storage adds per-entry overhead and the estimate itself is deliberately
+ * fuzzy in every browser, so a download that only just fits is one that
+ * fails halfway.
+ */
+const QUOTA_HEADROOM = 1.1;
+
+/**
+ * What running out of room reads like. The raw DOMException ("The quota has
+ * been exceeded.") tells the reader nothing they can act on.
+ */
+const OUT_OF_SPACE =
+  'There is not enough room on this device. Remove an offline copy or free up space, then try again.';
+
+function isQuotaError(err: unknown): boolean {
+  return (
+    err instanceof DOMException &&
+    (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+  );
+}
+
+/**
  * Purge generation: bumped by purgeOfflineData() once every registered
  * writer has settled. A download continuation from before the bump — e.g.
  * a manifest request that resolves only after logout completed — belongs
@@ -313,11 +423,34 @@ function raceAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/**
+ * Ask the browser to keep this origin's storage.
+ *
+ * Without it Safari evicts everything after seven days of not opening the app
+ * — the downloaded books AND the queue of unsent reading positions — which is
+ * precisely the interval between packing for a trip and getting on the plane.
+ * Asked at the moment someone downloads a book, because that is the clearest
+ * possible statement that they want it kept, and because Chrome grants it on
+ * engagement while Firefox may prompt: neither is something to spring on a
+ * reader who has not asked for anything yet.
+ */
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    const s = navigator.storage;
+    if (!s?.persist || !s.persisted) return;
+    if (await s.persisted()) return;
+    await s.persist();
+  } catch {
+    /* nothing we can do, and nothing that should stop a download */
+  }
+}
+
 export async function startDownload(
   bookId: string,
   onUpdate: (s: DownloadState) => void,
 ): Promise<void> {
   if (!('caches' in window)) throw new Error('Cache Storage is not available in this browser.');
+  void requestPersistentStorage();
   // Register the controller and in-flight marker BEFORE the first await: a
   // purge that begins while the manifest request is still pending must see
   // this attempt, abort it, and wait for it to settle — otherwise the
@@ -350,6 +483,7 @@ export async function startDownload(
       throw err;
     }
     if (controller.signal.aborted || invalidated()) return;
+    const resumed = await getDownloadState(bookId);
     const state: DownloadState = {
       bookId,
       status: 'downloading',
@@ -368,6 +502,27 @@ export async function startDownload(
       await idbPut(STORES.downloads, bookId, { ...state });
       onUpdate({ ...state });
     };
+    // Ask before writing, not after: a package that cannot fit fails here
+    // with something the reader can act on, instead of a raw quota
+    // exception hundreds of megabytes into an audiobook. Bytes an earlier
+    // attempt already stored are part of the reported usage, so they are
+    // credited back or every resume would look too big to finish.
+    const estimate = await storageEstimate();
+    const stillNeeded = Math.max(0, manifest.totalBytes - (resumed?.storedBytes ?? 0));
+    if (
+      estimate &&
+      estimate.quota > 0 &&
+      estimate.quota - estimate.usage < stillNeeded * QUOTA_HEADROOM
+    ) {
+      state.status = 'error';
+      state.error = OUT_OF_SPACE;
+      await save();
+      return;
+    }
+    // Register the attempt BEFORE the first byte is written. Nothing else
+    // records which URLs this package owns, so a tab killed mid-download
+    // would otherwise leave chunks on the device that "Remove offline copy"
+    // could never find.
     await save();
     const cache = await caches.open(OFFLINE_CACHE);
     try {
@@ -396,7 +551,7 @@ export async function startDownload(
         state.status = 'cancelled';
       } else {
         state.status = 'error';
-        state.error = (err as Error).message;
+        state.error = isQuotaError(err) ? OUT_OF_SPACE : (err as Error).message;
       }
       await save();
     }
@@ -415,23 +570,17 @@ export async function removeDownload(bookId: string): Promise<void> {
   const state = await getDownloadState(bookId);
   if (state) {
     const cache = await caches.open(OFFLINE_CACHE);
-    for (const url of state.urls) await deleteEntry(cache, url);
+    const paths = await cacheKeyPaths(cache);
+    for (const url of state.urls) await deleteEntry(cache, url, paths);
   }
   await idbDelete(STORES.downloads, bookId);
 }
 
-async function deleteEntry(cache: Cache, url: string): Promise<void> {
+async function deleteEntry(cache: Cache, url: string, paths?: string[]): Promise<void> {
   await cache.delete(url);
-  await cache.delete(partialMetaKey(url));
-  // Chunked tracks: remove meta + every chunk.
-  if (await cache.delete(metaKey(url))) {
-    for (let i = 0; ; i++) {
-      if (!(await cache.delete(chunkKey(url, i)))) break;
-    }
-  } else {
-    // Meta may be absent after a failed download; sweep chunks anyway.
-    for (let i = 0; await cache.delete(chunkKey(url, i)); i++);
-  }
+  // Chunked tracks: the meta may be absent after a failed download, so the
+  // chunks are enumerated either way.
+  await deleteTrackChunks(cache, url, paths);
 }
 
 /**
@@ -444,14 +593,20 @@ export async function abortAllDownloads(): Promise<void> {
 }
 
 /**
- * Logout-as-revocation: remove every per-user offline artifact from this
- * browser profile — downloaded book content (Cache Storage) and the
- * per-user IndexedDB state (queued progress, cached server state, download
- * registry). Active download controllers are aborted and AWAITED first, so
- * a logout/download race cannot leave freshly written content behind.
- * Called on logout and whenever the session is discovered invalid (any API
- * 401, or the service worker's own revocation check). Documented in
- * docs/security.md.
+ * Logout-as-revocation: remove every copy of server CONTENT this browser
+ * profile holds — downloaded books (Cache Storage), the download registry
+ * and the cached server progress state. Active download controllers are
+ * aborted and AWAITED first, so a logout/download race cannot leave freshly
+ * written content behind. Called on logout and whenever the session is
+ * discovered invalid (any API 401, or the service worker's own revocation
+ * check). Documented in docs/security.md.
+ *
+ * Deliberately NOT touched: the un-synced progress queue. Those are the
+ * reader's own unsent writes, not content they are no longer entitled to
+ * see, and a session that expires mid-flight would otherwise take a whole
+ * offline reading session with it. The queue is owned by the account that
+ * recorded it (progress/engine claimProgressQueue) and discarded only on a
+ * deliberate logout or when a different account signs in here.
  */
 export async function purgeOfflineData(): Promise<void> {
   try {
@@ -472,7 +627,6 @@ export async function purgeOfflineData(): Promise<void> {
   try {
     await idbClear(STORES.downloads);
     await idbClear(STORES.serverState);
-    await idbClear(STORES.pendingEvents);
   } catch {
     /* indexeddb unavailable */
   }

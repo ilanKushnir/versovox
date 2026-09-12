@@ -73,6 +73,16 @@ async function handleUnauthorized(url: string): Promise<void> {
   await unauthorizedCleanup;
 }
 
+/**
+ * Revocation entry point for the few requests that cannot go through api()
+ * because they carry a non-JSON body (the reader's chapter HTML). Same
+ * single-flight purge, same exemptions, so revocation still fails closed no
+ * matter which request discovers it.
+ */
+export async function notifyUnauthorized(url: string): Promise<void> {
+  await handleUnauthorized(url);
+}
+
 export async function api<T>(
   url: string,
   opts: {

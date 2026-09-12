@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { type AudioLocator, type EbookLocator } from '@versovox/shared';
-import { api } from '../api/client';
+import { api, isOffline, notifyUnauthorized } from '../api/client';
+import { cachedSwitch } from '../offline/downloads';
 import {
   type Annotation,
   type BookDetail,
@@ -226,6 +227,10 @@ export function ReaderPage() {
             () => ({ sentences: [] as SentenceIndexEntry[] }),
           ),
         ]);
+        // This one request cannot go through api() (the body is HTML), so
+        // it reports its own 401 — otherwise a revoked session keeps the
+        // reader open and blames the network for it.
+        if (res.status === 401) await notifyUnauthorized(`/api/books/${id}/chapter/${spineIdx}`);
         if (!res.ok) throw new Error(`chapter ${res.status}`);
         const text = await res.text();
         if (!alive) return;
@@ -560,7 +565,13 @@ export function ReaderPage() {
         const off = firstVisibleOffset(map, rect);
         if (off !== null && Math.abs(off - currentOffsetRef.current) > 40) {
           currentOffsetRef.current = off;
-          void recordCheckpoint(id, 'heartbeat', locatorAt(manifest, sentences, spineIdx, off));
+          // Scrolling on is as deliberate as turning a page: the first
+          // checkpoint after this surface (re)gained focus takes the
+          // progress claim back, so a session that lost it to another device
+          // is not reduced to heartbeats nobody applies.
+          const effective = needsClaimRef.current ? 'seek' : 'heartbeat';
+          needsClaimRef.current = false;
+          void recordCheckpoint(id, effective, locatorAt(manifest, sentences, spineIdx, off));
         }
       }, 600);
     };
@@ -662,12 +673,17 @@ export function ReaderPage() {
     if (page > 0) goToPage(page - 1);
     else if (spineIdx > 0 && manifest) {
       // Land on the previous chapter's end.
-      pendingTargetRef.current = {
-        charOffset: Math.max(0, (manifest.chapters[spineIdx - 1]?.charCount ?? 1) - 2),
-      };
+      const back = Math.max(0, (manifest.chapters[spineIdx - 1]?.charCount ?? 1) - 2);
+      pendingTargetRef.current = { charOffset: back };
       setSpineIdx(spineIdx - 1);
+      // Record the crossing itself: the next checkpoint only comes with the
+      // next turn, so a tab that dies here would leave progress a whole
+      // chapter ahead of where the reader actually is. The new chapter's
+      // sentence index is not loaded yet, hence no sentenceId.
+      needsClaimRef.current = false;
+      void recordCheckpoint(id, 'seek', locatorAt(manifest, [], spineIdx - 1, back));
     }
-  }, [prefs.mode, page, spineIdx, manifest, goToPage]);
+  }, [prefs.mode, page, spineIdx, manifest, goToPage, id]);
 
   // Keyboard.
   useEffect(() => {
@@ -922,10 +938,23 @@ export function ReaderPage() {
       pct: pctFor(manifest, spineIdx, currentOffsetRef.current),
     };
     try {
-      const res = await api<ResolveResponse>(`/api/pairs/${detail.book.pair.pairId}/resolve`, {
-        method: 'POST',
-        body: { from },
-      });
+      let res: ResolveResponse;
+      try {
+        res = await api<ResolveResponse>(`/api/pairs/${detail.book.pair.pairId}/resolve`, {
+          method: 'POST',
+          body: { from },
+        });
+      } catch (err) {
+        if (!isOffline(err)) throw err;
+        // No network. The downloaded package carries the server's own
+        // answers, so the handoff lands where it would online.
+        const stored = await cachedSwitch(id, from);
+        if (!stored) {
+          toast.show('This spot was not stored for offline switching.');
+          return;
+        }
+        res = stored;
+      }
       if (!res.to || res.to.medium !== 'audio') {
         // Never silently cross an alignment gap: explain, and point at the
         // nearest verified aligned narration instead.
