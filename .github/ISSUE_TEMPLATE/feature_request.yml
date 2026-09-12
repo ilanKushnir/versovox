@@ -1,0 +1,29 @@
+name: Feature request
+description: Something ReadPort should be able to do and cannot.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ReadPort is deliberately small: a reader, a player, and the machinery
+        that keeps them in step. The best requests describe a thing you were
+        trying to do with your own library, not a feature another app has.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you were trying to do
+      description: The situation, not the solution.
+      placeholder: |
+        I have a series where every book is split into two audiobook files, and
+        I want to see them as one thing when I am deciding what to read next.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you think would solve it
+      description: If you have an idea. It is fine not to.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today

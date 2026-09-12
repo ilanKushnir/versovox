@@ -1,0 +1,67 @@
+name: Bug report
+description: Something does not work the way it says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The most useful bug reports say what you
+        did, what happened, and what you expected — in that order.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the exact steps, and the text of any error you saw.
+      placeholder: |
+        1. Opened a book with both editions paired
+        2. Tapped "Listen from here" on page 40
+        3. The player started at the beginning of the chapter instead
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ReadPort version
+      description: The image tag you are running, or the commit if you built it yourself.
+      placeholder: "0.9.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is running
+      options:
+        - Docker Compose (the stock file)
+        - Docker Compose (modified)
+        - Docker, hand-run
+        - From source (npm)
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      description: Only if the problem is in the interface.
+      placeholder: Safari 18 on iPhone 15, installed to the home screen
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: |
+        `docker compose logs --tail 200 readport`. Redact anything you would
+        rather not publish — paths and book titles are fine to remove.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I looked at Settings → the self-check, and it reports no failures
+        - label: I searched the existing issues
