@@ -51,6 +51,14 @@ export interface RawTiming {
    * the reader a sentence-perfect switch.
    */
   exact?: boolean;
+  /**
+   * How far `startMs` could be wrong, in milliseconds, in the engine's own
+   * judgement. Carried through to the segment so the read-to-listen handoff
+   * can step back by exactly this much and land on narration the reader has
+   * already passed instead of ahead of it. Omitted means "no estimate", which
+   * is recorded as zero rather than guessed at here.
+   */
+  uncertaintyMs?: number;
 }
 
 export interface TimingOptions {
@@ -94,6 +102,7 @@ interface Row {
   score: number;
   exact: boolean;
   interpolated: boolean;
+  uncertaintyMs: number;
 }
 
 /**
@@ -119,6 +128,7 @@ export function segmentsFromTimings(
       score: t ? t.score : 0,
       exact: t ? t.exact === true : false,
       interpolated: false,
+      uncertaintyMs: t ? Math.max(0, Math.round(t.uncertaintyMs ?? 0)) : 0,
     };
   });
 
@@ -154,6 +164,7 @@ export function segmentsFromTimings(
       endMs: Math.max(startMs, bound(r.endMs, audioMs)),
       confidence: round3(confidence),
       source,
+      uncertaintyMs: r.uncertaintyMs,
     });
     prevEnd = r.endMs;
   }
@@ -216,12 +227,17 @@ function interpolateShortRuns(rows: Row[], maxRun: number): void {
         .reduce((acc, r) => acc + Math.max(1, r.sentence.tokens.length), 0);
       let t = prev.endMs;
       const span = Math.max(0, next.startMs - prev.endMs);
+      // Split by token count, which is a guess about pace; the whole span is
+      // therefore in play as error, on top of whatever the neighbours already
+      // admit to.
+      const unsure = Math.max(prev.uncertaintyMs, next.uncertaintyMs) + Math.round(span / 2);
       for (let k = i; k < j; k++) {
         const w = Math.max(1, rows[k]!.sentence.tokens.length) / total;
         rows[k]!.startMs = Math.round(t);
         t += span * w;
         rows[k]!.endMs = Math.round(t);
         rows[k]!.interpolated = true;
+        rows[k]!.uncertaintyMs = unsure;
       }
     }
     i = j - 1;

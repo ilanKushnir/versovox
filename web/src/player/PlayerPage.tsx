@@ -208,10 +208,15 @@ export function PlayerPage() {
             const abs = (d.tracks[t]?.startMsAbsolute ?? 0) + p;
             setHandoffMarkerPct(total > 0 ? abs / total : null);
             const gran = searchParams.get('granularity');
+            // A handoff aims deliberately behind the reader, so an unexplained
+            // rewind would read as a bug rather than as the safeguard it is.
+            const back = Math.round(Number(searchParams.get('back') ?? 0) / 1000);
             toast.show(
-              gran === 'sentence'
-                ? 'Continuing from your reading position'
-                : 'Continuing near your reading position',
+              back >= 3
+                ? `Starting ${back} seconds before your reading position, so nothing is spoiled`
+                : gran === 'sentence'
+                  ? 'Continuing from your reading position'
+                  : 'Continuing near your reading position',
             );
           }
           void recordCheckpoint(id, handoff ? 'switch' : 'seek', {

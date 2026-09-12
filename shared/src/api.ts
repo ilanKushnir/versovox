@@ -285,6 +285,21 @@ export const settingsSchema = z.object({
    */
   alignEngine: z.enum(['none', 'fixture', 'forced-align', 'whisper-cli']).default('forced-align'),
   /**
+   * How much of the narration the forced aligner actually listens to.
+   *  - `fast` (default) samples a few seconds every couple of minutes and
+   *    interpolates between the matches, then spends a second pass on the
+   *    stretches where the reading rate says something happened. A six-hour
+   *    audiobook takes minutes instead of an hour, and switching still lands
+   *    on the right paragraph.
+   *  - `careful` samples twice as often. Worth it for heavily broken-up books
+   *    (dense chapter breaks, interviews, verse).
+   *  - `thorough` listens to every second. Sentence-perfect timings at roughly
+   *    fifteen times the cost; for a book you intend to read along with
+   *    word by word.
+   * Ignored by every engine except `forced-align`.
+   */
+  alignPrecision: z.enum(['fast', 'careful', 'thorough']).default('fast'),
+  /**
    * How much work a library scan may start on its own.
    *  - `auto`   verify a strong match, then transcribe it in full, unattended
    *  - `verify` verify and link, then wait for you before the long transcription
@@ -297,6 +312,6 @@ export const settingsSchema = z.object({
    * wall clock (0.4 means a 1-hour book takes ~2.5 hours). Written by the
    * worker from real runs, never guessed; 0 means "not measured yet".
    */
-  transcribeSpeedRatio: z.number().min(0).max(20).default(0),
+  transcribeSpeedRatio: z.number().min(0).max(500).default(0),
 });
 export type Settings = z.infer<typeof settingsSchema>;

@@ -360,11 +360,12 @@ export function PipelineDiagram() {
       ))}
       <p className="pipeline__foot">
         One model covers every language — set it up in{' '}
-        <Link to="/settings#speech-models">Settings → Models</Link>. Step 2 is the slow part, an
-        hour or so of computing per two to three hours of audio, which is why it runs one book at a
-        time and reports live progress above. How many pins turn up is also the edition check: a
-        narration that is not this text produces almost none, and Versovox refuses to publish
-        timings rather than inventing them.
+        <Link to="/settings#speech-models">Settings → Models</Link>. Step 2 is the expensive part,
+        about a minute of computing per hour of audio — it samples the narration rather than
+        listening to every second — which is why it runs one book at a time and reports live
+        progress above. How many pins turn up is also the edition check: a narration that is not
+        this text produces almost none, and Versovox refuses to publish timings rather than
+        inventing them.
       </p>
     </div>
   );

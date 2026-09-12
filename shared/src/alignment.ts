@@ -17,6 +17,14 @@ export const alignmentSegmentSchema = z.object({
   endMs: z.number().int().min(0),
   confidence: z.number().min(0).max(1),
   source: alignmentSourceSchema,
+  /**
+   * How far `startMs` may be wrong, in milliseconds, as the aligner judged it.
+   * Sparse alignment interpolates between acoustic anchors, so a timing is only
+   * as good as its distance to the nearest one. The read-to-listen handoff
+   * subtracts this, which is what keeps a switch from landing on narration the
+   * reader has not reached yet.
+   */
+  uncertaintyMs: z.number().int().min(0).default(0),
 });
 export type AlignmentSegment = z.infer<typeof alignmentSegmentSchema>;
 
@@ -70,6 +78,12 @@ export const SWITCH_MIN_CONFIDENCE = 0.25;
 export const SWITCH_MAX_SENTENCE_DISTANCE = 8;
 /** Audio-side bound: max ms past a segment's end before it is a gap, not a match. */
 export const SWITCH_MAX_AUDIO_DRIFT_MS = 30_000;
+/**
+ * Ceiling on the backward step a read-to-listen switch takes to stay behind
+ * the reader. A switch that rewinds further than this is not a safety margin
+ * any more, it is a different place in the book.
+ */
+export const SWITCH_MAX_REWIND_MS = 45_000;
 
 export const switchResolutionSchema = z.object({
   granularity: z.enum(['sentence', 'paragraph', 'chapter', 'none']),
@@ -78,6 +92,12 @@ export const switchResolutionSchema = z.object({
   source: alignmentSourceSchema.optional(),
   /** True when the resolution is a nearby-but-not-exact mapping. */
   approximate: z.boolean().optional(),
+  /**
+   * How far behind the requested position the answer deliberately lands, in
+   * milliseconds. Present only on a read-to-listen switch that stepped back;
+   * the player says so rather than letting the rewind look like a bug.
+   */
+  rewindMs: z.number().int().min(0).optional(),
   reason: z.string().optional(),
 });
 export type SwitchResolution = z.infer<typeof switchResolutionSchema>;

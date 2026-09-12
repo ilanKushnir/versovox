@@ -1,6 +1,6 @@
 {
   "name": "versovox",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "description": "Self-hosted tandem reading: a non-destructive reader/player overlay for existing ebook and audiobook libraries.",

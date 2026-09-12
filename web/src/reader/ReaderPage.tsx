@@ -875,8 +875,11 @@ export function ReaderPage() {
       }
       void recordCheckpoint(id, 'switch', from);
       const to = res.to as AudioLocator;
+      const back = res.resolution.rewindMs ?? 0;
       navigate(
-        `/listen/${detail.book.pair.otherBookId}?track=${to.trackIdx}&pos=${to.positionMs}&handoff=1&granularity=${res.resolution.granularity}`,
+        `/listen/${detail.book.pair.otherBookId}?track=${to.trackIdx}&pos=${to.positionMs}` +
+          `&handoff=1&granularity=${res.resolution.granularity}` +
+          (back > 0 ? `&back=${back}` : ''),
       );
     } catch {
       toast.show('Switching failed — server unreachable?');

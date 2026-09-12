@@ -275,4 +275,15 @@ CREATE TABLE invites (
 );
 `,
   },
+  {
+    version: 6,
+    sql: `
+-- How far a segment's start may be wrong, in milliseconds, as the aligner
+-- itself judged it. Sparse alignment interpolates between acoustic anchors,
+-- so a timing is only as good as its distance to the nearest one, and the
+-- read-to-listen handoff subtracts this so it lands on narration already
+-- read instead of ahead of the reader. 0 = the engine offered no estimate.
+ALTER TABLE alignment_segments ADD COLUMN uncertainty_ms INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

@@ -1,12 +1,22 @@
 import { segmentsFromTimings, type AlignerResult, type EbookSentenceInput } from '../timings.js';
-import { matchChars, type BookSentence, type MatchStats } from './anchors.js';
+import { matchChars, type BookSentence, type MatchResult, type MatchStats } from './anchors.js';
 import {
   decodeBook,
+  openProbeDecoder,
   type DecodedBook,
   type DecodedChar,
   type EmissionOptions,
+  type ProbeDecoder,
+  type ProbeDecoderOptions,
 } from './emissions.js';
 import { romanize } from './romanize.js';
+import {
+  assembleProbes,
+  gridWindows,
+  refineWindows,
+  type ProbeRun,
+  type SparsePlan,
+} from './sparse.js';
 
 /**
  * Forced alignment: line up an audiobook against the ebook text we already
@@ -14,16 +24,23 @@ import { romanize } from './romanize.js';
  *
  * Free-form speech recognition is the wrong tool for this job. We are not
  * trying to discover the words — they are sitting in the EPUB. We only need to
- * know *when* each one is spoken. So the engine runs one pass of a CTC
- * acoustic model over the audio, greedy-decodes its emissions into a stream of
- * romanized characters with 20 ms timestamps, and then finds where that stream
- * and the book's own romanized characters agree.
+ * know *when* each one is spoken. So the engine runs a CTC acoustic model over
+ * the audio, greedy-decodes its emissions into a stream of romanized characters
+ * with 20 ms timestamps, and then finds where that stream and the book's own
+ * romanized characters agree.
  *
  * Agreement is established with character n-grams that occur exactly once on
  * each side, ordered by a longest increasing subsequence. That matters: it
  * assumes nothing about text position being proportional to audio position, so
  * front matter, credits, chapter announcements, endnotes and an index simply
  * produce no anchors instead of dragging the whole alignment off course.
+ *
+ * And it does not need to hear the whole book. Anchors are what the timeline is
+ * built from, and a handful of seconds every couple of minutes yields plenty of
+ * them; the rest is interpolation between anchors that a second pass checks and
+ * repairs where the implied reading rate says something happened (see
+ * sparse.ts). That is the difference between an hour of compute for a six-hour
+ * audiobook and about five minutes of it.
  *
  * Measured on a real human-narrated audiobook (67 minutes, 880 sentences):
  * 18,913 candidate anchors, 18,902 of them monotone, 830 sentences timed, and
@@ -63,13 +80,21 @@ export interface CtcAlignRequest {
   /** 0..1 over the decode, which is essentially all of the wall clock. */
   onProgress?: (fraction: number, detail: string) => void;
   /**
-   * The acoustic front end, defaulting to {@link decodeBook}. The only reason
-   * it is injectable is testing: everything this module actually decides —
-   * refusal, gaps, how timings become segments — is downstream of the decode,
-   * and a test that had to carry the 317 MB model (and onnxruntime, which CI
-   * does not install) could not cover any of it.
+   * Listen to short probes on this schedule instead of the whole book. Absent
+   * means decode every sample, which is slower by more than an order of
+   * magnitude and, on everything measured so far, no more accurate at the
+   * sentence level.
+   */
+  plan?: SparsePlan;
+  /**
+   * The acoustic front ends, defaulting to the real ones. The only reason they
+   * are injectable is testing: everything this module actually decides —
+   * refusal, refinement, gaps, how timings become segments — is downstream of
+   * the decode, and a test that had to carry the 317 MB model (and onnxruntime,
+   * which CI does not install) could not cover any of it.
    */
   decode?: (opts: EmissionOptions) => Promise<DecodedBook>;
+  openDecoder?: (opts: ProbeDecoderOptions) => Promise<ProbeDecoder>;
 }
 
 export interface CtcAlignResult {
@@ -78,6 +103,10 @@ export interface CtcAlignResult {
   /** Provenance for the alignments table. */
   model: string;
   audioMs: number;
+  /** Audio actually put through the model, for the speed estimate. 0 = all of it. */
+  decodedMs: number;
+  /** Probes decoded, or 0 for a whole-book decode. */
+  probes: number;
 }
 
 /**
@@ -86,6 +115,18 @@ export interface CtcAlignResult {
  * than from interpolation between two of them.
  */
 export const EXACT_SCORE = 0.9;
+
+/**
+ * ...and when the anchor is close in *time*, not just in characters.
+ *
+ * Character distance was a good enough proxy while the whole book was decoded
+ * and anchors were everywhere. Under sampling it is not: three hundred
+ * characters is twenty seconds of narration, so a sentence can be "near an
+ * anchor" by the character score and still be an interpolation across a third
+ * of a minute. Measured, this threshold is what separates the sentences a
+ * probe actually heard from the ones inferred between two probes.
+ */
+export const EXACT_UNCERTAINTY_MS = 2_500;
 
 export async function alignWithCtc(req: CtcAlignRequest): Promise<CtcAlignResult> {
   const book: BookSentence[] = req.sentences.map((_, i) => ({
@@ -98,6 +139,59 @@ export async function alignWithCtc(req: CtcAlignRequest): Promise<CtcAlignResult
   }
 
   req.onProgress?.(0, 'Listening to the narration');
+  const heard = req.plan
+    ? await listenSparsely(req, book, req.plan)
+    : await listenThroughout(req, book);
+
+  if (heard.match.stats.implausible) {
+    const stats = heard.match.stats;
+    throw new AlignmentRefusedError(
+      `This audio does not appear to narrate this ebook: only ${stats.monotoneAnchors} matching ` +
+        `passages were found across ${stats.bookChars.toLocaleString()} characters of text. ` +
+        `Check that the two editions really are the same work.`,
+      stats,
+    );
+  }
+
+  // One shared layer owns monotonicity, interpolation, gaps and confidence, so
+  // this engine cannot invent a segment shape of its own.
+  const byIndex = new Map(heard.match.timings.map((t) => [t.index, t]));
+  const result = segmentsFromTimings(
+    req.sentences,
+    (i) => {
+      const t = byIndex.get(i);
+      if (!t || t.gap) return null;
+      return {
+        startMs: t.startMs,
+        endMs: t.endMs,
+        score: t.score,
+        exact: t.score >= EXACT_SCORE && t.uncertaintyMs <= EXACT_UNCERTAINTY_MS,
+        uncertaintyMs: t.uncertaintyMs,
+      };
+    },
+    { audioMs: heard.audioMs },
+  );
+
+  return {
+    result,
+    stats: heard.match.stats,
+    model: heard.model,
+    audioMs: heard.audioMs,
+    decodedMs: heard.decodedMs,
+    probes: heard.probes,
+  };
+}
+
+interface Heard {
+  match: MatchResult;
+  audioMs: number;
+  model: string;
+  decodedMs: number;
+  probes: number;
+}
+
+/** Decode every sample. Slow, and kept for operators who want it that way. */
+async function listenThroughout(req: CtcAlignRequest, book: BookSentence[]): Promise<Heard> {
   const decoded = await (req.decode ?? decodeBook)({
     modelPath: req.modelPath,
     vocabPath: req.vocabPath,
@@ -114,34 +208,79 @@ export async function alignWithCtc(req: CtcAlignRequest): Promise<CtcAlignResult
 
   req.onProgress?.(0.97, 'Matching the narration to the text');
   const heard: DecodedChar[] = decoded.chars;
-  const { timings, stats } = matchChars(book, heard, { audioMs: decoded.audioMs });
+  return {
+    match: matchChars(book, heard, { audioMs: decoded.audioMs }),
+    audioMs: decoded.audioMs,
+    model: decoded.model,
+    decodedMs: decoded.audioMs,
+    probes: 0,
+  };
+}
 
-  if (stats.implausible) {
-    throw new AlignmentRefusedError(
-      `This audio does not appear to narrate this ebook: only ${stats.monotoneAnchors} matching ` +
-        `passages were found across ${stats.bookChars.toLocaleString()} characters of text. ` +
-        `Check that the two editions really are the same work.`,
-      stats,
-    );
+/**
+ * Decode a grid of short probes, then spend a bounded number of extra probes
+ * on the stretches whose implied reading rate says the interpolation between
+ * them cannot be trusted.
+ *
+ * The rounds are re-matched from scratch rather than patched: matching a
+ * 50,000-character book against its anchors takes milliseconds, and rebuilding
+ * means a late probe can revise an anchor the earlier rounds got wrong instead
+ * of being stitched onto a mistake.
+ */
+async function listenSparsely(
+  req: CtcAlignRequest,
+  book: BookSentence[],
+  plan: SparsePlan,
+): Promise<Heard> {
+  const decoder = await (req.openDecoder ?? openProbeDecoder)({
+    modelPath: req.modelPath,
+    vocabPath: req.vocabPath,
+    trackPaths: req.trackPaths,
+    trackStartMs: req.trackStartMs,
+    threads: req.threads,
+    signal: req.signal,
+  });
+  try {
+    const audioMs = decoder.audioMs;
+    const grid = gridWindows(audioMs, plan);
+    const budget = Math.floor(grid.length * Math.max(0, plan.refineBudget));
+    // The grid is the bulk of the work; the refinement rounds share what is
+    // left so the bar never goes backwards when a round turns out to be empty.
+    const gridShare = budget > 0 ? 0.8 : 0.95;
+
+    const runs: ProbeRun[] = [];
+    const decodeRound = async (windows: (typeof grid)[number][], from: number, to: number) => {
+      const chunks = await decoder.decode(windows, (done, total) => {
+        const f = from + ((to - from) * done) / Math.max(1, total);
+        req.onProgress?.(f, `Listening to the narration · ${Math.round(f * 100)}%`);
+      });
+      windows.forEach((window, i) => runs.push({ window, chars: chunks[i] ?? [] }));
+    };
+
+    await decodeRound(grid, 0, gridShare);
+    let match = matchChars(book, assembleProbes(runs), { audioMs });
+
+    let spent = 0;
+    for (let round = 0; round < plan.refineRounds && spent < budget; round++) {
+      const covered = runs.map((r) => r.window);
+      const extra = refineWindows(match.anchors, covered, audioMs, plan, budget - spent);
+      if (extra.length === 0) break;
+      const from = gridShare + ((0.97 - gridShare) * round) / plan.refineRounds;
+      const to = gridShare + ((0.97 - gridShare) * (round + 1)) / plan.refineRounds;
+      await decodeRound(extra, from, to);
+      spent += extra.length;
+      match = matchChars(book, assembleProbes(runs), { audioMs });
+    }
+
+    req.onProgress?.(0.97, 'Matching the narration to the text');
+    return {
+      match,
+      audioMs,
+      model: decoder.model,
+      decodedMs: runs.reduce((a, r) => a + r.window.durationMs, 0),
+      probes: runs.length,
+    };
+  } finally {
+    await decoder.close();
   }
-
-  // One shared layer owns monotonicity, interpolation, gaps and confidence, so
-  // this engine cannot invent a segment shape of its own.
-  const byIndex = new Map(timings.map((t) => [t.index, t]));
-  const result = segmentsFromTimings(
-    req.sentences,
-    (i) => {
-      const t = byIndex.get(i);
-      if (!t || t.gap) return null;
-      return {
-        startMs: t.startMs,
-        endMs: t.endMs,
-        score: t.score,
-        exact: t.score >= EXACT_SCORE,
-      };
-    },
-    { audioMs: decoded.audioMs },
-  );
-
-  return { result, stats, model: decoded.model, audioMs: decoded.audioMs };
 }

@@ -58,12 +58,12 @@ are produced. It has no `VX_*` variable — it lives in the database only, so
 it is set in Settings (or through `PUT /api/settings`) and can be changed
 without restarting the container. Full descriptions in docs/alignment.md.
 
-| `alignEngine`            | Needs                                                                                                          | What runs                                                                                                             |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `forced-align` (default) | the `mms-forced-aligner` model (317 MB, one download for all ten languages, **CC-BY-NC-4.0 — non-commercial**) | One CTC pass over the audio, matched against the ebook text. Roughly 2–3 hours for a six-hour book on a 4-CPU server. |
-| `fixture`                | a sidecar transcript next to the audio                                                                         | The legacy token aligner over your own word timestamps.                                                               |
-| `whisper-cli`            | a whisper.cpp binary plus a 1.6–3.1 GB model **per language**                                                  | Full transcription, then fuzzy matching. Slower; kept as a rescue path.                                               |
-| `none`                   | —                                                                                                              | Nothing. Pairs can still link; switching stays unavailable.                                                           |
+| `alignEngine`            | Needs                                                                                                          | What runs                                                                                                                                |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `forced-align` (default) | the `mms-forced-aligner` model (317 MB, one download for all ten languages, **CC-BY-NC-4.0 — non-commercial**) | CTC over the audio, matched against the ebook text. About six minutes for a six-hour book on a 4-CPU server; see `alignPrecision` below. |
+| `fixture`                | a sidecar transcript next to the audio                                                                         | The legacy token aligner over your own word timestamps.                                                                                  |
+| `whisper-cli`            | a whisper.cpp binary plus a 1.6–3.1 GB model **per language**                                                  | Full transcription, then fuzzy matching. Slower; kept as a rescue path.                                                                  |
+| `none`                   | —                                                                                                              | Nothing. Pairs can still link; switching stays unavailable.                                                                              |
 
 ### How it interacts with `transcribeProvider`
 
@@ -78,18 +78,14 @@ Three rules, all of them visible in `server/src/jobs/handlers.ts`:
    `VX_TRANSCRIBE_PROVIDER=fixture`, a pair with a sidecar is aligned from
    those word timestamps whatever `alignEngine` says. Real timestamps you
    produced yourself are exact and free; no acoustic model improves on them.
-2. **`transcribeProvider=none` disables alignment entirely** — including
-   forced alignment. Library scans queue no alignment jobs, and a manually
-   started one fails with "Transcription is disabled". To run the forced
-   aligner today, set `VX_TRANSCRIBE_PROVIDER=whisper-cli`; the bundled
-   binary is already at `/usr/local/bin/whisper-cli`. This coupling is a
-   leftover from the transcription-first design and is worth removing.
-   **Install the forced aligner first.** `autoDownloadDefaultModel` (on by
+2. **Forced alignment needs no provider at all.** It never guesses words, so
+   `transcribeProvider=none` — the default — is enough to scan, pair and
+   align. A provider is only required by the sidecar path (`fixture`), the
+   legacy engine, and language detection. `autoDownloadDefaultModel` (on by
    default) fetches the 1.6 GB multilingual whisper model on first start when
    the provider is `whisper-cli` and _no_ multilingual model is installed
-   yet — and the aligner counts as one, so having it on disk already
-   suppresses that download. Otherwise turn the setting off in
-   Settings → Speech models.
+   yet — the aligner counts as one, so having it on disk already suppresses
+   that download.
 3. **Language detection is a whisper job.** When neither a pair override, the
    EPUB's `dc:language`, nor the audio tags give a language, the detector
    runs on a short clip and needs `transcribeProvider=whisper-cli` plus any
@@ -100,6 +96,23 @@ Three rules, all of them visible in `server/src/jobs/handlers.ts`:
    numbers, currency and abbreviations get spelled out in the wrong
    language, costing anchors around those and nowhere else. Setting the
    language on the pair is still the reliable fix.
+
+### How closely it listens
+
+`alignPrecision` (default `fast`) applies to `forced-align` only, and like
+`alignEngine` it lives in the database — set it in Settings → Processing.
+
+| `alignPrecision` | Audio through the model                           | A six-hour book | Typical backward step at a switch |
+| ---------------- | ------------------------------------------------- | --------------- | --------------------------------- |
+| `fast` (default) | ~7% (a probe every 150 s, plus a refinement pass) | ≈ 6 min         | ~7.6 s                            |
+| `careful`        | ~15% (a probe every 75 s)                         | ≈ 13 min        | ~4.5 s                            |
+| `thorough`       | all of it                                         | ≈ 1.8 h         | ~2 s                              |
+
+The backward step is not a defect being papered over: a read-to-listen switch
+deliberately lands behind the reader by however far the aligner says its timing
+could be wrong, because hearing a sentence twice is free and hearing one early
+is a spoiler. `thorough` is worth choosing only if you follow the narration
+word by word on the page.
 
 ## How much runs on its own
 
@@ -115,10 +128,13 @@ What `verify` means depends on the engine, because the two engines pay for
 verification very differently:
 
 - **`forced-align`** has no separate verification stage: the alignment _is_
-  the edition check, so the job runs end to end. On the measured hardware
-  that is wall clock of roughly 0.33–0.46× the audio duration — about two to
-  three hours for a six-hour book — and a mismatched pair refuses early with
-  almost no anchors found.
+  the edition check, so the job runs end to end. On the measured hardware and
+  at the default `fast` precision that is wall clock of roughly 0.018× the
+  audio duration — about six minutes for a six-hour book — and a mismatched
+  pair refuses early with almost no anchors found. `VX_ALIGN_PRECISION` (or
+  Settings → Processing) trades that against timing accuracy: `careful` is
+  twice the time, `thorough` decodes every sample and is roughly fifteen times
+  the cost.
 - **`whisper-cli`** transcribes two 90-second clips first, links the pair if
   their words are really in the ebook, and then stops and waits for you
   unless the mode is `auto`. The hours-long full transcription is the part
@@ -127,9 +143,10 @@ verification very differently:
 Verified pairs are linked and usable for browsing either way. Start the
 remaining work from the Pairing page, individually or with multi-select, or
 use "Start all". Time estimates there come from `transcribeSpeedRatio`,
-which the worker measures from its own runs rather than guessing — today
-only from whisper runs, so on a `forced-align`-only server it stays at 0
-("not measured yet") and the Pairing page shows no estimate.
+which the worker measures from its own runs rather than guessing. A run whose
+speed is wildly unlike the stored average replaces it instead of being blended
+in, so changing engine or precision does not leave the estimate wrong for the
+next several books.
 
 ## First run
 

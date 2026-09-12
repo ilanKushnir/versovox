@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { segmentsFromTimings, type EbookSentenceInput } from '../timings.js';
 import { matchChars, type BookSentence } from './anchors.js';
-import { type DecodedBook, type DecodedChar, type EmissionOptions } from './emissions.js';
-import { alignWithCtc, AlignmentRefusedError, EXACT_SCORE } from './engine.js';
+import {
+  type DecodedBook,
+  type DecodedChar,
+  type EmissionOptions,
+  type ProbeDecoder,
+  type ProbeDecoderOptions,
+  type ProbeWindow,
+} from './emissions.js';
+import {
+  alignWithCtc,
+  AlignmentRefusedError,
+  EXACT_SCORE,
+  EXACT_UNCERTAINTY_MS,
+} from './engine.js';
 import { romanize } from './romanize.js';
+import { type SparsePlan } from './sparse.js';
 
 /**
  * Engine-level tests for forced alignment.
@@ -251,7 +264,8 @@ describe('alignWithCtc', () => {
           startMs: t.startMs,
           endMs: t.endMs,
           score: t.score,
-          exact: t.score >= EXACT_SCORE,
+          exact: t.score >= EXACT_SCORE && t.uncertaintyMs <= EXACT_UNCERTAINTY_MS,
+          uncertaintyMs: t.uncertaintyMs,
         };
       },
       { audioMs: heard.audioMs },
@@ -318,3 +332,190 @@ describe('alignWithCtc', () => {
     );
   });
 });
+
+/**
+ * Sparse decoding, driven through the same synthetic narration.
+ *
+ * The fake probe decoder hears exactly what the schedule asks it to hear and
+ * nothing else, so these tests measure the real cost of listening to a
+ * fraction of a book: how much audio goes through the model, and how far the
+ * resulting sentence times drift from the truth in between.
+ */
+function fakeProbeDecoder(
+  n: Narration,
+  seen: ProbeWindow[] = [],
+): (opts: ProbeDecoderOptions) => Promise<ProbeDecoder> {
+  return async (): Promise<ProbeDecoder> => ({
+    model: FAKE_MODEL,
+    audioMs: n.audioMs,
+    async decode(windows, onWindow) {
+      return windows.map((w, i) => {
+        seen.push(w);
+        onWindow?.(i + 1, windows.length);
+        const hi = w.startMs + w.durationMs;
+        return n.chars.filter((c) => c.ms >= w.startMs && c.ms < hi);
+      });
+    },
+    async close() {},
+  });
+}
+
+function sparseRequest(
+  book: Book,
+  n: Narration,
+  plan: SparsePlan,
+  seen?: ProbeWindow[],
+  onProgress?: (f: number, detail: string) => void,
+) {
+  return { ...request(book, n, onProgress), plan, openDecoder: fakeProbeDecoder(n, seen) };
+}
+
+describe('alignWithCtc, sampling the narration', () => {
+  /** 15 characters per second over 400 sentences is a little over an hour. */
+  const PLAN: SparsePlan = {
+    windowMs: 8_000,
+    everyMs: 120_000,
+    refineRounds: 2,
+    rateTolerance: 0.2,
+    refineBudget: 0.6,
+  };
+
+  it('times the whole book after listening to a fraction of it', async () => {
+    const book = makeBook(11, 400);
+    const heard = narrate(book.text);
+    const seen: ProbeWindow[] = [];
+
+    const out = await alignWithCtc(sparseRequest(book, heard, PLAN, seen));
+
+    // The point of the exercise: a small share of the audio through the model.
+    expect(out.decodedMs).toBeLessThan(heard.audioMs * 0.15);
+    expect(out.probes).toBe(seen.length);
+    expect(out.audioMs).toBe(heard.audioMs);
+    expect(out.stats.implausible).toBe(false);
+    // And still a timing for nearly every sentence.
+    expect(out.result.coverage).toBeGreaterThan(0.95);
+
+    const placed = byOrd(out.result.segments);
+    for (let i = 0; i < book.sentences.length; i++) {
+      const seg = placed.get(i);
+      if (!seg) continue;
+      const truth = heard.truth[i]!;
+      // Steady narration between anchors interpolates almost exactly; the
+      // slack here is for the sentences that fall between two probes.
+      expect(Math.abs(seg.startMs - truth.startMs)).toBeLessThan(20_000);
+      // Whatever the error, the segment has to own up to it: the handoff
+      // subtracts exactly this, and that is the only reason a switch cannot
+      // land ahead of the reader.
+      expect(seg.startMs - seg.uncertaintyMs).toBeLessThanOrEqual(truth.startMs);
+    }
+  });
+
+  it('admits more uncertainty the further a sentence sits from a probe', async () => {
+    const book = makeBook(12, 400);
+    const heard = narrate(book.text);
+    const seen: ProbeWindow[] = [];
+
+    const out = await alignWithCtc(sparseRequest(book, heard, PLAN, seen));
+    const inProbe = (ms: number) =>
+      seen.some((w) => ms >= w.startMs && ms < w.startMs + w.durationMs);
+
+    const heardDirectly = out.result.segments.filter((s) => inProbe(s.startMs));
+    const guessed = out.result.segments.filter((s) => !inProbe(s.startMs));
+    expect(heardDirectly.length).toBeGreaterThan(0);
+    expect(guessed.length).toBeGreaterThan(0);
+    expect(mean(heardDirectly.map((s) => s.uncertaintyMs))).toBeLessThan(
+      mean(guessed.map((s) => s.uncertaintyMs)),
+    );
+    // Whatever the schedule, the claim has to cover the actual error — that is
+    // the only thing standing between a reader and a switch that spoils the
+    // next paragraph.
+    for (const s of out.result.segments) {
+      const truth = heard.truth[Number(s.sentenceId.slice(1))];
+      if (!truth) continue;
+      expect(s.startMs - s.uncertaintyMs).toBeLessThanOrEqual(truth.startMs);
+    }
+  });
+
+  it('spends its second pass on the stretch where the narrator paused', async () => {
+    // A book read straight through, except for two minutes of silence in the
+    // middle — the shape of a chapter break, and the one thing interpolation
+    // between two distant anchors cannot see.
+    const book = makeBook(13, 400);
+    const heard = narrate(book.text);
+    const pauseAt = Math.round(heard.audioMs / 2);
+    const PAUSE_MS = 120_000;
+    for (const c of heard.chars) if (c.ms >= pauseAt) c.ms += PAUSE_MS;
+    for (const t of heard.truth) {
+      if (t && t.startMs >= pauseAt) {
+        t.startMs += PAUSE_MS;
+        t.endMs += PAUSE_MS;
+      }
+    }
+    heard.audioMs += PAUSE_MS;
+
+    const seen: ProbeWindow[] = [];
+    await alignWithCtc(sparseRequest(book, heard, PLAN, seen));
+
+    const grid = Math.ceil(heard.audioMs / PLAN.everyMs);
+    const extra = seen.slice(grid);
+    expect(extra.length).toBeGreaterThan(0);
+    // The refinement probes cluster on the pause rather than spreading evenly.
+    const nearPause = extra.filter(
+      (w) => Math.abs(w.startMs - (pauseAt + PAUSE_MS / 2)) < PLAN.everyMs,
+    );
+    expect(nearPause.length).toBeGreaterThan(0);
+  });
+
+  it('still refuses audio that narrates a different book', async () => {
+    const book = makeBook(14, 300);
+    const other = makeBook(15, 300);
+    const heard = narrate(other.text);
+
+    await expect(alignWithCtc(sparseRequest(book, heard, PLAN))).rejects.toBeInstanceOf(
+      AlignmentRefusedError,
+    );
+  });
+
+  it('closes the decoder even when the match is refused', async () => {
+    const book = makeBook(16, 300);
+    const heard = narrate(makeBook(17, 300).text);
+    let closed = false;
+    const req = {
+      ...request(book, heard),
+      plan: PLAN,
+      openDecoder: async (): Promise<ProbeDecoder> => ({
+        model: FAKE_MODEL,
+        audioMs: heard.audioMs,
+        async decode(windows: ProbeWindow[]) {
+          return windows.map((w) =>
+            heard.chars.filter((c) => c.ms >= w.startMs && c.ms < w.startMs + w.durationMs),
+          );
+        },
+        async close() {
+          closed = true;
+        },
+      }),
+    };
+    await expect(alignWithCtc(req)).rejects.toBeInstanceOf(AlignmentRefusedError);
+    expect(closed).toBe(true);
+  });
+
+  it('reports progress that only ever rises, across both passes', async () => {
+    const book = makeBook(18, 400);
+    const heard = narrate(book.text);
+    const reported: number[] = [];
+
+    await alignWithCtc(sparseRequest(book, heard, PLAN, [], (fraction) => reported.push(fraction)));
+
+    expect(reported.length).toBeGreaterThan(5);
+    for (let i = 1; i < reported.length; i++) {
+      expect(reported[i]).toBeGreaterThanOrEqual(reported[i - 1]!);
+    }
+    expect(reported.at(-1)).toBeGreaterThanOrEqual(0.97);
+    expect(reported.at(-1)).toBeLessThanOrEqual(1);
+  });
+});
+
+function mean(xs: number[]): number {
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+}

@@ -1,5 +1,6 @@
 import {
   SWITCH_MAX_AUDIO_DRIFT_MS,
+  SWITCH_MAX_REWIND_MS,
   SWITCH_MAX_SENTENCE_DISTANCE,
   SWITCH_MIN_CONFIDENCE,
   SWITCH_SENTENCE_CONFIDENCE,
@@ -48,8 +49,8 @@ export function storeAlignment(
       nowIso(),
     );
     const ins = db.prepare(
-      `INSERT INTO alignment_segments (alignment_id, ord, sentence_id, spine_idx, sentence_ord, start_ms, end_ms, confidence, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO alignment_segments (alignment_id, ord, sentence_id, spine_idx, sentence_ord, start_ms, end_ms, confidence, source, uncertainty_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     result.segments.forEach((s, ord) =>
       ins.run(
@@ -62,6 +63,7 @@ export function storeAlignment(
         s.endMs,
         s.confidence,
         s.source,
+        s.uncertaintyMs,
       ),
     );
     db.exec('COMMIT');
@@ -145,6 +147,7 @@ function rowToSegment(row: Record<string, unknown>): AlignmentSegment {
     endMs: Number(row.end_ms),
     confidence: Number(row.confidence),
     source: String(row.source) as AlignmentSegment['source'],
+    uncertaintyMs: Number(row.uncertainty_ms ?? 0),
   };
 }
 
@@ -195,7 +198,9 @@ function audioAnchor(ctx: ResolveContext, seg: AlignmentSegment): SwitchAnchor {
   return {
     sentenceId: seg.sentenceId,
     confidence: seg.confidence,
-    to: bookMsToAudioLocator(ctx, seg.startMs),
+    // Offered as somewhere to jump to, so it gets the same backward margin a
+    // direct switch would.
+    to: bookMsToAudioLocator(ctx, safeStartMs(seg.startMs, seg)),
   };
 }
 
@@ -235,6 +240,22 @@ function segAfter(
     )
     .get(ctx.alignmentId, spineIdx, spineIdx, sentenceOrd) as Record<string, unknown> | undefined;
   return row ? rowToSegment(row) : null;
+}
+
+/**
+ * Step a read-to-listen switch back by the segment's own admitted error.
+ *
+ * Landing early is a second of narration the reader already knows. Landing
+ * late is a spoiler — a sentence, a plot turn, a punchline they had not
+ * reached — and no amount of precision elsewhere makes up for it. So the
+ * asymmetry is deliberate: the switch always aims behind the reader by however
+ * far the aligner says it might be wrong, and never further than
+ * {@link SWITCH_MAX_REWIND_MS}, past which it is not a margin but a different
+ * scene.
+ */
+function safeStartMs(bookMs: number, seg: AlignmentSegment): number {
+  const rewind = Math.min(Math.max(0, seg.uncertaintyMs), SWITCH_MAX_REWIND_MS);
+  return Math.max(0, bookMs - rewind);
 }
 
 export function resolveEbookToAudio(ctx: ResolveContext, from: EbookLocator): SwitchOutcome {
@@ -314,7 +335,8 @@ export function resolveEbookToAudio(ctx: ResolveContext, from: EbookLocator): Sw
   // Within-sentence interpolation only when confidence is high.
   const ratio = exactSentence ? (from.sentenceRatio ?? 0) : 0;
   const bookMs = Math.round(seg.startMs + ratio * Math.max(0, seg.endMs - seg.startMs));
-  const audio = bookMsToAudioLocator(ctx, bookMs);
+  const safeMs = safeStartMs(bookMs, seg);
+  const audio = bookMsToAudioLocator(ctx, safeMs);
   return {
     to: audio,
     resolution: {
@@ -322,6 +344,7 @@ export function resolveEbookToAudio(ctx: ResolveContext, from: EbookLocator): Sw
       confidence: seg.confidence,
       source: seg.source,
       approximate: approximate || !exactSentence,
+      ...(bookMs > safeMs ? { rewindMs: bookMs - safeMs } : {}),
     },
   };
 }

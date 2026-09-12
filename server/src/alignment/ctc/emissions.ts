@@ -655,3 +655,254 @@ export async function decodeBook(opts: EmissionOptions): Promise<DecodedBook> {
     await close();
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* probe decode (sparse)                                               */
+/* ------------------------------------------------------------------ */
+
+/** A stretch of the book's audio to decode, in absolute book milliseconds. */
+export interface ProbeWindow {
+  startMs: number;
+  durationMs: number;
+}
+
+/**
+ * Emitted between two probes.
+ *
+ * Sparse decoding cuts the narration into islands, and two islands minutes
+ * apart must never read as one continuous character run: an n-gram straddling
+ * the seam would be a phrase the narrator never spoke, matched against a book
+ * position that is nowhere near either probe. A space is outside the model's
+ * alphabet (`a`-`z` and an apostrophe) and outside anything romanization can
+ * produce, so every gram containing one fails to match the book by
+ * construction — no matcher change, no boundary bookkeeping to get wrong.
+ */
+export const PROBE_BREAK = ' ';
+
+export interface ProbeDecoderOptions {
+  modelPath: string;
+  vocabPath: string;
+  trackPaths: string[];
+  trackStartMs: number[];
+  threads: number;
+  signal?: AbortSignal;
+}
+
+export interface ProbeDecoder {
+  /** Provenance string for the model. */
+  readonly model: string;
+  /** True length of the book's audio, from ffprobe. */
+  readonly audioMs: number;
+  /**
+   * Decode `windows`, returning one character run per window, in the order the
+   * windows were given. Runs are kept apart rather than concatenated because
+   * probes arrive in schedule order, not playback order, and only the caller
+   * knows how to interleave a refinement round with what it already has —
+   * see `assembleProbes` in sparse.ts.
+   */
+  decode(
+    windows: ProbeWindow[],
+    onWindow?: (done: number, total: number) => void,
+  ): Promise<DecodedChar[][]>;
+  close(): Promise<void>;
+}
+
+/** Context decoded on each side of a probe and then discarded. */
+const PROBE_CONTEXT_MS = 1000;
+/** Longest core decoded in a single inference; longer probes are split. */
+const PROBE_MAX_CORE_MS = 30_000;
+
+interface Track {
+  path: string;
+  startMs: number;
+  durationMs: number;
+}
+
+/**
+ * Open a decoder that reads only the parts of the audio it is asked for.
+ *
+ * {@link decodeBook} streams every sample through the model, which costs about
+ * a fifth of real time — over an hour of compute for a six-hour book.
+ * Alignment does not need every sample. It needs enough anchors to pin the
+ * text to the timeline, and those come from short probes spread across the
+ * narration; everything between two anchors is interpolation, and interpolation
+ * over a couple of minutes of steady reading is accurate to a few seconds.
+ *
+ * So this front end seeks instead of streaming, and keeps the ONNX session open
+ * across rounds so that a refinement pass costs no model load.
+ */
+export async function openProbeDecoder(opts: ProbeDecoderOptions): Promise<ProbeDecoder> {
+  if (opts.trackPaths.length !== opts.trackStartMs.length) {
+    throw new Error('trackPaths and trackStartMs must have the same length');
+  }
+  if (os.endianness() !== 'LE') {
+    throw new Error('CTC decoding requires a little-endian host (ffmpeg emits f32le)');
+  }
+  throwIfAborted(opts.signal);
+
+  const idToToken = parseVocab(JSON.parse(fs.readFileSync(opts.vocabPath, 'utf8')));
+  const tracks: Track[] = [];
+  for (let i = 0; i < opts.trackPaths.length; i++) {
+    const filePath = opts.trackPaths[i]!;
+    const probe = await probeAudio(filePath);
+    tracks.push({ path: filePath, startMs: opts.trackStartMs[i]!, durationMs: probe.durationMs });
+  }
+  const audioMs = tracks.reduce((a, t) => Math.max(a, t.startMs + t.durationMs), 0);
+  const { session, close } = await createOrtSession(opts.modelPath, opts.threads);
+
+  return {
+    model: modelId(opts.modelPath),
+    audioMs,
+    async decode(windows, onWindow) {
+      const runs: DecodedChar[][] = [];
+      for (let i = 0; i < windows.length; i++) {
+        throwIfAborted(opts.signal);
+        const out: DecodedChar[] = [];
+        await decodeProbe(session, idToToken, tracks, windows[i]!, out, opts.signal);
+        runs.push(out);
+        onWindow?.(i + 1, windows.length);
+      }
+      return runs;
+    },
+    close,
+  };
+}
+
+/** The track a book-timeline instant falls in, or null past the end. */
+function trackAt(tracks: Track[], ms: number): Track | null {
+  for (const t of tracks) {
+    if (ms >= t.startMs && ms < t.startMs + t.durationMs) return t;
+  }
+  return null;
+}
+
+/**
+ * Decode one probe.
+ *
+ * A little more audio than asked for is read on each side and then thrown
+ * away, because the model decodes badly across a hard cut and a probe is
+ * nothing but two hard cuts.
+ *
+ * A probe that lands past the end of every track, or that yields too little
+ * audio to carry a frame, contributes nothing rather than failing the
+ * alignment: the schedule comes from a duration estimate and has to tolerate
+ * being slightly wrong at the seams.
+ */
+async function decodeProbe(
+  session: CtcSession,
+  idToToken: readonly string[],
+  tracks: Track[],
+  win: ProbeWindow,
+  out: DecodedChar[],
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const track = trackAt(tracks, win.startMs);
+  if (!track) return;
+  // Clipped to the track: a probe never spans a file boundary, because the two
+  // halves need separate seeks and the sliver lost at the join is worth nothing.
+  const relStart = win.startMs - track.startMs;
+  const coreMs = Math.min(win.durationMs, track.durationMs - relStart);
+  if (coreMs < 1000) return;
+
+  const readStart = Math.max(0, relStart - PROBE_CONTEXT_MS);
+  const readEnd = Math.min(track.durationMs, relStart + coreMs + PROBE_CONTEXT_MS);
+  const samples = await readPcm(track.path, readStart, readEnd - readStart, signal);
+  if (samples.length < MIN_SEGMENT_SAMPLES) return;
+
+  const segStartMs = track.startMs + readStart;
+  const coreLoMs = track.startMs + relStart;
+  const coreHiMs = coreLoMs + coreMs;
+  const maxCore = Math.round((PROBE_MAX_CORE_MS / 1000) * SAMPLE_RATE);
+
+  for (let off = 0; off < samples.length; off += maxCore) {
+    const lo = Math.max(0, off - SAMPLE_RATE);
+    const hi = Math.min(samples.length, off + maxCore + SAMPLE_RATE);
+    const seg = samples.subarray(lo, hi);
+    if (seg.length < MIN_SEGMENT_SAMPLES) break;
+    const emission = await session.run(seg);
+    assertFrameCount(seg.length, emission.frames);
+    collapseChunk({
+      emission,
+      segStartMs: segStartMs + (lo / SAMPLE_RATE) * 1000,
+      coreLoMs: Math.max(coreLoMs, segStartMs + (off / SAMPLE_RATE) * 1000),
+      coreHiMs: Math.min(coreHiMs, segStartMs + ((off + maxCore) / SAMPLE_RATE) * 1000),
+      idToToken,
+      // Every probe starts a fresh CTC path: there is no previous frame to
+      // suppress a repeat against when the audio before it was never decoded.
+      prevId: -1,
+      out,
+    });
+  }
+}
+
+/**
+ * Decode `durationMs` of mono 16 kHz audio starting `startMs` into `filePath`.
+ *
+ * `-ss` before `-i` so ffmpeg seeks rather than decoding and discarding the
+ * whole head — that is the entire point of probing. Measured against a
+ * contiguous decode of the same book, the seek costs no timestamp accuracy
+ * worth correcting for.
+ */
+async function readPcm(
+  filePath: string,
+  startMs: number,
+  durationMs: number,
+  signal: AbortSignal | undefined,
+): Promise<Float32Array> {
+  throwIfAborted(signal);
+  const child = spawn(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-nostdin',
+      '-ss',
+      (startMs / 1000).toFixed(3),
+      '-t',
+      (durationMs / 1000).toFixed(3),
+      '-i',
+      filePath,
+      '-vn',
+      '-ac',
+      '1',
+      '-ar',
+      String(SAMPLE_RATE),
+      '-f',
+      'f32le',
+      '-',
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  let stderrTail = '';
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-2000);
+  });
+  const exited = new Promise<number | null>((resolve) => child.on('close', resolve));
+  const onAbort = () => child.kill('SIGKILL');
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  // ffmpeg's byte runs need not land on float boundaries, and Buffer.concat
+  // gives no 4-byte alignment guarantee, so bytes are copied into a byte view
+  // of an owned Float32Array exactly as the streaming path does.
+  const win = new PcmWindow(Math.ceil(((durationMs + 2000) / 1000) * SAMPLE_RATE));
+  try {
+    for await (const piece of child.stdout) {
+      if (signal?.aborted) break;
+      win.pushBytes(piece as Buffer);
+    }
+  } catch (err) {
+    child.kill('SIGKILL');
+    await exited;
+    throw err;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+  const code = await exited;
+  throwIfAborted(signal);
+  if (code !== 0) {
+    throw new Error(`ffmpeg exited with code ${code} on ${filePath}: ${stderrTail.trim()}`);
+  }
+  // Copied out of the window: the view is only valid until the next trim, and
+  // the caller keeps these samples across several inference calls.
+  return win.view(0, win.end).slice();
+}

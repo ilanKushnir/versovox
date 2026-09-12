@@ -620,9 +620,11 @@ export function SetupWizard({
             )}
 
             <p className="hint" style={{ marginTop: 14 }}>
-              How long: roughly <strong>20–30 minutes of computing per hour of audio</strong>, once
-              per book, measured on a four-core home server. A six-hour audiobook is done in two to
-              three hours and never needs doing again.
+              How long: roughly <strong>a minute of computing per hour of audio</strong>, once per
+              book, measured on a four-core home server. A six-hour audiobook is done in about six
+              minutes and never needs doing again. It gets there by sampling the narration rather
+              than listening to every second — Settings can turn that down if you want
+              sentence-perfect timings and have the hours to spare.
             </p>
 
             {blocking.some((c) => c.id === 'onnx-runtime' || c.id === 'audio-tools') && (
@@ -648,11 +650,10 @@ export function SetupWizard({
           <div className="wizard__body">
             <h1 tabIndex={-1}>How much should run on its own?</h1>
             <p className="lede">
-              Aligning a book costs roughly{' '}
-              <strong>20–30 minutes of computing per hour of audio</strong>, once. Versovox does it
-              one book at a time, in the background, and a pairing that is really a different
-              edition produces no match and is dropped rather than guessed. What you choose here is
-              how much of that starts without you.
+              Aligning a book costs roughly <strong>a minute of computing per hour of audio</strong>
+              , once. Versovox does it one book at a time, in the background, and a pairing that is
+              really a different edition produces no match and is dropped rather than guessed. What
+              you choose here is how much of that starts without you.
             </p>
             <div className="role-picker" role="radiogroup" aria-label="Processing">
               {(

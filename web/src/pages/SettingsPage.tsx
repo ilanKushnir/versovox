@@ -378,6 +378,7 @@ export function SettingsPage() {
           isAdmin={isAdmin}
           models={models}
           onEngine={(v) => void save({ alignEngine: v })}
+          onPrecision={(v) => void save({ alignPrecision: v })}
         />
         <h3 className="settings-h3">Languages and limits</h3>
         <div className="field">
@@ -830,6 +831,30 @@ const ENGINES: [Settings['alignEngine'], string, string][] = [
 ];
 
 /**
+ * How much of the narration is actually decoded. The timeline is built from
+ * points where the audio and the text provably agree, and those are cheap to
+ * find in samples — so the honest framing is not "quality" but how often it
+ * stops to listen, and what that buys.
+ */
+const PRECISIONS: [Settings['alignPrecision'], string, string][] = [
+  [
+    'fast',
+    'Sample the narration (recommended)',
+    'Listens for a few seconds every couple of minutes, then goes back over anything that looks off. A six-hour audiobook takes minutes instead of an hour, and switching still lands on the right paragraph.',
+  ],
+  [
+    'careful',
+    'Sample twice as often',
+    'Roughly double the time, for books that are cut up a lot — dense chapter breaks, interviews, verse, or anything with long pauses.',
+  ],
+  [
+    'thorough',
+    'Listen to every second',
+    'Sentence-perfect timings at around fifteen times the cost — hours per book. Worth it only if you read along with the narration word by word.',
+  ],
+];
+
+/**
  * The primary alignment control, with an honest readiness line underneath it:
  * forced alignment needs its model AND the native ONNX runtime, and a server
  * missing either should say so here rather than at the end of a queued job.
@@ -839,11 +864,13 @@ function AlignmentEngine({
   isAdmin,
   models,
   onEngine,
+  onPrecision,
 }: {
   settings: Settings;
   isAdmin: boolean;
   models: ModelsResponse | null;
   onEngine: (v: Settings['alignEngine']) => void;
+  onPrecision: (v: Settings['alignPrecision']) => void;
 }) {
   const aligner = alignerModel(models);
   const runtime = models?.alignerRuntime ?? null;
@@ -924,6 +951,33 @@ function AlignmentEngine({
               </span>
             </div>
           )}
+        </>
+      )}
+
+      {settings.alignEngine === 'forced-align' && (
+        <>
+          <h3 className="settings-h3">How closely it listens</h3>
+          <div className="role-picker" role="radiogroup" aria-label="Alignment precision">
+            {PRECISIONS.map(([value, label, blurb]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={settings.alignPrecision === value}
+                disabled={!isAdmin}
+                className={`role-picker__opt ${settings.alignPrecision === value ? 'is-on' : ''}`}
+                onClick={() => onPrecision(value)}
+              >
+                <strong>{label}</strong>
+                <span>{blurb}</span>
+              </button>
+            ))}
+          </div>
+          <p className="settings-section__lede">
+            Switching from reading to listening always lands a little <em>behind</em> where you
+            were, never ahead — the player steps back by however far the aligner says it might be
+            wrong, so a switch never plays you a sentence you have not read yet.
+          </p>
         </>
       )}
 

@@ -21,6 +21,7 @@ const DEFAULTS: Settings = {
   ebookDirs: [],
   audiobookDirs: [],
   alignEngine: 'forced-align',
+  alignPrecision: 'fast',
   processingMode: 'verify',
   transcribeSpeedRatio: 0,
 };
@@ -31,11 +32,15 @@ const DEFAULTS: Settings = {
  * whisper runs; ignores samples too short to be meaningful.
  */
 export function recordTranscribeSpeed(db: DB, audioMs: number, wallMs: number): void {
-  if (audioMs < 30_000 || wallMs < 5_000) return;
+  if (audioMs < 30_000 || wallMs < 1_000) return;
   const sample = audioMs / wallMs;
-  if (!Number.isFinite(sample) || sample <= 0 || sample > 20) return;
+  if (!Number.isFinite(sample) || sample <= 0 || sample > 500) return;
   const stored = getStoredSettings(db).transcribeSpeedRatio ?? 0;
-  const next = stored > 0 ? stored * 0.7 + sample * 0.3 : sample;
+  // A sample this far from the average is not noise, it is a different method
+  // — the alignment engine or its precision changed. Blending would leave the
+  // estimate wrong for the next several books, so start again from the truth.
+  const changed = stored > 0 && (sample > stored * 3 || sample * 3 < stored);
+  const next = stored > 0 && !changed ? stored * 0.7 + sample * 0.3 : sample;
   saveSettings(db, { transcribeSpeedRatio: Math.round(next * 1000) / 1000 });
 }
 

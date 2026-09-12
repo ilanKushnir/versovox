@@ -1,3 +1,4 @@
+import { SWITCH_MAX_REWIND_MS } from '@versovox/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openMemoryDatabase, nowIso, type DB } from '../db/index.js';
 import {
@@ -42,6 +43,7 @@ const result: AlignerResult = {
       endMs: (i + 1) * 5000,
       confidence: 0.9,
       source: 'exact' as const,
+      uncertaintyMs: 0,
     })),
     ...Array.from({ length: 4 }, (_, k) => ({
       sentenceId: `s${31 + k}`,
@@ -51,6 +53,7 @@ const result: AlignerResult = {
       endMs: 100_000 + (k + 1) * 5000,
       confidence: 0.85,
       source: 'exact' as const,
+      uncertaintyMs: 0,
     })),
   ],
   gaps: [{ fromMs: 25_000, toMs: 100_000, reason: 'narration-only' }],
@@ -276,5 +279,86 @@ describe('honest handoff status', () => {
     // Coverage below the switchable floor: handoff not even available here.
     expect(status.available).toBe(false);
     expect(status.exactSentenceCoverage).toBeCloseTo(9 / 40, 3);
+  });
+});
+
+/**
+ * A read-to-listen switch must land on narration the reader has already
+ * passed. Being a few seconds early costs a repeated sentence; being a few
+ * seconds late plays them something they have not read.
+ */
+describe('the switch stays behind the reader', () => {
+  /** Rebuild the fixture with a known uncertainty on every segment. */
+  function withUncertainty(uncertaintyMs: number): ResolveContext {
+    const db2 = openMemoryDatabase();
+    db2
+      .prepare(
+        `INSERT INTO books (id, kind, root_dir, rel_path, format, title, size_bytes, scan_state, added_at)
+         VALUES ('e1','ebook','/x','a.epub','epub','E',1,'ready',?), ('a1','audio','/x','a','m4b','A',1,'ready',?)`,
+      )
+      .run(nowIso(), nowIso());
+    db2
+      .prepare(
+        `INSERT INTO pairs (id, ebook_id, audio_id, status, score, created_at) VALUES ('p1','e1','a1','confirmed',0.9,?)`,
+      )
+      .run(nowIso());
+    const id = storeAlignment(
+      db2,
+      'p1',
+      'en',
+      'test',
+      {
+        ...result,
+        segments: result.segments.map((s) => ({ ...s, uncertaintyMs })),
+      },
+      { sentenceCount: 40 },
+    );
+    return { ...ctx(), db: db2, alignmentId: id };
+  }
+
+  const at = (c: ResolveContext, sentenceId: string, charOffset: number) =>
+    resolveEbookToAudio(c, { medium: 'ebook', spineIdx: 0, sentenceId, charOffset, pct: 0.05 });
+
+  it('steps back by exactly what the aligner admitted, and says so', () => {
+    // s2 is timed at 10 s; an aligner unsure by 4 s must hand over at 6 s.
+    const r = at(withUncertainty(4_000), 's2', 210);
+    expect(r.to?.medium).toBe('audio');
+    expect((r.to as { bookMs?: number }).bookMs).toBe(6_000);
+    // Reported, because an unexplained rewind in the player reads as a bug.
+    expect(r.resolution.rewindMs).toBe(4_000);
+  });
+
+  it('does not move a timing the aligner vouched for', () => {
+    const r = at(withUncertainty(0), 's2', 210);
+    expect((r.to as { bookMs?: number }).bookMs).toBe(10_000);
+    expect(r.resolution.rewindMs).toBeUndefined();
+  });
+
+  it('never rewinds past the start of the audio', () => {
+    const r = at(withUncertainty(30_000), 's0', 10);
+    expect((r.to as { bookMs?: number }).bookMs).toBe(0);
+  });
+
+  it('caps a wild uncertainty rather than jumping to another scene', () => {
+    // s31 is at 100 s. An hour of claimed doubt is not a safety margin.
+    const r = at(withUncertainty(3_600_000), 's31', 3110);
+    expect((r.to as { bookMs?: number }).bookMs).toBe(100_000 - SWITCH_MAX_REWIND_MS);
+  });
+
+  it('applies the same margin to an anchor it offers instead of a switch', () => {
+    const c = withUncertainty(4_000);
+    // Deep inside the omitted passage: no switch, but the anchors it points at
+    // are jump targets too.
+    const r = resolveEbookToAudio(c, {
+      medium: 'ebook',
+      spineIdx: 0,
+      sentenceId: 's18',
+      charOffset: 1810,
+      pct: 0.45,
+    });
+    expect(r.to).toBeNull();
+    const before = r.anchors?.before?.to as { bookMs?: number } | undefined;
+    // s4 ends the narrated head at 20 s, less the 4 s of doubt.
+    expect(before?.bookMs).toBe(16_000);
   });
 });

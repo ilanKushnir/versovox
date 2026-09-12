@@ -32,23 +32,57 @@ much harder question than the one we have. **We are not trying to discover
 the words — they are sitting in the EPUB.** We only need to know _when_ each
 one is spoken.
 
-So the default engine (`server/src/alignment/ctc/`) runs one pass of a CTC
-acoustic model over the audio, greedy-decodes its emissions into a stream of
-romanized characters with 20 ms timestamps, and then finds where that stream
-and the book's own romanized characters agree.
+So the default engine (`server/src/alignment/ctc/`) runs a CTC acoustic model
+over the audio, greedy-decodes its emissions into a stream of romanized
+characters with 20 ms timestamps, and then finds where that stream and the
+book's own romanized characters agree.
 
-|                      | Transcribe then match (`whisper-cli`)          | Forced alignment (`forced-align`)                            |
-| -------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
-| Model                | 1.6–3.1 GB, one per language                   | 317 MB, one for all ten (whisper models optional, see below) |
-| Measured speed       | 0.61 seconds of audio per second of wall clock | wall clock 0.33–0.46× the audio duration                     |
-| A six-hour book      | ≈ 11 hours                                     | ≈ 2–3 hours                                                  |
-| Edition check        | separate two-clip probe                        | falls out of the alignment itself                            |
-| Needs the ebook text | no                                             | **yes** — it is the point                                    |
+And it does not listen to all of it. The timeline is built from anchors —
+places where the audio and the text provably agree — and a few seconds of
+narration every couple of minutes produces plenty of them. Everything between
+two anchors is interpolated, and a second pass re-listens wherever the implied
+reading rate says the interpolation would be a lie.
 
-Both figures were measured on the same target server (a 4-CPU LXC), the
-forced-alignment ones on a 67-minute human-narrated audiobook with 880
-ebook sentences. They are not benchmarks of the method in general; they are
-what this code did on that machine with that book.
+|                         | Transcribe then match (`whisper-cli`) | Forced alignment, every sample (`thorough`)                  | Forced alignment, sampled (`fast`, default) |
+| ----------------------- | ------------------------------------- | ------------------------------------------------------------ | ------------------------------------------- |
+| Model                   | 1.6–3.1 GB, one per language          | 317 MB, one for all ten (whisper models optional, see below) | the same 317 MB                             |
+| Audio through the model | all of it                             | all of it                                                    | ~7%                                         |
+| Measured speed          | 0.61× real time                       | 3.3× real time                                               | 56× real time                               |
+| A six-hour book         | ≈ 11 hours                            | ≈ 1.8 hours                                                  | **≈ 6 minutes**                             |
+| Edition check           | separate two-clip probe               | falls out of the alignment itself                            | falls out of the alignment itself           |
+| Needs the ebook text    | no                                    | **yes** — it is the point                                    | **yes**                                     |
+
+All measured on the same target server (a 4-CPU LXC) with the same 67-minute
+human-narrated audiobook of 880 ebook sentences. They are not benchmarks of
+the method in general; they are what this code did on that machine with that
+book, and the host was carrying other work at the time — an idle box is about
+a third faster again.
+
+### Sampling, and what it costs
+
+Scored against the contiguous decode of the same book, sentence by sentence:
+
+|                                       | `fast` (every 150 s) | `careful` (every 75 s) |
+| ------------------------------------- | -------------------- | ---------------------- |
+| Audio decoded                         | 7.0%                 | 15.4%                  |
+| Wall clock, 67-minute book            | 72 s                 | 150 s                  |
+| Sentences timed                       | 92.8%                | 93.0%                  |
+| Median timing error                   | −0.5 s               | −0.1 s                 |
+| Worst error                           | +8.8 s / −19.8 s     | +5.1 s / −17.1 s       |
+| Sentences still late after the margin | 2 of 817 (≤ +2.0 s)  | 6 of 818 (≤ +1.6 s)    |
+
+The error is not the interesting number; the _sign_ is. A reader switching
+from the page to the narration can tolerate hearing a sentence again, and
+cannot tolerate hearing one they have not reached — so every segment carries
+its own `uncertaintyMs`, and the handoff subtracts it (see "Staying behind the
+reader" below). Under `fast` that costs a median rewind of 7.6 seconds, which
+is roughly the line that just scrolled off the top of the page.
+
+Shorter windows are also cheaper per second of audio than long ones, because
+the model's attention is quadratic in frames: measured on this server, 6–8
+second windows cost ~125 ms per second of audio against ~189 ms for the
+30-second chunks the whole-book path uses. Sampling is therefore better than
+its duty cycle suggests.
 
 ### The pipeline
 
@@ -61,27 +95,48 @@ what this code did on that machine with that book.
    and their deliberate deviations are documented at the top of
    `romanize.ts`). Script mapping is keyed on the character, not the book's
    language, so a Russian name in an English novel still produces letters.
-2. **Decode the audio** (`emissions.ts`). The bundled ffmpeg resamples every
-   track to 16 kHz mono; the decoder consumes it in 30-second chunks with one
-   second of context on each side (frames near a hard cut decode badly, and
-   the context is discarded afterwards). The model emits one frame per 320
-   samples over a 400-sample window — exactly 20.0 ms — and the code asserts
-   that frame count on every chunk, so swapping in a model with a different
-   stride fails loudly instead of silently shifting every timestamp. Greedy
-   CTC collapse (skip blank, skip repeats) turns the emissions into stamped
-   characters. Streaming is a requirement, not an optimisation: six hours of
-   float32 PCM is 1.4 GB, and only a ~32-second window is ever resident.
-3. **Anchor** (`anchors.ts`). Index every 14-character n-gram of both
+2. **Choose where to listen** (`sparse.ts`). One probe every 150 seconds to
+   start with. Then, for each stretch between two consecutive anchors, the
+   implied reading rate (book characters per millisecond) is compared against
+   the book's median: a stretch that is more than 20% off, or that produced no
+   anchors at all, gets another probe placed in the widest part of it that
+   nothing has listened to yet. Up to three rounds, with a probe budget of 60%
+   of the first pass. A chapter break shows up as a stretch that is too slow, a
+   passage the narration skips as one that is too fast, and a probe that landed
+   in music as one with no anchors — all three are the same signal, and all
+   three are exactly where interpolation goes wrong.
+3. **Decode the audio** (`emissions.ts`). The bundled ffmpeg resamples every
+   track to 16 kHz mono. The whole-book path (`thorough`) consumes it as a
+   stream in 30-second chunks with one second of context on each side (frames
+   near a hard cut decode badly, and the context is discarded afterwards);
+   streaming is a requirement there, not an optimisation, since six hours of
+   float32 PCM is 1.4 GB and only a ~32-second window is ever resident. The
+   sampling path seeks to each probe instead, again with a second of context
+   on each side, and holds the ONNX session open across rounds. The model emits
+   one frame per 320 samples over a 400-sample window — exactly 20.0 ms — and
+   the code asserts that frame count on every chunk, so swapping in a model
+   with a different stride fails loudly instead of silently shifting every
+   timestamp. Greedy CTC collapse (skip blank, skip repeats) turns the
+   emissions into stamped characters. Probes are spliced together in playback
+   order with a space between them: a space is outside the model's alphabet
+   and outside anything romanization can produce, so no n-gram can straddle
+   the seam between two probes minutes apart and anchor on a phrase nobody
+   said.
+4. **Anchor** (`anchors.ts`). Index every 14-character n-gram of both
    strings and keep only the grams that occur **exactly once on each side**.
    Those pairs are unambiguous by construction, so no similarity threshold is
    needed. A longest-increasing-subsequence pass discards any candidate that
    would require the narrator to jump backwards.
-4. **Interpolate.** Linear interpolation between consecutive anchors maps any
-   book character position to a millisecond. A sentence whose nearest anchor
-   is more than 3000 characters away is reported as a gap instead of a
-   timing; closer than that, its score falls linearly from 1 at an anchor to
-   0 at the cut-off.
-5. **Decide what may be claimed** (`../timings.ts`). `segmentsFromTimings()`
+5. **Interpolate, and say how much that is worth.** Linear interpolation
+   between consecutive anchors maps any book character position to a
+   millisecond. A sentence whose nearest anchor is more than 3000 characters
+   away is reported as a gap instead of a timing; closer than that, its score
+   falls linearly from 1 at an anchor to 0 at the cut-off. Each timing also
+   carries an `uncertaintyMs`: 2 seconds plus 15% of the _audio_ distance to
+   the nearer bracketing anchor, or — outside the anchored range, where the
+   timing is not an interpolation but an edge anchor's time held while the
+   narration kept going — 2 seconds plus the whole extrapolated distance.
+6. **Decide what may be claimed** (`../timings.ts`). `segmentsFromTimings()`
    is the only function in the codebase that constructs an
    `AlignmentSegment`. Engines report evidence; that module enforces
    monotonicity, interpolates runs of at most three unplaced sentences (and
@@ -165,18 +220,42 @@ guess.
   `indexTruncated` so this is visible rather than mysterious.
 - **Empty sentences are never timed.** A heading, or a sentence that
   romanized to nothing, has no characters to anchor.
-- **Distance from an anchor decides what may be claimed.** A sentence within
-  300 characters of one is allowed to be called `exact`; beyond roughly 1950
-  characters its score falls under the trust floor and the timings layer
-  drops it altogether, even though the matcher scored it. This is
-  intentional: the region reads as a gap instead of as a plausible wrong
-  answer.
+- **Distance from an anchor decides what may be claimed.** A sentence has to
+  be within 300 characters of one _and_ carry an uncertainty of 2.5 seconds
+  or less to be called `exact`; beyond roughly 1950 characters its score falls
+  under the trust floor and the timings layer drops it altogether, even though
+  the matcher scored it. Both halves matter under sampling: 300 characters is
+  twenty seconds of narration, so the character score alone would let an
+  interpolation across a third of a minute call itself exact. On the sampled
+  run, that second condition is what took the `exact` count from 335 of 817
+  sentences down to an honest 70.
 - **A timing is where the sentence starts, interpolated linearly.** Between
   two anchors we assume the narrator kept a steady pace. Over a few hundred
   characters that is a good assumption; a long pause, a sound effect, or a
   sip of water inside an un-anchored stretch will push a sentence's start
   out by as much as that pause. Which is one more reason `exact` is reserved
   for sentences sitting on top of an anchor.
+
+## Staying behind the reader
+
+Switching from the page to the narration is not symmetric. Landing a few
+seconds early costs the reader a sentence they have already read. Landing a
+few seconds late plays them a plot turn they have not reached — and no amount
+of precision elsewhere makes up for that.
+
+So every segment carries `uncertaintyMs`, the aligner's own account of how far
+its start could be wrong, and `resolveEbookToAudio` subtracts it before handing
+a position to the player (capped at 45 seconds, past which it is not a safety
+margin but a different scene). The reader page already sends the _first_
+sentence visible on the page rather than the last, so the two together put the
+handoff at or slightly above the top of the screen — the line that just
+scrolled away.
+
+Measured on the sampled run of the validated book, that leaves 2 sentences out
+of 817 landing later than the truth, by at most 2.0 seconds, for a median
+rewind of 7.6 seconds. Going the other way (narration to page) needs no margin:
+the segment containing the current instant is the sentence being spoken, and
+erring toward the earlier one is already what the lookup does.
 
 ## The model, and its licence
 

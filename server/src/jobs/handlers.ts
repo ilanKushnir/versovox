@@ -34,6 +34,7 @@ import {
 import { languageCode } from '../pairing/score.js';
 import { libraryRoots, recordTranscribeSpeed, resolveSettings } from '../domain/settings.js';
 import { alignWithCtc, AlignmentRefusedError } from '../alignment/ctc/engine.js';
+import { planFor } from '../alignment/ctc/sparse.js';
 import {
   enqueueJob,
   jobCheckpoint,
@@ -1010,6 +1011,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
         sentences: input,
         sentenceText: inputText,
         threads: Math.max(1, config.alignThreads),
+        plan: planFor(settings.alignPrecision) ?? undefined,
         signal: controller.signal,
         onProgress: (f: number, detail: string) =>
           jobProgress(db, job.id, job.lease_token, 0.18 + 0.72 * f, detail),
@@ -1081,9 +1083,12 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     guard.assertHeld();
     storeAlignment(db, pairId, language, ctc.model, ctc.result, {
       provider: 'forced-align',
+      precision: settings.alignPrecision,
       sentenceCount: input.length,
       anchors: ctc.stats.monotoneAnchors,
       charRatio: ctc.stats.charRatio,
+      probes: ctc.probes,
+      decodedMs: ctc.decodedMs,
     });
     jobProgress(
       db,
