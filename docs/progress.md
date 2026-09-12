@@ -20,11 +20,11 @@ forward.**
 3. Acknowledged events are deleted; the server's reconciled state is cached
    locally.
 4. **A revoked session does not discard the queue.** A 401 stops the app
-   trusting cached *content* — the offline packages, the cached server state —
+   trusting cached _content_ — the offline packages, the cached server state —
    but the reader's own unsent writes are theirs, and an expiry discovered on
    landing after a flight would otherwise erase the flight. The queue is
    stamped with the account that made it and is cleared only on a deliberate
-   sign-out (after a flush attempt) or when a *different* account signs in on
+   sign-out (after a flush attempt) or when a _different_ account signs in on
    the same browser.
 5. **Resume** combines the newest acknowledged server state with any newer
    unacknowledged local events — using the _same_ decision function the

@@ -290,7 +290,6 @@ export function matchChars(
   return { timings, stats, anchors: anchorList };
 }
 
-
 /**
  * Longest strictly increasing subsequence of heard positions, over pairs that
  * are already sorted by book position. Patience sorting, O(n log n).

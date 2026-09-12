@@ -258,7 +258,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
     const row = db.prepare('SELECT * FROM pairs WHERE id = ?').get(id) as
       Record<string, unknown> | undefined;
     if (!row) return reply.code(404).send({ error: 'not-found' });
-    // Asked for by a person: run the full transcription even when this server
+    // Asked for by a person: align this pair now, even when this server
     // is set to verify-and-wait.
     const jobId = enqueueJob(
       db,
@@ -270,7 +270,7 @@ export function registerPairRoutes(app: FastifyInstance, ctx: AppContext): void 
   });
 
   /**
-   * Start transcription for several pairs at once — the "Start all" and
+   * Align several pairs at once — the "Start all" and
    * multi-select actions. Each becomes an ordinary queued job, so the same
    * one-at-a-time lane and the same live progress apply.
    */

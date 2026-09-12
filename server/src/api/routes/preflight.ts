@@ -6,12 +6,7 @@ import { type FastifyInstance } from 'fastify';
 import { type AppContext } from '../../context.js';
 import { hasRole } from '../../auth/roles.js';
 import { checkCtcEngine } from '../../alignment/ctc/emissions.js';
-import {
-  ALIGNER,
-  isInstalled,
-  modelFiles,
-  modelPath,
-} from '../../alignment/model.js';
+import { ALIGNER, isInstalled, modelFiles, modelPath } from '../../alignment/model.js';
 import { alignmentRoots, libraryRoots } from '../../domain/settings.js';
 import { checkLibraryPath } from '../../setup/paths.js';
 

@@ -4,7 +4,6 @@
  *   - EPUBs built from original stories (fixture-content.mjs)
  *   - Audiobook narration synthesized with espeak-ng (text2wav, WASM) and
  *     encoded with the system ffmpeg
- *   - A deterministic word-timestamp transcript sidecar for the paired book
  *     (sentence boundaries are exact; word times are proportional within a
  *     sentence — documented honestly in docs/alignment.md)
  *
@@ -270,7 +269,7 @@ function encodeM4b(wavPath, m4bPath, meta, chapters) {
 // --------------------------------------------------------------------- build
 
 async function main() {
-  // --- Book A: The Lantern of Ash Harbor (paired: EPUB + 4 mp3 + transcript)
+  // --- Book A: The Lantern of Ash Harbor (paired: EPUB + 4 mp3)
   {
     const b = lantern;
     const chaptersXhtml = b.chapters.map((ch, i) => {
@@ -311,8 +310,6 @@ async function main() {
     // notice that is NOT in the ebook text (exercises narration-only gaps).
     const dir = path.join(audioDir, 'Rivka Sharon', 'The Lantern of Ash Harbor');
     fs.mkdirSync(dir, { recursive: true });
-    const allWords = [];
-    let absoluteMs = 0;
     for (let i = 0; i < b.chapters.length; i++) {
       const ch = b.chapters[i];
       const sentences = [];
@@ -338,26 +335,8 @@ async function main() {
         language: 'eng',
       });
       fs.rmSync(wavPath);
-      for (const w of unit.words)
-        allWords.push({ w: w.w, s: w.s + absoluteMs, e: w.e + absoluteMs });
-      // Track boundaries must reflect the *encoded* duration; mp3 encoding
-      // preserves duration within a few ms, so use the synthesized value.
-      absoluteMs += unit.durationMs;
       console.log(`audio ${mp3Path}`);
     }
-    fs.writeFileSync(
-      path.join(dir, 'transcript.versovox.json'),
-      JSON.stringify(
-        {
-          language: 'en',
-          model: 'fixture-espeak-ng',
-          note: 'Deterministic sample transcript. Sentence boundaries are exact; word timings are proportional within each sentence.',
-          words: allWords,
-        },
-        null,
-        0,
-      ),
-    );
     fs.writeFileSync(
       path.join(dir, 'cover.svg'),
       coverSvg({
@@ -401,7 +380,7 @@ async function main() {
     });
   }
 
-  // --- Book C: multi-file audiobook only (no transcript, no ebook)
+  // --- Book C: multi-file audiobook only (no ebook)
   {
     const b = fieldNotes;
     const dir = path.join(audioDir, 'Tamar Bell', 'Field Notes from a Quiet Valley');

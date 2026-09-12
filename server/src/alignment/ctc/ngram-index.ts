@@ -92,8 +92,9 @@ export class NgramIndex {
     for (let i = 0; ; i++) {
       this.insert(h, i);
       if (i >= end) break;
-      h = (Math.imul(h - Math.imul(text.charCodeAt(i), power), HASH_BASE) +
-        text.charCodeAt(i + n)) | 0;
+      h =
+        (Math.imul(h - Math.imul(text.charCodeAt(i), power), HASH_BASE) + text.charCodeAt(i + n)) |
+        0;
     }
   }
 
@@ -157,8 +158,10 @@ export class NgramIndex {
         s = (s + 1) & this.mask;
       }
       if (i >= end) break;
-      h = (Math.imul(h - Math.imul(other.charCodeAt(i), power), HASH_BASE) +
-        other.charCodeAt(i + n)) | 0;
+      h =
+        (Math.imul(h - Math.imul(other.charCodeAt(i), power), HASH_BASE) +
+          other.charCodeAt(i + n)) |
+        0;
     }
     // A gram the long side used twice is no more of an anchor than one this
     // side used twice.

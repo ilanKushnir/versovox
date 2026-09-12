@@ -85,13 +85,25 @@ export async function runImportAlignments(
   jobProgress(db, job.id, job.lease_token, 0.05, 'Looking for saved alignments');
   const out = importAlignments(ctx, (done, total) => {
     guard.assertHeld();
-    jobProgress(db, job.id, job.lease_token, total ? (0.05 + 0.9 * done) / total : 1, `Checking ${done} of ${total}`);
+    jobProgress(
+      db,
+      job.id,
+      job.lease_token,
+      total ? (0.05 + 0.9 * done) / total : 1,
+      `Checking ${done} of ${total}`,
+    );
   });
   guard.assertHeld();
   const parts = [`Restored ${out.imported}`];
   if (out.unmatched) parts.push(`${out.unmatched} for books not in this library`);
   if (out.rejected.length) parts.push(`${out.rejected.length} could not be used`);
-  jobProgress(db, job.id, job.lease_token, 1, out.scanned === 0 ? 'No saved alignments found' : parts.join(' · '));
+  jobProgress(
+    db,
+    job.id,
+    job.lease_token,
+    1,
+    out.scanned === 0 ? 'No saved alignments found' : parts.join(' · '),
+  );
   for (const r of out.rejected) ctx.log.warn(`${path.basename(r.file)}: ${r.reason}`);
 }
 
@@ -104,7 +116,13 @@ export async function runExportAlignments(
   const { db } = ctx;
   const out = exportAlignments(ctx, (done, total) => {
     guard.assertHeld();
-    jobProgress(db, job.id, job.lease_token, total ? done / total : 1, `Saving ${done} of ${total}`);
+    jobProgress(
+      db,
+      job.id,
+      job.lease_token,
+      total ? done / total : 1,
+      `Saving ${done} of ${total}`,
+    );
   });
   guard.assertHeld();
   if (out.problem) ctx.log.warn(out.problem);

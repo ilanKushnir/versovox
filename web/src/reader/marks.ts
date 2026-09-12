@@ -77,11 +77,7 @@ export function marksInChapter(annotations: Annotation[], spineIdx: number): Ann
  * Registries are cleared rather than left behind when a colour goes unused:
  * a stale registry keeps painting a range that no longer belongs to anything.
  */
-export function paintMarks(
-  map: TextMap | null,
-  annotations: Annotation[],
-  spineIdx: number,
-): void {
+export function paintMarks(map: TextMap | null, annotations: Annotation[], spineIdx: number): void {
   const css = CSS as unknown as HighlightApi;
   if (!css.highlights || typeof Highlight === 'undefined') return;
   if (!map) {
@@ -144,10 +140,7 @@ export function markAtPoint(
  */
 function caretAt(x: number, y: number): { node: Node; offset: number } | null {
   const doc = document as Document & {
-    caretPositionFromPoint?: (
-      x: number,
-      y: number,
-    ) => { offsetNode: Node; offset: number } | null;
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
   };
   if (typeof doc.caretPositionFromPoint === 'function') {

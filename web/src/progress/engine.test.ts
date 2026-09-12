@@ -65,7 +65,10 @@ const audio = (pct: number) => ({ medium: 'audio' as const, trackIdx: 0, positio
 
 /** The events in the most recent POST body. */
 const lastBatch = (): ProgressEvent[] => {
-  const call = apiMock.mock.calls.at(-1) as unknown as [string, { body: { events: ProgressEvent[] } }];
+  const call = apiMock.mock.calls.at(-1) as unknown as [
+    string,
+    { body: { events: ProgressEvent[] } },
+  ];
   return call[1].body.events;
 };
 
@@ -182,7 +185,10 @@ describe('keepalive flush budget', () => {
   });
 
   it('an oversized single event is still sent rather than blocking the queue', () => {
-    const huge = { eventId: 'x', locator: { note: 'x'.repeat(70 * 1024) } } as unknown as ProgressEvent;
+    const huge = {
+      eventId: 'x',
+      locator: { note: 'x'.repeat(70 * 1024) },
+    } as unknown as ProgressEvent;
     expect(withinKeepaliveBudget([huge])).toHaveLength(1);
   });
 });

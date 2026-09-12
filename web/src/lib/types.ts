@@ -179,7 +179,5 @@ export const ALIGNER_MODEL_ID = 'alignment-model';
 export function alignerModel(models: ModelsResponse | null): ModelInfo | null {
   // By id, then by being the only entry: a server one version behind still
   // calls it something else, and the page has to show its model either way.
-  return (
-    models?.models.find((m) => m.id === ALIGNER_MODEL_ID) ?? models?.models[0] ?? null
-  );
+  return models?.models.find((m) => m.id === ALIGNER_MODEL_ID) ?? models?.models[0] ?? null;
 }

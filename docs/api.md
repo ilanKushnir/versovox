@@ -275,15 +275,12 @@ round trip), `paths` (`dataDir`, `cacheDir`, `modelsDir` and the folder lists),
 the `alignments` summary described above, and a one-line `precedence` string
 saying which layer wins.
 
-There are eight settings: `defaultLanguage`, `jobConcurrency`, `ebookDirs`,
-`audiobookDirs`, `alignmentDirs`, `alignPrecision` (`standard` or `exact`),
-`autoAlign` and `alignSpeedRatio`. The first five can be pinned by environment
-variables and then appear in `envPinned`; the other three exist only here.
-Two of them are readable but not settable. `alignSpeedRatio` is written by the
-worker from real runs, so a client that sends it is overwriting a measurement
-with a guess; `jobConcurrency` is taken from `VX_JOB_CONCURRENCY` when the
-worker starts and from nowhere else, so a value written here is stored and
-never acted on. Both are in the schema because the settings page shows them.
+There are seven settings: `defaultLanguage`, `ebookDirs`, `audiobookDirs`,
+`alignmentDirs`, `alignPrecision` (`standard` or `exact`), `autoAlign` and
+`alignSpeedRatio`. The first four can be pinned by environment variables and
+then appear in `envPinned`; the rest exist only here. One is readable but not
+settable: `alignSpeedRatio` is written by the worker from real runs, so a
+client that sends it is overwriting a measurement with a guess.
 
 `PUT` persists only the keys the request actually contained. This is not
 politeness: `settingsSchema.partial()` still fills in every `.default()`, so a

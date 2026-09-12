@@ -124,7 +124,7 @@ excerpt, each with jump and delete. The caret exists only once there is
 something behind it, so an unmarked book shows the ribbon on its own.
 
 Selecting text offers five highlight colours — amber, rose, plum, sky and
-sand — as five swatches, and picking one *is* the act of highlighting: there
+sand — as five swatches, and picking one _is_ the act of highlighting: there
 is no Highlight button to press first, so highlighting in a chosen colour is
 one tap, the same as highlighting at all. They are muted tints of the app's own
 warm palette rather than the saturated yellows most readers reach for, on the

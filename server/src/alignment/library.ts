@@ -335,9 +335,7 @@ export function exportAlignments(
 ): ExportOutcome {
   const { dir, problem } = writeTargetDir(ctx);
   const pairs = ctx.db
-    .prepare(
-      `SELECT DISTINCT pair_id FROM alignments WHERE status = 'ready' ORDER BY pair_id`,
-    )
+    .prepare(`SELECT DISTINCT pair_id FROM alignments WHERE status = 'ready' ORDER BY pair_id`)
     .all() as { pair_id: string }[];
   let written = 0;
   let skipped = 0;

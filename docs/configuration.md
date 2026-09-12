@@ -50,14 +50,13 @@ not cost a container restart, so they live in the database only.
 
 ## In-app settings
 
-Eight keys, the whole of `settingsSchema`. `GET /api/settings` returns them
+Seven keys, the whole of `settingsSchema`. `GET /api/settings` returns them
 with the list of those an environment variable has pinned; `PUT` writes the
 rest, admin only.
 
 | Setting           | Default    | Set in                               | Pinned by             |
 | ----------------- | ---------- | ------------------------------------ | --------------------- |
 | `defaultLanguage` | `en`       | Settings → Alignment → Language      | `VX_DEFAULT_LANGUAGE` |
-| `jobConcurrency`  | `2`        | the environment (see below)          | `VX_JOB_CONCURRENCY`  |
 | `ebookDirs`       | none       | Settings → Libraries, and the wizard | `VX_EBOOK_DIRS`       |
 | `audiobookDirs`   | none       | Settings → Libraries, and the wizard | `VX_AUDIOBOOK_DIRS`   |
 | `alignmentDirs`   | none       | Settings → Libraries, and the wizard | `VX_ALIGNMENT_DIRS`   |

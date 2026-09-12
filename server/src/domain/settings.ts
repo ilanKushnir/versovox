@@ -11,7 +11,6 @@ import { type EnvConfig } from '../config.js';
 
 const DEFAULTS: Settings = {
   defaultLanguage: 'en',
-  jobConcurrency: 2,
   ebookDirs: [],
   audiobookDirs: [],
   alignmentDirs: [],
@@ -49,7 +48,6 @@ export function recordAlignSpeed(db: DB, audioMs: number, wallMs: number): void 
 /** Settings keys that can be pinned by env vars, mapped to config fields. */
 const ENV_MAP: Partial<Record<keyof Settings, keyof EnvConfig>> = {
   defaultLanguage: 'defaultLanguage',
-  jobConcurrency: 'jobConcurrency',
   ebookDirs: 'ebookDirs',
   audiobookDirs: 'audiobookDirs',
   alignmentDirs: 'alignmentDirs',

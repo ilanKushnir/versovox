@@ -45,4 +45,3 @@ export function activeDerivedDir(ctx: AppContext, bookId: string): string {
 export function coversDir(ctx: AppContext): string {
   return path.join(ctx.config.cacheDir, 'covers');
 }
-

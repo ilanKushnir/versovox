@@ -137,9 +137,7 @@ describe('NgramIndex', () => {
     const heard = `${'a'.repeat(500)}${gram}`;
     // The gram starts at 500, past a limit of 100, so it cannot be found.
     expect(new NgramIndex(heard, 14, 100).matchAgainst(`qq${gram}qq`)).toEqual([]);
-    expect(new NgramIndex(heard, 14, HUGE).matchAgainst(`qq${gram}qq`)).toEqual([
-      { a: 500, b: 2 },
-    ]);
+    expect(new NgramIndex(heard, 14, HUGE).matchAgainst(`qq${gram}qq`)).toEqual([{ a: 500, b: 2 }]);
   });
 
   it('scales past the length that used to be the ceiling', () => {

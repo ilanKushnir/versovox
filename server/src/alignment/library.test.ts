@@ -89,14 +89,24 @@ function seedPair(
                           size_bytes, scan_state, added_at)
        VALUES (?, 'audio', '/lib', 'a', 'm4b', 'The Lantern', 'A Narrator', ?, 99, 'ready', ?)`,
     )
-    .run(audioId, trackMs.reduce((a, b) => a + b, 0), nowIso());
+    .run(
+      audioId,
+      trackMs.reduce((a, b) => a + b, 0),
+      nowIso(),
+    );
   trackMs.forEach((ms, i) => {
     c.db
       .prepare(
         `INSERT INTO audio_tracks (book_id, idx, rel_path, duration_ms, size_bytes, format, start_ms_absolute)
          VALUES (?, ?, ?, ?, 1, 'm4b', ?)`,
       )
-      .run(audioId, i, `t${i}.m4b`, ms, trackMs.slice(0, i).reduce((a, b) => a + b, 0));
+      .run(
+        audioId,
+        i,
+        `t${i}.m4b`,
+        ms,
+        trackMs.slice(0, i).reduce((a, b) => a + b, 0),
+      );
   });
   c.db
     .prepare(
@@ -120,12 +130,19 @@ function seedAlignment(c: AppContext, pairId: string): void {
       uncertaintyMs: 2000,
     })),
   );
-  storeAlignment(c.db, pairId, 'en', 'mms-fa/model_int8.onnx', {
-    segments,
-    gaps: [],
-    coverage: 1,
-    meanConfidence: 0.9,
-  }, { sentenceCount: segments.length });
+  storeAlignment(
+    c.db,
+    pairId,
+    'en',
+    'mms-fa/model_int8.onnx',
+    {
+      segments,
+      gaps: [],
+      coverage: 1,
+      meanConfidence: 0.9,
+    },
+    { sentenceCount: segments.length },
+  );
 }
 
 beforeEach(() => {

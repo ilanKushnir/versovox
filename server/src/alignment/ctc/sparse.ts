@@ -54,7 +54,7 @@ export const DEFAULT_SPARSE_PLAN: SparsePlan = {
 };
 
 /**
- * The settings-level choice, expressed as schedules. `thorough` has no
+ * The settings-level choice, expressed as a schedule. `exact` has no
  * schedule: it decodes every sample.
  */
 /** Schedule for a settings value, or null when every sample is decoded. */

@@ -770,10 +770,10 @@ describe('Versovox API', () => {
       await authed({
         method: 'PUT',
         url: '/api/settings',
-        payload: { jobConcurrency: 4, defaultLanguage: 'he' },
+        payload: { alignPrecision: 'exact', defaultLanguage: 'he' },
       })
-    ).json() as { settings: { jobConcurrency: number; defaultLanguage: string } };
-    expect(updated.settings.jobConcurrency).toBe(4);
+    ).json() as { settings: { alignPrecision: string; defaultLanguage: string } };
+    expect(updated.settings.alignPrecision).toBe('exact');
     // An operator pinned the language in Compose; the UI may offer the field,
     // but a save must not quietly win over the environment.
     expect(updated.settings.defaultLanguage).toBe('en');
@@ -988,7 +988,7 @@ describe('Versovox API', () => {
     expect(after.autoAlign).toBe(false);
     // Everything the caller did NOT send must survive untouched. This used to
     // wipe the library folders on every save.
-    for (const key of ['ebookDirs', 'audiobookDirs', 'alignPrecision', 'jobConcurrency']) {
+    for (const key of ['ebookDirs', 'audiobookDirs', 'alignPrecision']) {
       expect(after[key]).toEqual(before[key]);
     }
     await authed({ method: 'PUT', url: '/api/settings', payload: { autoAlign: true } });

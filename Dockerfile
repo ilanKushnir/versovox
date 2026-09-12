@@ -1,6 +1,7 @@
 # Versovox production image
 # Multi-stage: build workspaces with dev deps, then a slim non-root runtime
-# with ffmpeg/ffprobe. No native Node modules (SQLite is node:sqlite).
+# with ffmpeg/ffprobe. SQLite is node:sqlite; the one native module is
+# onnxruntime-node, whose darwin and win32 binaries are pruned below.
 # Debian (glibc) base: package-lock.json was generated on glibc, and npm's
 # optional-dependency bug (npm/cli#4828) leaves the platform-native Rollup
 # binary (@rollup/rollup-linux-*-musl) uninstalled when `npm ci` runs on
