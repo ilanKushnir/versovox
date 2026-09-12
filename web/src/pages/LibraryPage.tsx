@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { type BookSummary } from '@versovox/shared';
+import { Link, NavLink, useParams } from 'react-router-dom';
+import { AUTO_SHELVES, type AutoShelfId, type BookSummary } from '@versovox/shared';
 import { api } from '../api/client';
+import { useShelves } from '../state/shelves';
+import { AddToSheet } from '../components/AddToSheet';
 import { Cover, EmptyState } from '../components/ui';
 import {
   IconAlert,
@@ -10,15 +12,17 @@ import {
   IconHeadphones,
   IconLibrary,
   IconLink,
+  IconList,
   IconOffline,
   IconPlay,
+  IconPlus,
   IconSearch,
+  IconShelf,
 } from '../components/icons';
 import { formatDuration, formatPct } from '../lib/format';
 import { cachedBookSummary, listDownloads } from '../offline/downloads';
 
 type Kind = 'all' | 'ebook' | 'audio';
-type Shelf = 'none' | 'paired' | 'in-progress' | 'downloaded';
 type Sort = 'title' | 'author' | 'recent' | 'added';
 
 interface LibraryData {
@@ -26,6 +30,15 @@ interface LibraryData {
   continueRail: string[];
   scanActive: boolean;
 }
+
+/** Which shelf this page is showing, worked out from the route. */
+type Showing =
+  | { kind: 'library' }
+  | { kind: 'auto'; id: AutoShelfId }
+  | { kind: 'device' }
+  | { kind: 'user'; id: string };
+
+const AUTO_IDS = AUTO_SHELVES.map((s) => s.id) as string[];
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -37,17 +50,50 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function LibraryPage() {
+  const params = useParams();
+  const { overview, refreshDownloads } = useShelves();
+  const showing = useMemo<Showing>(() => {
+    if (params.shelfId) return { kind: 'user', id: params.shelfId };
+    if (params.autoShelf === 'on-this-device') return { kind: 'device' };
+    if (params.autoShelf && AUTO_IDS.includes(params.autoShelf)) {
+      return { kind: 'auto', id: params.autoShelf as AutoShelfId };
+    }
+    return { kind: 'library' };
+  }, [params.shelfId, params.autoShelf]);
+
   const [data, setData] = useState<LibraryData | null>(null);
+  const [shelfName, setShelfName] = useState<string | null>(null);
+  const [missingCount, setMissingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [offlineBooks, setOfflineBooks] = useState<BookSummary[] | null>(null);
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebounced(query, 220);
   const [kind, setKind] = useState<Kind>('all');
-  const [shelf, setShelf] = useState<Shelf>('none');
   const [sort, setSort] = useState<Sort>('title');
+  const [addTo, setAddTo] = useState<BookSummary | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const requestSeq = useRef(0);
+  const chipsRef = useRef<HTMLElement>(null);
+
+  const shelfKey =
+    showing.kind === 'library' ? 'library' : `${showing.kind}:${'id' in showing ? showing.id : ''}`;
+
+  // Arriving at a different shelf starts fresh. Inside "Recently added" the
+  // point IS recency, so that is where its sort starts.
+  useEffect(() => {
+    setSort(shelfKey === 'auto:recently-added' ? 'added' : 'title');
+    setQuery('');
+    setKind('all');
+  }, [shelfKey]);
+
+  // The chip you are on must be the chip you can see; a row that scrolls
+  // sideways can otherwise hide the answer to "where am I".
+  useEffect(() => {
+    chipsRef.current
+      ?.querySelector('.is-current')
+      ?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [shelfKey, overview?.shelves.length]);
 
   const loadDownloads = useCallback(async () => {
     const list = await listDownloads();
@@ -58,14 +104,30 @@ export function LibraryPage() {
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
     try {
+      if (showing.kind === 'user') {
+        const res = await api<{
+          shelf: { name: string };
+          books: BookSummary[];
+          missingCount: number;
+        }>(`/api/shelves/${showing.id}/books?sort=${sort === 'recent' ? 'manual' : sort}`);
+        if (seq !== requestSeq.current) return;
+        setShelfName(res.shelf.name);
+        setMissingCount(res.missingCount);
+        setData({ books: res.books, continueRail: [], scanActive: false });
+        setError(null);
+        setOfflineBooks(null);
+        return;
+      }
       const params = new URLSearchParams();
       if (debouncedQuery.trim()) params.set('query', debouncedQuery.trim());
       if (kind !== 'all') params.set('kind', kind);
-      if (shelf === 'paired' || shelf === 'in-progress') params.set('filter', shelf);
+      if (showing.kind === 'auto') params.set('filter', showing.id);
       params.set('sort', sort);
       const res = await api<LibraryData>(`/api/library?${params}`);
-      if (seq !== requestSeq.current) return; // a newer request superseded this one
+      if (seq !== requestSeq.current) return;
       setData(res);
+      setShelfName(null);
+      setMissingCount(0);
       setError(null);
       setOfflineBooks(null);
     } catch {
@@ -84,7 +146,7 @@ export function LibraryPage() {
           : 'Could not load the library. Check the server connection.',
       );
     }
-  }, [debouncedQuery, kind, shelf, sort, loadDownloads]);
+  }, [debouncedQuery, kind, sort, showing, loadDownloads]);
 
   useEffect(() => {
     void load();
@@ -110,9 +172,24 @@ export function LibraryPage() {
   }, [data?.scanActive, load]);
 
   const books = useMemo(() => {
-    const source = data?.books ?? offlineBooks ?? [];
-    return shelf === 'downloaded' ? source.filter((b) => downloaded.has(b.id)) : source;
-  }, [data, offlineBooks, shelf, downloaded]);
+    let source = data?.books ?? offlineBooks ?? [];
+    // The one shelf the server cannot answer: what is downloaded lives in
+    // this browser, so the filtering happens here and nowhere else.
+    if (showing.kind === 'device') source = source.filter((b) => downloaded.has(b.id));
+    if (showing.kind === 'user' || showing.kind === 'device') {
+      const needle = debouncedQuery.trim().toLowerCase();
+      if (needle) {
+        source = source.filter(
+          (b) =>
+            b.title.toLowerCase().includes(needle) ||
+            (b.author ?? '').toLowerCase().includes(needle) ||
+            (b.series ?? '').toLowerCase().includes(needle),
+        );
+      }
+      if (kind !== 'all') source = source.filter((b) => b.kind === kind);
+    }
+    return source;
+  }, [data, offlineBooks, showing, downloaded, debouncedQuery, kind]);
 
   const continueBooks = useMemo(() => {
     if (!data) return [];
@@ -121,7 +198,8 @@ export function LibraryPage() {
   }, [data]);
   const hero = continueBooks[0] ?? null;
   const rail = continueBooks.slice(1);
-  const showContinue = shelf === 'none' && kind === 'all' && !query && continueBooks.length > 0;
+  const showContinue =
+    showing.kind === 'library' && kind === 'all' && !query && continueBooks.length > 0;
 
   const stats = useMemo(() => {
     const all = data?.books ?? [];
@@ -132,9 +210,49 @@ export function LibraryPage() {
     };
   }, [data]);
 
+  const heading =
+    showing.kind === 'user'
+      ? (shelfName ?? 'Shelf')
+      : showing.kind === 'device'
+        ? 'On this device'
+        : showing.kind === 'auto'
+          ? AUTO_SHELVES.find((s) => s.id === showing.id)!.label
+          : 'Library';
+
+  const showChips = showing.kind !== 'library' || (overview?.shelves.length ?? 0) > 0;
+  const chips = [
+    { to: '/', label: 'Library', end: true },
+    { to: '/reading-list', label: 'Reading list', end: false },
+    ...AUTO_SHELVES.map((s) => ({ to: `/shelf/${s.id}`, label: s.label, end: false })),
+    { to: '/shelf/on-this-device', label: 'On this device', end: false },
+    ...(overview?.shelves ?? []).map((s) => ({
+      to: `/shelf/u/${s.id}`,
+      label: s.name,
+      end: false,
+    })),
+  ];
+
   return (
-    <main className="app-main">
-      <h1 className="visually-hidden">Library</h1>
+    <main className="app-main" id="library-main">
+      <h1 className="visually-hidden">{heading}</h1>
+
+      {/* Moving between shelves on a narrow screen: a swipe and a tap, no
+          sheet. A reader with no shelves is not taxed with a control that
+          does nothing yet. */}
+      {showChips && (
+        <nav className="shelf-chips chip-row" aria-label="Shelves" ref={chipsRef}>
+          {chips.map((c) => (
+            <NavLink
+              key={c.to}
+              to={c.to}
+              end={c.end}
+              className={({ isActive }) => `chip${isActive ? ' is-current' : ''}`}
+            >
+              {c.label}
+            </NavLink>
+          ))}
+        </nav>
+      )}
 
       {error && (
         <div className={`banner ${offlineBooks ? '' : 'banner--error'}`} role="alert">
@@ -146,6 +264,15 @@ export function LibraryPage() {
         </div>
       )}
 
+      {missingCount > 0 && (
+        <div className="banner" role="note">
+          <IconAlert size={16} />
+          {missingCount === 1
+            ? '1 book on this shelf is on a drive that is not mounted.'
+            : `${missingCount} books on this shelf are on a drive that is not mounted.`}
+        </div>
+      )}
+
       {showContinue && hero && (
         <section className="band band--continue" aria-labelledby="continue-h">
           <div className="band__head">
@@ -153,9 +280,9 @@ export function LibraryPage() {
               Continue
             </h2>
             {continueBooks.length > 1 && (
-              <button className="band__more" onClick={() => setShelf('in-progress')}>
+              <Link className="band__more" to="/shelf/reading-now">
                 All in progress · {continueBooks.length}
-              </button>
+              </Link>
             )}
           </div>
           <HeroCard book={hero} />
@@ -172,16 +299,10 @@ export function LibraryPage() {
       <section className="band band--library" aria-labelledby="library-h">
         <div className="band__head">
           <h2 id="library-h" className="band__title">
-            {shelf === 'downloaded'
-              ? 'Downloaded'
-              : shelf === 'in-progress'
-                ? 'In progress'
-                : shelf === 'paired'
-                  ? 'Paired editions'
-                  : 'Library'}
+            {heading}
             {books.length > 0 && <span className="section-title__count">{books.length}</span>}
           </h2>
-          {shelf === 'none' && kind === 'all' && !query && data && (
+          {showing.kind === 'library' && kind === 'all' && !query && data && (
             <span className="band__stats">
               {stats.ebooks} ebooks · {stats.audio} audiobooks
               {stats.paired > 0 ? ` · ${Math.round(stats.paired)} paired` : ''}
@@ -195,7 +316,7 @@ export function LibraryPage() {
               className="input"
               type="search"
               placeholder="Search title, author, series"
-              aria-label="Search library"
+              aria-label="Search this shelf"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -211,22 +332,6 @@ export function LibraryPage() {
               <IconHeadphones size={15} /> Audiobooks
             </button>
           </div>
-          <label className="visually-hidden" htmlFor="lib-shelf">
-            Shelf
-          </label>
-          <select
-            id="lib-shelf"
-            className="input input--select"
-            value={shelf}
-            onChange={(e) => setShelf(e.target.value as Shelf)}
-          >
-            <option value="none">Everything</option>
-            <option value="in-progress">In progress</option>
-            <option value="paired">Paired editions</option>
-            <option value="downloaded">
-              Downloaded{downloaded.size > 0 ? ` (${downloaded.size})` : ''}
-            </option>
-          </select>
           <label className="visually-hidden" htmlFor="lib-sort">
             Sort by
           </label>
@@ -238,7 +343,9 @@ export function LibraryPage() {
           >
             <option value="title">By title</option>
             <option value="author">By author</option>
-            <option value="recent">Recently active</option>
+            <option value="recent">
+              {showing.kind === 'user' ? 'Shelf order' : 'Recently active'}
+            </option>
             <option value="added">Recently added</option>
           </select>
         </div>
@@ -259,30 +366,81 @@ export function LibraryPage() {
             ))}
           </div>
         ) : books.length === 0 ? (
-          query || kind !== 'all' || shelf !== 'none' ? (
-            <EmptyState
-              icon={shelf === 'downloaded' ? <IconDownload size={40} /> : <IconSearch size={40} />}
-              title={shelf === 'downloaded' ? 'Nothing downloaded yet' : 'No matches'}
-            >
-              {shelf === 'downloaded'
-                ? 'Open a book and tap Download to keep it on this device for flights and dead zones.'
-                : 'Nothing in your library matches this search or filter.'}
-            </EmptyState>
-          ) : (
-            <EmptyState icon={<IconLibrary size={44} />} title="Your library is empty">
-              Versovox reads ebook and audiobook folders you already have, and never writes to them.
-              Choose those folders in Settings → Libraries; each one is tested before it is saved.
-            </EmptyState>
-          )
+          <ShelfEmpty showing={showing} filtered={!!query || kind !== 'all'} />
         ) : (
           <div className="book-grid">
             {books.map((b) => (
-              <BookCard key={b.id} book={b} offline={downloaded.has(b.id)} />
+              <BookCard
+                key={b.id}
+                book={b}
+                offline={downloaded.has(b.id)}
+                onAddTo={() => setAddTo(b)}
+              />
             ))}
           </div>
         )}
       </section>
+
+      {addTo && (
+        <AddToSheet
+          bookId={addTo.id}
+          title={addTo.title}
+          onClose={() => setAddTo(null)}
+          onChanged={() => {
+            void refreshDownloads();
+            if (showing.kind === 'user') void load();
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function ShelfEmpty({ showing, filtered }: { showing: Showing; filtered: boolean }) {
+  if (filtered) {
+    return (
+      <EmptyState icon={<IconSearch size={40} />} title="No matches">
+        Nothing here matches this search or filter.
+      </EmptyState>
+    );
+  }
+  if (showing.kind === 'device') {
+    return (
+      <EmptyState icon={<IconOffline size={40} />} title="Nothing downloaded in this browser">
+        Downloads stay on the device that made them and are removed when you sign out. Open a book
+        and choose Download to keep it here.
+      </EmptyState>
+    );
+  }
+  if (showing.kind === 'user') {
+    return (
+      <EmptyState icon={<IconShelf size={40} />} title="This shelf is empty">
+        Add books from the library — hover a cover and press the plus.
+      </EmptyState>
+    );
+  }
+  if (showing.kind === 'auto') {
+    const copy: Record<AutoShelfId, string> = {
+      'reading-now': 'Open anything and it appears here until you finish it.',
+      finished: 'Books you mark as finished collect here.',
+      'both-formats':
+        'This fills up as Versovox matches an ebook to its audiobook. The Pairing page shows what it is considering.',
+      'recently-added': 'Nothing new has turned up in the last month.',
+    };
+    return (
+      <EmptyState
+        icon={showing.id === 'both-formats' ? <IconLink size={40} /> : <IconList size={40} />}
+        title="Nothing here yet"
+      >
+        {copy[showing.id]}
+      </EmptyState>
+    );
+  }
+  return (
+    <EmptyState icon={<IconLibrary size={44} />} title="Your library is empty">
+      Versovox reads ebook and audiobook folders you already have, and never writes to them. Choose
+      those folders in Settings → Libraries; each one is tested before it is saved.
+    </EmptyState>
   );
 }
 
@@ -370,7 +528,20 @@ function ContinueCard({ book }: { book: BookSummary }) {
   );
 }
 
-function BookCard({ book, offline }: { book: BookSummary; offline: boolean }) {
+/**
+ * The card is a positioned wrapper with the link and the shelf button as
+ * SIBLINGS. A button inside an anchor is invalid and swallows the keyboard,
+ * so the plus cannot live inside the Link no matter how convenient that is.
+ */
+function BookCard({
+  book,
+  offline,
+  onAddTo,
+}: {
+  book: BookSummary;
+  offline: boolean;
+  onAddTo: () => void;
+}) {
   const stateNote =
     book.scanState === 'error'
       ? 'Indexing failed'
@@ -379,46 +550,56 @@ function BookCard({ book, offline }: { book: BookSummary; offline: boolean }) {
         : null;
   const pair = book.pair && book.pair.status !== 'candidate' ? book.pair : null;
   return (
-    <Link className="book-card" to={`/book/${book.id}`}>
-      <span className="book-card__coverwrap">
-        <Cover book={book} className="book-card__cover" />
-        <span className="book-card__badges">
-          <span className={`badge ${book.kind === 'audio' ? 'badge--audio' : ''}`}>
-            {book.kind === 'ebook' ? <IconBookOpen size={11} /> : <IconHeadphones size={11} />}
-            {book.kind === 'ebook'
-              ? 'EPUB'
-              : book.format === 'multi'
-                ? 'AUDIO'
-                : book.format.toUpperCase()}
+    <div className="book-card">
+      <Link className="book-card__link" to={`/book/${book.id}`}>
+        <span className="book-card__coverwrap">
+          <Cover book={book} className="book-card__cover" />
+          <span className="book-card__badges">
+            <span className={`badge ${book.kind === 'audio' ? 'badge--audio' : ''}`}>
+              {book.kind === 'ebook' ? <IconBookOpen size={11} /> : <IconHeadphones size={11} />}
+              {book.kind === 'ebook'
+                ? 'EPUB'
+                : book.format === 'multi'
+                  ? 'AUDIO'
+                  : book.format.toUpperCase()}
+            </span>
+            {pair && (
+              <span
+                className={`badge badge--paired ${pair.switchable ? 'badge--sync' : ''}`}
+                title={pair.switchable ? 'Synced — exact switching ready' : 'Paired edition'}
+              >
+                <IconLink size={11} />
+                {pair.switchable ? 'SYNC' : 'PAIR'}
+              </span>
+            )}
           </span>
-          {pair && (
-            <span
-              className={`badge badge--paired ${pair.switchable ? 'badge--sync' : ''}`}
-              title={pair.switchable ? 'Synced — exact switching ready' : 'Paired edition'}
-            >
-              <IconLink size={11} />
-              {pair.switchable ? 'SYNC' : 'PAIR'}
+          {offline && (
+            <span className="book-card__offline" title="Downloaded to this device">
+              <IconDownload size={12} />
             </span>
           )}
+          {book.progress && book.progress.pct > 0.001 && !book.progress.finished && (
+            <span className="book-card__progress" aria-hidden="true">
+              <span style={{ width: `${book.progress.pct * 100}%` }} />
+            </span>
+          )}
+          {book.progress?.finished && <span className="book-card__done">Finished</span>}
         </span>
-        {offline && (
-          <span className="book-card__offline" title="Downloaded to this device">
-            <IconDownload size={12} />
+        <span>
+          <span className="book-card__title">{book.title}</span>
+          <span className="book-card__author" style={{ display: 'block' }}>
+            {stateNote ?? book.author ?? ' '}
           </span>
-        )}
-        {book.progress && book.progress.pct > 0.001 && !book.progress.finished && (
-          <span className="book-card__progress" aria-hidden="true">
-            <span style={{ width: `${book.progress.pct * 100}%` }} />
-          </span>
-        )}
-        {book.progress?.finished && <span className="book-card__done">Finished</span>}
-      </span>
-      <span>
-        <span className="book-card__title">{book.title}</span>
-        <span className="book-card__author" style={{ display: 'block' }}>
-          {stateNote ?? book.author ?? ' '}
         </span>
-      </span>
-    </Link>
+      </Link>
+      <button
+        className="book-card__add"
+        onClick={onAddTo}
+        aria-label={`Add ${book.title} to a shelf or your reading list`}
+        title="Add to…"
+      >
+        <IconPlus size={17} />
+      </button>
+    </div>
   );
 }

@@ -23,6 +23,9 @@ Versovox is the beautiful self-hosted place to read ebooks and listen to audiobo
 5. Pairing review: high-confidence automatic candidates, explainable match evidence, manual link/unlink, edition-compatibility warning, and alignment confidence/coverage.
 6. Mode switch: ebook location to audiobook timestamp and audiobook timestamp to ebook sentence, with a temporary visible handoff marker.
 7. Settings and onboarding for mounted paths, rescans, model/language packs, compute limits, storage budgets, users, security, backups, and integrations.
+8. Shelves: a persistent list beside the library holding automatic shelves the server computes (reading now, finished, both formats, recently added), the reader's own named shelves, and an ordered reading list. Every one of them is per person — two people on one server share every book and no shelf. The list is a rail on a wide screen, a drawer on a tablet, and a bottom sheet plus a scrolling chip row on a phone, where moving between shelves should not cost a panel.
+
+One shelf is per DEVICE rather than per person, and is named "On this device" so it never pretends otherwise. Downloaded titles live in one browser profile on one machine and are removed on sign-out, so the same account shows different contents on a phone and a laptop, the server cannot count them, and that shelf is the only one that still works with the server unreachable. Syncing download state to the server would fix the inconsistency by teaching the server what each person carries around; that is a different feature with real privacy consequences, not a bug fix.
 
 ## Progress correctness
 

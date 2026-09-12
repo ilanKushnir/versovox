@@ -2707,3 +2707,642 @@ select.input {
 .settings-page .settings-section {
   scroll-margin-top: 80px;
 }
+
+/* ---------------------------------------------------------------- shelves */
+/* A dozen shelf rows in front of the grid is a dozen tab stops; this is the
+   way past them, and the app's first focusable element. */
+.skip-link {
+  position: absolute;
+  inset-inline-start: var(--sp-4);
+  top: calc(var(--vx-safe-top) + var(--sp-2));
+  z-index: 50;
+  padding: 10px var(--sp-4);
+  border-radius: var(--radius-pill);
+  background: var(--vx-primary);
+  color: var(--vx-on-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.skip-link:focus-visible {
+  transform: none;
+}
+
+.app-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.app-rail {
+  display: none;
+}
+.app-header__shelves {
+  min-height: 38px;
+  padding: 0 var(--sp-3);
+  font-size: 14.5px;
+}
+.app-header__shelvesname {
+  max-width: 34vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.sidebar__group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar__group--queue {
+  padding-block-end: var(--sp-3);
+  margin-block-end: var(--sp-1);
+  border-block-end: 1px solid var(--vx-border);
+}
+.sidebar__heading {
+  font-family: var(--vx-font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vx-text-soft);
+  margin: var(--sp-4) var(--sp-3) var(--sp-2);
+}
+.sidebar__heading--action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-inline-end: var(--sp-1);
+}
+.sidebar__iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--vx-text-soft);
+  cursor: pointer;
+}
+.sidebar__iconbtn:hover {
+  background: var(--vx-surface);
+  color: var(--vx-text);
+}
+.sidebar__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.sidebar__row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-control);
+  text-decoration: none;
+  color: var(--vx-text-soft);
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.sidebar__row > svg {
+  flex-shrink: 0;
+}
+.sidebar__row:hover {
+  background: var(--vx-surface);
+  color: var(--vx-text);
+}
+.sidebar__row.is-active {
+  background: var(--vx-primary);
+  color: var(--vx-on-primary);
+}
+.sidebar__label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar__sub {
+  font-size: 13px;
+  font-weight: 400;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar__group--queue .sidebar__row {
+  min-height: 52px;
+}
+.sidebar__count {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+/* A row that vanishes when empty teaches the reader the app is unreliable;
+   a dim zero is honest and stays where they last saw it. */
+.sidebar__row.is-zero:not(.is-active) {
+  opacity: 0.6;
+}
+.sidebar__empty {
+  margin: 0 var(--sp-3) var(--sp-2);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--vx-text-soft);
+}
+.sidebar__newbtn {
+  align-self: flex-start;
+  margin: 0 var(--sp-2) var(--sp-2);
+  min-height: 36px;
+}
+.sidebar__new {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) 0;
+}
+.sidebar__new .input {
+  min-height: 36px;
+}
+.sidebar__new .btn {
+  min-height: 36px;
+  flex-shrink: 0;
+}
+.sidebar__tools {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  position: absolute;
+  inset-inline-end: 2px;
+  background: var(--vx-surface);
+  border-radius: var(--radius-control);
+  opacity: 0;
+  pointer-events: none;
+}
+.sidebar__item--own:hover .sidebar__tools,
+.sidebar__item--own:focus-within .sidebar__tools,
+.sidebar__item--own.is-grabbed .sidebar__tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* A finger cannot hover, and a control that only appears on hover does not
+   exist on a phone. */
+@media (hover: none) {
+  .sidebar__tools {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.sidebar__item--own.is-editing {
+  display: block;
+}
+.sidebar__edit {
+  padding: var(--sp-2) var(--sp-2) var(--sp-3);
+  border: 1px solid var(--vx-border);
+  border-radius: var(--radius-control);
+  background: var(--vx-surface);
+}
+.sidebar__edit form {
+  display: flex;
+  gap: var(--sp-2);
+  margin-block-end: var(--sp-2);
+}
+.sidebar__edit .input {
+  min-height: 36px;
+}
+.sidebar__edit .btn {
+  flex-shrink: 0;
+}
+.sidebar__confirm {
+  margin: 0 0 var(--sp-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--vx-text-soft);
+}
+.sidebar__editactions {
+  display: flex;
+  gap: var(--sp-2);
+}
+.sidebar__grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--vx-text-soft);
+  cursor: grab;
+  touch-action: none;
+}
+.sidebar__grip[aria-pressed='true'] {
+  background: var(--vx-surface-raised);
+  color: var(--vx-text);
+  cursor: grabbing;
+}
+.sidebar__item--own.is-grabbed {
+  box-shadow: var(--vx-shadow-1);
+  border-radius: var(--radius-control);
+}
+.sidebar__foot {
+  margin-block-start: auto;
+  padding-block-start: var(--sp-4);
+}
+.sidebar__foot .btn {
+  min-height: 36px;
+  font-size: 13.5px;
+  padding-inline: var(--sp-2);
+}
+
+/* Persistent rail. Chrome in this app is a hairline, never a raised slab:
+   a full-height surface would out-weigh the covers it exists to serve. */
+@media (min-width: 1080px) {
+  .app-body {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+  .app-shell.is-railhidden .app-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-rail {
+    display: block;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-inline-end: 1px solid var(--vx-border);
+    padding: var(--sp-4) var(--sp-3) var(--sp-6);
+  }
+  .app-rail > .sidebar {
+    min-height: calc(100dvh - 140px);
+  }
+  .app-shell.is-railhidden .app-rail {
+    display: none;
+  }
+  /* With the rail present the header button is redundant; it comes back the
+     moment the rail is hidden. */
+  .app-shell:not(.is-railhidden) .app-header__shelves {
+    display: none;
+  }
+  .shelf-chips {
+    display: none;
+  }
+  .app-shell.is-railhidden .shelf-chips {
+    display: flex;
+  }
+}
+@media (max-height: 900px) and (min-width: 1080px) {
+  .sidebar__row {
+    min-height: 36px;
+  }
+}
+@media (pointer: coarse) {
+  .sidebar__row {
+    min-height: 44px;
+  }
+  .sidebar__iconbtn,
+  .sidebar__grip {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* Tablet: the grid needs the pixels, so the same list slides in instead. */
+.drawer {
+  position: fixed;
+  z-index: 41;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: min(300px, 86vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--vx-surface-raised);
+  box-shadow: var(--vx-shadow-2);
+  padding-block: var(--vx-safe-top) var(--vx-safe-bottom);
+  animation: vx-slide-in var(--vx-duration-slow) var(--vx-ease);
+}
+.drawer__body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-3) var(--sp-3) var(--sp-6);
+}
+@keyframes vx-slide-in {
+  from {
+    transform: translateX(-18px);
+    opacity: 0;
+  }
+}
+[dir='rtl'] .drawer {
+  animation-name: vx-slide-in-rtl;
+}
+@keyframes vx-slide-in-rtl {
+  from {
+    transform: translateX(18px);
+    opacity: 0;
+  }
+}
+
+/* The chip row: on a narrow screen, moving between shelves is a swipe and a
+   tap with no panel at all. */
+.shelf-chips {
+  margin-block-end: var(--sp-4);
+  padding-block-end: var(--sp-1);
+}
+.shelf-chips .chip {
+  text-decoration: none;
+  color: var(--vx-text);
+}
+.shelf-chips .chip.is-current {
+  background: var(--vx-primary);
+  border-color: var(--vx-primary);
+  color: var(--vx-on-primary);
+}
+
+/* The plus on a cover. It is a SIBLING of the card's link, never a child:
+   a button inside an anchor is invalid and swallows the keyboard. */
+.book-card {
+  position: relative;
+}
+.book-card__link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  text-decoration: none;
+  color: var(--vx-text);
+  border-radius: var(--radius-card);
+}
+.book-card__add {
+  position: absolute;
+  top: var(--sp-2);
+  inset-inline-end: var(--sp-2);
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity var(--vx-duration-quick) var(--vx-ease);
+}
+.book-card__add:hover {
+  background: rgb(0 0 0 / 0.72);
+}
+/* A phone has no hover, and an invisible affordance on touch is no
+   affordance at all. */
+@media (hover: hover) {
+  .book-card__add {
+    opacity: 0;
+  }
+  .book-card:hover .book-card__add,
+  .book-card:focus-within .book-card__add {
+    opacity: 1;
+  }
+}
+
+/* The Add-to panel: rows toggle and the panel stays open. */
+.addto {
+  margin: calc(var(--sp-4) * -1);
+}
+.addto .list-row[aria-pressed='true'] {
+  color: var(--vx-interactive);
+}
+.addto .list-row:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.addto__rule {
+  height: 1px;
+  background: var(--vx-border);
+}
+.addto__empty {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: 13.5px;
+  color: var(--vx-text-soft);
+}
+.addto__new {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+}
+.addto__new .btn {
+  flex-shrink: 0;
+}
+
+/* Where a book already sits, and one click to undo it. */
+.membership {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-block-start: var(--sp-3);
+}
+.membership__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--vx-border-strong);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vx-text-soft);
+}
+.membership__x {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.membership__x:hover {
+  background: var(--vx-surface);
+  color: var(--vx-text);
+}
+
+/* ------------------------------------------------------------ reading list */
+.queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.queue-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--vx-border);
+  border-radius: var(--radius-card);
+  background: var(--vx-surface-raised);
+  /* The row scrolls; only the handle claims the gesture. */
+  touch-action: pan-y;
+  transition:
+    transform var(--vx-duration-quick) var(--vx-ease),
+    box-shadow var(--vx-duration-quick) var(--vx-ease);
+}
+.queue-row.is-grabbed {
+  z-index: 2;
+  box-shadow: var(--vx-shadow-2);
+}
+.queue-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-height: 44px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--vx-text-soft);
+  cursor: grab;
+  /* The browser must not claim this gesture, or a drag becomes a scroll. */
+  touch-action: none;
+}
+.queue-handle[aria-pressed='true'] {
+  background: var(--vx-surface);
+  color: var(--vx-text);
+  cursor: grabbing;
+}
+.queue-handle:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.queue-row__pos {
+  min-width: 20px;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--vx-text-soft);
+  text-align: end;
+  flex-shrink: 0;
+}
+.queue-row__cover {
+  /* Positioned: the placeholder cover is absolutely placed, and without a
+     containing block here it spreads across the whole row. */
+  position: relative;
+  display: block;
+  width: 40px;
+  height: 60px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--vx-surface);
+  container-type: inline-size;
+}
+.queue-row__cover .book-card__fallback {
+  padding: 5px;
+}
+.queue-row__cover .book-card__fallback > span:last-child {
+  display: none;
+}
+.queue-row__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.queue-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.queue-row__title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--vx-text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-row__title:hover {
+  text-decoration: underline;
+}
+.queue-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--vx-text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-row__note {
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--vx-text-soft);
+}
+.queue-row__body .progressbar {
+  margin-block-start: 4px;
+  max-width: 220px;
+}
+.queue-row__tools {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.queue-menu {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% - var(--sp-2));
+  inset-inline-end: var(--sp-2);
+  min-width: 200px;
+  background: var(--vx-surface-raised);
+  border: 1px solid var(--vx-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--vx-shadow-2);
+  overflow: hidden;
+}
+.queue-menu .list-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+@media (max-width: 560px) {
+  .queue-row__pos {
+    display: none;
+  }
+  .queue-row__body .progressbar {
+    max-width: none;
+  }
+}
+
+/* Motion off: the lift becomes a border, and rows jump rather than slide. */
+@media (prefers-reduced-motion: reduce) {
+  .queue-row.is-grabbed {
+    box-shadow: none;
+    border-color: var(--vx-primary);
+  }
+}

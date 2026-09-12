@@ -40,6 +40,8 @@ header. Schemas are zod-validated; canonical types live in
 | Method | Path                                  | Notes                                       |
 | ------ | ------------------------------------- | ------------------------------------------- |
 | GET    | `/api/library?query&kind&filter&sort` | books + continue rail + scan state          |
+| GET    | `/api/library?filter=both-formats`    | one row per paired title (see Shelves)      |
+| GET    | `/api/library?filter=recently-added`  | arrivals of the last 30 days, capped at 60  |
 | POST   | `/api/library/rescan`                 | admin                                       |
 | GET    | `/api/library/roots`                  | configured read-only roots                  |
 | GET    | `/api/books/:id`                      | detail: chapters, tracks, pair, progress    |
@@ -61,6 +63,42 @@ header. Schemas are zod-validated; canonical types live in
 | GET          | `/api/progress/:bookId/history` | recent events incl. rejected + reasons                     |
 | GET/POST     | `/api/books/:id/annotations`    | bookmarks/highlights/notes                                 |
 | PATCH/DELETE | `/api/annotations/:annId`       |                                                            |
+
+## Shelves & reading list
+
+Personal furniture, one set per account. Not gated on role — the guard is
+ownership: every statement is scoped `WHERE user_id = ?`, every shelf
+sub-resource resolves through one owned-shelf lookup, and a miss answers 404
+rather than 403 so a shelf id cannot be probed. Ordering uses a fractional
+TEXT rank minted only on the server (`server/src/util/rank.ts`), so a move
+writes exactly one row; the client sends the gesture (`afterBookId`), never a
+key, and a neighbour that moved underneath answers `409 stale-order`.
+
+| Method | Path                                      | Notes                                                                        |
+| ------ | ----------------------------------------- | ---------------------------------------------------------------------------- |
+| GET    | `/api/shelves`                            | the whole sidebar: automatic counts, own shelves, queue count + what is next |
+| POST   | `/api/shelves`                            | `{name}`; `409 shelf-name-taken` (case-insensitive), `409 too-many-shelves`  |
+| PATCH  | `/api/shelves/:id`                        | `{name?, afterShelfId?}` — an ABSENT `afterShelfId` means "do not move"      |
+| DELETE | `/api/shelves/:id`                        | removes the shelf and its membership; no book, no file                       |
+| GET    | `/api/shelves/:id/books?sort=`            | `manual` (default) \| `title` \| `author` \| `added`; + `missingCount`       |
+| PUT    | `/api/shelves/:id/books/:bookId`          | idempotent add → `{added, count}`; optional `{afterBookId}`                  |
+| POST   | `/api/shelves/:id/books`                  | `{bookIds: []}` up to 200 in one transaction → `{added, skipped}`            |
+| DELETE | `/api/shelves/:id/books/:bookId`          | `{removed, count}`                                                           |
+| PATCH  | `/api/shelves/:id/books/:bookId/position` | `{afterBookId}`; null = first                                                |
+| GET    | `/api/reading-list`                       | queue order, with notes; missing books reported not hidden                   |
+| PUT    | `/api/reading-list/:bookId`               | idempotent; `{position?: 'top'\|'end', afterBookId?, note?}` → `{position}`  |
+| PATCH  | `/api/reading-list/:bookId`               | `{note}` — a note belongs to a place in the queue, not to a book             |
+| PATCH  | `/api/reading-list/:bookId/position`      | `{afterBookId}`; null = first                                                |
+| DELETE | `/api/reading-list/:bookId`               | `{removed}`                                                                  |
+| GET    | `/api/books/:id/shelves`                  | `{shelfIds, onReadingList, readingListPosition}` for the book page           |
+
+The automatic shelves are NOT endpoints of their own: `filter=reading-now` is
+`in-progress`, and `both-formats` and `recently-added` are two more values on
+`GET /api/library?filter=`, so one code path still owns filtering, sorting and
+the missing-book exclusion. `both-formats` keeps one row per pair (the ebook
+side, or the audio side when the ebook is missing), because a title owned
+twice is one title. "On this device" has no endpoint at all — downloads live
+in one browser and only that browser can count them.
 
 ## Pairing & alignment
 

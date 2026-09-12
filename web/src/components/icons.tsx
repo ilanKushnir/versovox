@@ -239,3 +239,39 @@ export const IconSwitch = (p: P) => (
     <path d="M20 16H7M10 12.8 6.5 16l3.5 3.2" />
   </I>
 );
+export const IconShelf = (p: P) => (
+  <I {...p}>
+    <path d="M4.2 5.2h3.2v11.1H4.2zM9 5.2h3.2v11.1H9z" />
+    <path d="m14.7 6.4 3.1-.7 2.1 9.9-3.1.7z" />
+    <path d="M3 19.4h18" />
+  </I>
+);
+export const IconList = (p: P) => (
+  <I {...p}>
+    <path d="M9 6.5h11M9 12h11M9 17.5h11" />
+    <path d="M4.4 6.5h.01M4.4 12h.01M4.4 17.5h.01" strokeWidth="2.4" />
+  </I>
+);
+export const IconPlus = (p: P) => (
+  <I {...p}>
+    <path d="M12 5.5v13M5.5 12h13" />
+  </I>
+);
+export const IconGrip = (p: P) => (
+  <I {...p}>
+    <path
+      d="M9.2 7h.01M14.8 7h.01M9.2 12h.01M14.8 12h.01M9.2 17h.01M14.8 17h.01"
+      strokeWidth="2.6"
+    />
+  </I>
+);
+export const IconMore = (p: P) => (
+  <I {...p}>
+    <path d="M6 12h.01M12 12h.01M18 12h.01" strokeWidth="2.6" />
+  </I>
+);
+export const IconChevronLeft = (p: P) => (
+  <I {...p}>
+    <path d="M14.5 5.5 8 12l6.5 6.5" />
+  </I>
+);

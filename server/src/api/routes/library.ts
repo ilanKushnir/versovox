@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { type BookSummary } from '@versovox/shared';
+import { RECENTLY_ADDED_DAYS, RECENTLY_ADDED_LIMIT, type BookSummary } from '@versovox/shared';
 import { libraryRoots } from '../../domain/settings.js';
 import { type AppContext } from '../../context.js';
 import { enqueueJob } from '../../jobs/queue.js';
@@ -66,7 +66,14 @@ export function bookRowToSummary(
 const libraryQuerySchema = z.object({
   query: z.string().max(200).optional(),
   kind: z.enum(['ebook', 'audio']).optional(),
-  filter: z.enum(['paired', 'in-progress', 'finished']).optional(),
+  /**
+   * The automatic shelves are values here rather than endpoints of their
+   * own, so one code path still owns filtering, sorting, the missing-book
+   * exclusion and the continue rail.
+   */
+  filter: z
+    .enum(['paired', 'in-progress', 'finished', 'both-formats', 'recently-added'])
+    .optional(),
   sort: z.enum(['title', 'author', 'recent', 'added']).optional(),
 });
 
@@ -96,6 +103,29 @@ export function registerLibraryRoutes(app: FastifyInstance, ctx: AppContext): vo
     if (q.filter === 'in-progress')
       books = books.filter((b) => b.progress && !b.progress.finished && b.progress.pct > 0.001);
     if (q.filter === 'finished') books = books.filter((b) => b.progress?.finished);
+    if (q.filter === 'both-formats') {
+      // A title owned twice is ONE title. `paired` returns both sides of
+      // every pair, so twelve paired books would read as twenty-four; keep
+      // the ebook side of each pair, falling back to the audio side when the
+      // ebook is missing or not yet indexed.
+      const byPair = new Map<string, BookSummary>();
+      for (const b of books) {
+        if (!b.pair || b.pair.status === 'candidate') continue;
+        const kept = byPair.get(b.pair.pairId);
+        if (!kept || (kept.kind === 'audio' && b.kind === 'ebook')) byPair.set(b.pair.pairId, b);
+      }
+      const keep = new Set([...byPair.values()].map((b) => b.id));
+      books = books.filter((b) => keep.has(b.id));
+    }
+    if (q.filter === 'recently-added') {
+      // What the last scan turned up. Distinct from sort=added, which
+      // reorders the whole library instead of isolating the new arrivals.
+      const cutoff = Date.now() - RECENTLY_ADDED_DAYS * 86400000;
+      books = books
+        .filter((b) => Date.parse(b.addedAt) >= cutoff)
+        .sort((a, b) => Date.parse(b.addedAt) - Date.parse(a.addedAt))
+        .slice(0, RECENTLY_ADDED_LIMIT);
+    }
 
     switch (q.sort) {
       case 'recent':
