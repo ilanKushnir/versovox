@@ -3,6 +3,7 @@ import { type TrackInfo } from '@readport/shared';
 import { api } from '../api/client';
 import { type SentenceIndexEntry } from '../lib/types';
 import { recordCheckpoint } from '../progress/engine';
+import { loadPlayback, setBookSpeed, speedFor } from '../player/prefs';
 import { formatDuration } from '../lib/format';
 import {
   IconClose,
@@ -37,31 +38,6 @@ import {
  */
 
 const SPEEDS = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
-
-/**
- * How far the back button goes, in seconds. The same preference the player
- * uses, so a reader who set it to 30 there does not find 15 here.
- */
-function loadBackSeconds(): number {
-  try {
-    const raw = JSON.parse(localStorage.getItem('rp-skip') ?? '');
-    if (typeof raw?.back === 'number' && raw.back > 0) return raw.back;
-  } catch {
-    /* default */
-  }
-  return 15;
-}
-
-/** Per-book speed, shared with the player so one setting follows the book. */
-function loadSpeed(audioBookId: string): number {
-  try {
-    const perBook = Number(localStorage.getItem(`rp-speed:${audioBookId}`));
-    if (perBook > 0) return perBook;
-    return Number(localStorage.getItem('rp-speed')) || 1;
-  } catch {
-    return 1;
-  }
-}
 
 export interface NarrationApi {
   /** True once the audiobook and this chapter's timings have loaded. */
@@ -125,9 +101,9 @@ export function useNarration(opts: NarrationOptions): NarrationApi {
   const [trackIdx, setTrackIdx] = useState(0);
   const [bookMs, setBookMs] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeedState] = useState(() => loadSpeed(audioBookId ?? ''));
+  const [speed, setSpeedState] = useState(() => speedFor(loadPlayback(), audioBookId ?? ''));
   const [error, setError] = useState<string | null>(null);
-  const [backSeconds] = useState(loadBackSeconds);
+  const [backSeconds] = useState(() => loadPlayback().skipBack);
 
   /** Applied once the target track reports a duration. */
   const pendingSeekRef = useRef<{ trackIdx: number; positionMs: number; play: boolean } | null>(
@@ -328,11 +304,9 @@ export function useNarration(opts: NarrationOptions): NarrationApi {
   const setSpeed = useCallback(
     (rate: number) => {
       setSpeedState(rate);
-      try {
-        if (audioBookId) localStorage.setItem(`rp-speed:${audioBookId}`, String(rate));
-      } catch {
-        /* private mode */
-      }
+      // The same store the player writes, so a rate set while reading along is
+      // the rate the player opens at — and reaches the reader's other devices.
+      if (audioBookId) setBookSpeed(audioBookId, rate);
     },
     [audioBookId],
   );

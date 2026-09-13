@@ -3668,3 +3668,43 @@ select.input {
   color: var(--rp-text-soft);
   font-size: 12.5px;
 }
+
+/* --------------------------------------------------------- search results */
+
+.search-count {
+  margin: 0 0 var(--sp-2);
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--rp-text-soft);
+}
+.search-hit {
+  text-align: start;
+}
+.search-hit__chapter {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--rp-text-soft);
+  margin-block-end: 2px;
+}
+.search-hit__text {
+  display: block;
+  font-family: var(--rp-font-reading);
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--rp-text);
+}
+/* The hit itself: a wash and a weight change rather than a block of colour,
+   so the sentence around it stays readable and the eye still lands first on
+   the words that were searched for. */
+.search-hit__mark {
+  background: color-mix(in srgb, var(--rp-primary) 20%, transparent);
+  color: inherit;
+  font-weight: 680;
+  border-radius: 3px;
+  padding: 0 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}

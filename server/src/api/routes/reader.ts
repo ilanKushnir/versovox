@@ -115,7 +115,17 @@ export function registerReaderRoutes(app: FastifyInstance, ctx: AppContext): voi
     const matches: {
       spineIdx: number;
       charOffset: number;
-      excerpt: string;
+      /** Length of the hit at `charOffset`, so the reader can mark it. */
+      matchLength: number;
+      /**
+       * The excerpt in three parts rather than one string, so the client can
+       * mark the hit without re-finding it. Re-finding would be wrong as often
+       * as not: the excerpt collapses whitespace, and a word that appears
+       * twice inside sixty characters would mark the wrong one.
+       */
+      before: string;
+      match: string;
+      after: string;
       chapterTitle: string | null;
     }[] = [];
     for (const ch of manifest.chapters) {
@@ -129,13 +139,15 @@ export function registerReaderRoutes(app: FastifyInstance, ctx: AppContext): voi
         if (at === -1) break;
         const start = Math.max(0, at - 60);
         const end = Math.min(text.length, at + needle.length + 60);
+        const flat = (t: string) => t.replace(/\s+/g, ' ');
         matches.push({
           spineIdx: ch.idx,
           charOffset: at,
-          excerpt:
-            (start > 0 ? '…' : '') +
-            text.slice(start, end).replace(/\s+/g, ' ').trim() +
-            (end < text.length ? '…' : ''),
+          matchLength: needle.length,
+          before: (start > 0 ? '…' : '') + flat(text.slice(start, at)).trimStart(),
+          match: flat(text.slice(at, at + needle.length)),
+          after:
+            flat(text.slice(at + needle.length, end)).trimEnd() + (end < text.length ? '…' : ''),
           chapterTitle: ch.title,
         });
         from = at + needle.length;

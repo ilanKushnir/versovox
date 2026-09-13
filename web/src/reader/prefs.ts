@@ -1,68 +1,142 @@
-export type ReaderTheme = 'paper' | 'sepia' | 'night' | 'contrast';
+import {
+  DEFAULT_READER_PREFS,
+  EMPTY_SYNCED_READER_PREFS,
+  type DeviceClass,
+  type ReaderFont,
+  type ReaderPrefs,
+  type ReaderTheme,
+  type SyncedReaderPrefs,
+  mergeReaderPrefs,
+  reconcileReaderPrefs,
+  readerPrefsSchema,
+  splitReaderPrefs,
+  syncedReaderPrefsSchema,
+} from '@readport/shared';
+import { api } from '../api/client';
 
-export interface ReaderPrefs {
-  /** 'auto' follows the system appearance: paper by day, night in the dark. */
-  theme: ReaderTheme | 'auto';
-  font: ReaderFont;
-  /** px */
-  size: number;
-  weight: number;
-  lineHeight: number;
-  /** ch measure for scroll mode / margins feel */
-  margin: 'compact' | 'normal' | 'wide';
-  align: 'start' | 'justify';
-  hyphens: boolean;
-  mode: 'paginated' | 'scroll';
-  /** Paginated columns: 'auto' shows two pages side by side on wide screens. */
-  columns: 'auto' | 'one' | 'two';
-  /** 0.35–1: page dimming for night reading (1 = no dimming). */
-  brightness: number;
-  /** Bottom progress indicator: full (slider + details), compact (one thin line), or hidden. */
-  progressBar: 'full' | 'compact' | 'hidden';
-}
+export {
+  DEFAULT_READER_PREFS as DEFAULT_PREFS,
+  SIZE_MAX,
+  SIZE_MIN,
+  type ReaderFont,
+  type ReaderPrefs,
+  type ReaderTheme,
+} from '@readport/shared';
 
-export type ReaderFont =
-  'literata' | 'iowan' | 'charter' | 'palatino' | 'georgia' | 'baskerville' | 'sans';
-
-export const DEFAULT_PREFS: ReaderPrefs = {
-  theme: 'paper',
-  font: 'literata',
-  size: 19,
-  weight: 420,
-  lineHeight: 1.62,
-  margin: 'normal',
-  align: 'start',
-  hyphens: true,
-  mode: 'paginated',
-  columns: 'auto',
-  brightness: 1,
-  progressBar: 'full',
-};
-
-export const SIZE_MIN = 14;
-export const SIZE_MAX = 32;
+/**
+ * Reader appearance on this device.
+ *
+ * The contract — what a preference is, and which of them belong to the screen
+ * rather than to the person — lives in @readport/shared so the server can
+ * validate what it is handed. This module is the browser half: which device
+ * class this is, where the local copy lives, and how the two are kept in step.
+ *
+ * localStorage stays the source the reader actually sees. It answers instantly,
+ * it works with no server, and a reader changing the type size must never wait
+ * for a round trip to see it. The server copy is the sync layer underneath.
+ */
 
 const KEY = 'rp-reader-prefs';
 
-export function loadPrefs(): ReaderPrefs {
+/**
+ * Which kind of screen this is.
+ *
+ * Width alone would call a laptop in a narrow window a phone and hand it that
+ * phone's type size, so the pointer is consulted too: a coarse pointer at
+ * tablet width is a tablet, a fine pointer at any width is a desktop. Read
+ * once per load — a reader does not change device mid-session, and re-deciding
+ * on every resize would swap their settings while they drag a window.
+ */
+export function deviceClass(): DeviceClass {
+  if (typeof window === 'undefined') return 'desktop';
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const width = Math.min(window.screen?.width || window.innerWidth, window.innerWidth || 9999);
+  if (!coarse) return 'desktop';
+  return width < 600 ? 'phone' : 'tablet';
+}
+
+/** The synced document as this browser last knew it. */
+function loadSynced(): SyncedReaderPrefs {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return DEFAULT_PREFS;
-    const parsed = JSON.parse(raw) as Partial<Omit<ReaderPrefs, 'font'>> & { font?: string };
-    // Migrate the pre-0.2 'serif' choice to its closest named face.
-    if (parsed.font === 'serif') parsed.font = 'iowan';
-    if (parsed.font && !(parsed.font in FONTS)) delete parsed.font;
-    return { ...DEFAULT_PREFS, ...(parsed as Partial<ReaderPrefs>) };
+    if (!raw) return EMPTY_SYNCED_READER_PREFS;
+    const parsed = JSON.parse(raw);
+    // Before 0.9 this key held a flat ReaderPrefs object. Fold it into the
+    // shared bucket rather than discarding what the reader had chosen.
+    if (parsed && typeof parsed === 'object' && !('shared' in parsed)) {
+      // The pre-0.2 'serif' choice became a named face.
+      if (parsed.font === 'serif') parsed.font = 'iowan';
+      // Validated key by key rather than trusted: this is a value that has sat
+      // in a browser across many versions, and one setting this build no
+      // longer understands must not take the rest of them down with it.
+      const kept = readerPrefsSchema.partial().safeParse(parsed);
+      const legacy = { ...DEFAULT_READER_PREFS, ...(kept.success ? kept.data : {}) };
+      return splitReaderPrefs(legacy, deviceClass(), null, new Date(0).toISOString());
+    }
+    const ok = syncedReaderPrefsSchema.safeParse(parsed);
+    return ok.success ? ok.data : EMPTY_SYNCED_READER_PREFS;
   } catch {
-    return DEFAULT_PREFS;
+    return EMPTY_SYNCED_READER_PREFS;
   }
 }
 
-export function savePrefs(p: ReaderPrefs): void {
+function storeSynced(next: SyncedReaderPrefs): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(p));
+    localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
-    /* private mode */
+    /* private mode: the reader still gets their settings for this session */
+  }
+}
+
+export function loadPrefs(): ReaderPrefs {
+  return mergeReaderPrefs(loadSynced(), deviceClass());
+}
+
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+let pending: SyncedReaderPrefs | null = null;
+
+/**
+ * Save locally at once, and to the server shortly afterwards.
+ *
+ * The push is debounced because the size stepper fires on every press, and a
+ * reader adjusting it is making one decision, not eight. A failed push is
+ * left for the next change or the next load to carry: preferences are not
+ * worth a retry queue, and the local copy is already correct.
+ */
+export function savePrefs(next: ReaderPrefs): void {
+  const merged = splitReaderPrefs(next, deviceClass(), loadSynced(), new Date().toISOString());
+  storeSynced(merged);
+  pending = merged;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => {
+    const body = pending;
+    pending = null;
+    pushTimer = null;
+    if (body) void api('/api/prefs/reader', { method: 'PUT', body }).catch(() => {});
+  }, 900);
+}
+
+/**
+ * Take whatever the server has and reconcile it with this browser's copy.
+ *
+ * Returns the preferences to use now. Called when the reader opens a book, so
+ * a size chosen on the laptop this morning is in place on the phone tonight
+ * without either device having to be told about the other.
+ */
+export async function syncPrefs(): Promise<ReaderPrefs> {
+  const local = loadSynced();
+  try {
+    const res = await api<{ reader: SyncedReaderPrefs | null }>('/api/prefs/reader');
+    const winner = reconcileReaderPrefs(local, res.reader);
+    if (winner !== local) storeSynced(winner);
+    // This device has something the server has not seen — a change made
+    // offline, or a first run against a server that has never been told.
+    else if (Date.parse(local.updatedAt) > Date.parse(res.reader?.updatedAt ?? '1970-01-01')) {
+      void api('/api/prefs/reader', { method: 'PUT', body: local }).catch(() => {});
+    }
+    return mergeReaderPrefs(winner, deviceClass());
+  } catch {
+    return mergeReaderPrefs(local, deviceClass());
   }
 }
 

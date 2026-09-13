@@ -1,6 +1,12 @@
 import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { FACET_KINDS, type SidebarPrefs } from '@readport/shared';
+import {
+  FACET_KINDS,
+  type SidebarPrefs,
+  playbackPrefsSchema,
+  prunePerBookSpeeds,
+  syncedReaderPrefsSchema,
+} from '@readport/shared';
 import { type AppContext } from '../../context.js';
 import { nowIso } from '../../db/index.js';
 
@@ -27,6 +33,10 @@ const sidebarSchema = z.object({
 /** The keys this build knows, and how each is validated. */
 const KEYS = {
   sidebar: sidebarSchema,
+  /** Reader appearance: shared taste, plus a bucket per device class. */
+  reader: syncedReaderPrefsSchema,
+  /** Playback speed and skip lengths, which are about the book, not the device. */
+  playback: playbackPrefsSchema,
 } as const;
 
 type PrefKey = keyof typeof KEYS;
@@ -48,8 +58,52 @@ export function readPref<K extends PrefKey>(
   }
 }
 
+/** One key/value write, used by every typed route below. */
+function writePref(ctx: AppContext, userId: string, key: PrefKey, value: unknown): void {
+  ctx.db
+    .prepare(
+      `INSERT INTO user_prefs (user_id, key, value_json, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id, key) DO UPDATE SET value_json = excluded.value_json,
+         updated_at = excluded.updated_at`,
+    )
+    .run(userId, key, JSON.stringify(value), nowIso());
+}
+
 export function registerPrefsRoutes(app: FastifyInstance, ctx: AppContext): void {
-  const { db } = ctx;
+  /**
+   * Reader appearance.
+   *
+   * The client is the source of truth for its own device bucket and pushes
+   * the whole document, because it is the only side that knows which device
+   * class it is. The server's job is to validate it and hand it to the next
+   * device that asks — a phone must not be able to write the desktop's type
+   * size by accident, which is why the shape, not just the values, is checked.
+   */
+  app.get('/api/prefs/reader', async (req) => ({ reader: readPref(ctx, req.user!.id, 'reader') }));
+
+  app.put('/api/prefs/reader', async (req, reply) => {
+    const body = syncedReaderPrefsSchema.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid', detail: body.error.issues[0]?.message });
+    }
+    writePref(ctx, req.user!.id, 'reader', body.data);
+    return { reader: body.data };
+  });
+
+  app.get('/api/prefs/playback', async (req) => ({
+    playback: readPref(ctx, req.user!.id, 'playback'),
+  }));
+
+  app.put('/api/prefs/playback', async (req, reply) => {
+    const body = playbackPrefsSchema.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid', detail: body.error.issues[0]?.message });
+    }
+    // Bounded here as well as on the client: the cap is what keeps one
+    // account's row from growing without limit, so it cannot be advisory.
+    writePref(ctx, req.user!.id, 'playback', prunePerBookSpeeds(body.data));
+    return { playback: prunePerBookSpeeds(body.data) };
+  });
 
   app.get('/api/prefs/sidebar', async (req) => {
     const value = readPref(ctx, req.user!.id, 'sidebar');
@@ -69,11 +123,7 @@ export function registerPrefsRoutes(app: FastifyInstance, ctx: AppContext): void
     // the first mention of each wins rather than the last.
     const facets = body.data.facets.filter((f, i, all) => all.indexOf(f) === i);
     const value: SidebarPrefs = { facets, chosen: body.data.chosen };
-    db.prepare(
-      `INSERT INTO user_prefs (user_id, key, value_json, updated_at) VALUES (?, 'sidebar', ?, ?)
-       ON CONFLICT(user_id, key) DO UPDATE SET value_json = excluded.value_json,
-         updated_at = excluded.updated_at`,
-    ).run(req.user!.id, JSON.stringify(value), nowIso());
+    writePref(ctx, req.user!.id, 'sidebar', value);
     return { sidebar: value };
   });
 }

@@ -159,3 +159,46 @@ export function firstVisibleOffset(
   }
   return null;
 }
+
+/**
+ * The chapter's text exactly as the offsets address it.
+ *
+ * This is the same string `extractText()` builds on the server — text-node
+ * data in document order, with a synthetic newline after each block — so an
+ * offset that came from the server indexes into it directly.
+ */
+export function mappedText(map: TextMap): string {
+  let out = '';
+  let at = 0;
+  for (const entry of map.nodes) {
+    // Restore the synthetic newlines the walk counted but did not store.
+    if (entry.start > at) out += '\n'.repeat(entry.start - at);
+    out += entry.node.data;
+    at = entry.start + entry.node.data.length;
+  }
+  if (map.totalChars > at) out += '\n'.repeat(map.totalChars - at);
+  return out;
+}
+
+/**
+ * Where `needle` actually is in this chapter, preferring the occurrence
+ * closest to `near`.
+ *
+ * A safety net for a jump whose offset does not land. The server searched the
+ * text it extracted; the reader addresses the DOM it built from the same
+ * source, and the two agreeing is a property of two separate walks staying in
+ * step. When they do not, an exact search for the words the reader asked for
+ * is better than dropping them on page one and calling it a jump.
+ */
+export function nearestOccurrence(map: TextMap, needle: string, near: number): number | null {
+  if (!needle) return null;
+  const hay = mappedText(map).toLowerCase();
+  const want = needle.toLowerCase();
+  let best: number | null = null;
+  let at = hay.indexOf(want);
+  while (at !== -1) {
+    if (best === null || Math.abs(at - near) < Math.abs(best - near)) best = at;
+    at = hay.indexOf(want, at + 1);
+  }
+  return best;
+}

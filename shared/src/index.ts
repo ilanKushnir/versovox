@@ -4,5 +4,6 @@ export * from './alignment.js';
 export * from './api.js';
 export * from './shelves.js';
 export * from './facets.js';
+export * from './prefs.js';
 export * from './languages.js';
 export * from './reconcile.js';

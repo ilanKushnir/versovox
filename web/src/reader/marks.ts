@@ -157,6 +157,24 @@ export function markAtPoint(
 }
 
 /**
+ * Registry for a search hit the reader has just jumped to.
+ *
+ * Its own registry so it can be shown and cleared without disturbing the
+ * reader's own marks, and so it can be tinted differently: this is a
+ * temporary "here it is", not something they made.
+ */
+const FOUND = 'rp-found';
+
+/** Mark the passage a search jumped to, or clear it. */
+export function paintFound(map: TextMap | null, span: { start: number; end: number } | null): void {
+  const css = CSS as unknown as HighlightApi;
+  if (!css.highlights || typeof Highlight === 'undefined') return;
+  const range = map && span ? rangeForSpan(map, span.start, span.end) : null;
+  if (range) css.highlights.set(FOUND, new Highlight(range));
+  else css.highlights.delete(FOUND);
+}
+
+/**
  * The chapter character offset under a point, or null when the point is not
  * on text at all. Read-along uses it to tell "the reader tapped this line"
  * from "the reader tapped the margin".

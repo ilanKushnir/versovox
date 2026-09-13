@@ -30,6 +30,7 @@ import {
   buildTextMap,
   domToOffset,
   firstVisibleOffset,
+  nearestOccurrence,
   rangeForSpan,
   type TextMap,
 } from './textmap';
@@ -40,6 +41,7 @@ import {
   colorOf,
   markAtPoint,
   offsetAtPoint,
+  paintFound,
   paintMarks,
   paintSpeaking,
   type HighlightColor,
@@ -52,6 +54,7 @@ import {
   effectiveTheme,
   FONTS,
   loadPrefs,
+  syncPrefs,
   MARGINS,
   pageCountFor,
   savePrefs,
@@ -116,6 +119,12 @@ export function ReaderPage() {
   const [readAlong, setReadAlong] = useState(false);
   /** Whether the page still moves itself to keep up with the voice. */
   const [following, setFollowing] = useState(true);
+  /** The passage a search jumped to: landed on, marked, and then let go. */
+  const [found, setFound] = useState<{
+    spineIdx: number;
+    charOffset: number;
+    text: string;
+  } | null>(null);
 
   const [systemDark, setSystemDark] = useState(
     () => typeof matchMedia === 'function' && matchMedia(DARK_MQ).matches,
@@ -480,6 +489,25 @@ export function ReaderPage() {
     prefs.hyphens,
   ]);
 
+  /**
+   * Pick up preferences changed on another device.
+   *
+   * Once, when the reader opens a book — not on a timer. Preferences are
+   * changed rarely and read constantly, so polling would be all cost; and
+   * re-reading them mid-chapter would reflow the page under someone who is
+   * reading it. The local copy is what the first paint used, so this can only
+   * ever be an improvement on it.
+   */
+  useEffect(() => {
+    let alive = true;
+    void syncPrefs().then((p) => {
+      if (alive) setPrefs(p);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // Re-paint highlights when annotations change.
   useEffect(() => {
     paintMarks(textMapRef.current, annotations, spineIdx);
@@ -808,6 +836,55 @@ export function ReaderPage() {
     }
   }, [readAlong, narration.cue, following, prefs.mode, page, goToPage, pageForOffset]);
 
+  /**
+   * Land on a search hit, verifiably, and mark it.
+   *
+   * The jump itself measured the target page against the layout as it was at
+   * the moment the result was pressed. On a phone that is the wrong moment:
+   * the sheet holding the on-screen keyboard is closing, and the viewport is
+   * about to change size and re-paginate underneath the answer. So the hit is
+   * checked once more on the next frame and, if it is not actually on screen,
+   * the jump is redone against the layout that settled.
+   *
+   * The offset itself is checked too. It came from the server's extracted
+   * text; the reader addresses a DOM built from the same source, and the two
+   * agreeing is a property of two walks staying in step rather than a
+   * guarantee. If it does not resolve, the words are searched for directly.
+   */
+  useEffect(() => {
+    const map = textMapRef.current;
+    if (!found || found.spineIdx !== spineIdx || !map) {
+      if (!found) paintFound(null, null);
+      return;
+    }
+    let offset = found.charOffset;
+    const here = rangeForSpan(map, offset, offset + found.text.length);
+    if (!here) {
+      const better = nearestOccurrence(map, found.text, offset);
+      if (better === null) {
+        paintFound(null, null);
+        return;
+      }
+      offset = better;
+    }
+    paintFound(map, { start: offset, end: offset + found.text.length });
+    const raf = requestAnimationFrame(() => {
+      const box = (
+        prefs.mode === 'paginated' ? pagesRef.current : scrollerRef.current
+      )?.getBoundingClientRect();
+      if (!spanOnScreen(map, offset, box)) restoreOffset(offset);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [found, spineIdx, html, prefs.mode, restoreOffset]);
+
+  // A hit belongs to the search that found it. Turning pages away from it, or
+  // opening another chapter, is the reader moving on.
+  useEffect(() => {
+    if (!found) return;
+    const t = setTimeout(() => setFound(null), 20_000);
+    return () => clearTimeout(t);
+  }, [found]);
+
   // Leaving the reader stops the voice; so does closing the tab.
   useEffect(() => () => paintSpeaking(null, null), []);
 
@@ -827,6 +904,32 @@ export function ReaderPage() {
       return true;
     },
     [readAlong, narration],
+  );
+
+  /**
+   * A plain click near either edge of the column turns the page.
+   *
+   * On touch the tapzone buttons on top of the page do this. They cannot on a
+   * mouse — a button over the text swallows the drag that would otherwise be
+   * a selection — so there they sit behind the page box and this handles the
+   * part of the edge that the text covers. Only ever reached for a genuine
+   * tap: a drag is filtered out before this runs, which is the whole point.
+   */
+  const edgeTap = useCallback(
+    (clientX: number): boolean => {
+      if (prefs.mode !== 'paginated') return false;
+      const box = pagesRef.current?.getBoundingClientRect();
+      if (!box || box.width < 200) return false;
+      const edge = box.width * 0.18;
+      const atStart = clientX < box.left + edge;
+      const atEnd = clientX > box.right - edge;
+      if (!atStart && !atEnd) return false;
+      const backward = rtl ? atEnd : atStart;
+      if (backward) prevPage();
+      else nextPage();
+      return true;
+    },
+    [prefs.mode, rtl, prevPage, nextPage],
   );
 
   const startReadAlong = useCallback(() => {
@@ -1285,6 +1388,7 @@ export function ReaderPage() {
                     if (sel && !sel.isCollapsed) return;
                     if (openMarkAt(e.clientX, e.clientY)) return;
                     if (seekVoiceAt(e.clientX, e.clientY)) return;
+                    if (edgeTap(e.clientX)) return;
                     setChrome((c) => !c);
                   }
                 }}
@@ -1688,8 +1792,9 @@ export function ReaderPage() {
         <SearchSheet
           bookId={id}
           onClose={() => setSheet('none')}
-          onJump={(s, off) => {
+          onJump={(s, off, text) => {
             setSheet('none');
+            setFound({ spineIdx: s, charOffset: off, text });
             gotoChapter(s, off);
           }}
         />
@@ -2064,6 +2169,24 @@ function ReaderSettingsSheet({
   );
 }
 
+interface SearchMatch {
+  spineIdx: number;
+  charOffset: number;
+  matchLength: number;
+  before: string;
+  match: string;
+  after: string;
+  chapterTitle: string | null;
+}
+
+/**
+ * Find in book.
+ *
+ * The server returns each hit already split into what came before it, the hit
+ * itself, and what came after, so the row can mark the words without
+ * re-finding them in the excerpt — re-finding would mark the wrong occurrence
+ * whenever a word appears twice inside sixty characters.
+ */
 function SearchSheet({
   bookId,
   onClose,
@@ -2071,27 +2194,33 @@ function SearchSheet({
 }: {
   bookId: string;
   onClose: () => void;
-  onJump: (spineIdx: number, charOffset: number) => void;
+  onJump: (spineIdx: number, charOffset: number, text: string) => void;
 }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<
-    { spineIdx: number; charOffset: number; excerpt: string; chapterTitle: string | null }[] | null
-  >(null);
+  const [results, setResults] = useState<SearchMatch[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
   const run = async () => {
     if (q.trim().length < 2) return;
     setBusy(true);
+    setFailed(false);
     try {
-      const res = await api<{ matches: NonNullable<typeof results> }>(
+      const res = await api<{ matches: SearchMatch[] }>(
         `/api/books/${bookId}/search?q=${encodeURIComponent(q.trim())}`,
       );
       setResults(res.matches);
     } catch {
+      // "No matches" and "the search did not run" are different answers, and
+      // telling them apart is the difference between trusting the book and
+      // trusting the network.
       setResults([]);
+      setFailed(true);
     } finally {
       setBusy(false);
     }
   };
+
   return (
     <Sheet title="Search in book" onClose={onClose}>
       <form
@@ -2114,21 +2243,42 @@ function SearchSheet({
           {busy ? '…' : 'Search'}
         </button>
       </form>
-      {results !== null &&
-        (results.length === 0 ? (
-          <p style={{ color: 'var(--rp-text-soft)' }}>No matches.</p>
-        ) : (
-          results.map((r, i) => (
-            <button key={i} className="list-row" onClick={() => onJump(r.spineIdx, r.charOffset)}>
-              <span className="grow" style={{ whiteSpace: 'normal' }}>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--rp-text-soft)' }}>
-                  {r.chapterTitle ?? `Chapter ${r.spineIdx + 1}`}
+      {results !== null && (
+        <>
+          {results.length > 0 && (
+            <p className="search-count" role="status">
+              {results.length === 100 ? 'First 100 matches' : null}
+              {results.length !== 100
+                ? `${results.length} ${results.length === 1 ? 'match' : 'matches'}`
+                : null}
+            </p>
+          )}
+          {results.length === 0 ? (
+            <p style={{ color: 'var(--rp-text-soft)' }}>
+              {failed ? 'Could not search — are you offline?' : 'No matches.'}
+            </p>
+          ) : (
+            results.map((r, i) => (
+              <button
+                key={`${r.spineIdx}-${r.charOffset}-${i}`}
+                className="list-row search-hit"
+                onClick={() => onJump(r.spineIdx, r.charOffset, r.match)}
+              >
+                <span className="grow" style={{ whiteSpace: 'normal' }}>
+                  <span className="search-hit__chapter">
+                    {r.chapterTitle ?? `Chapter ${r.spineIdx + 1}`}
+                  </span>
+                  <span className="search-hit__text">
+                    {r.before}
+                    <mark className="search-hit__mark">{r.match}</mark>
+                    {r.after}
+                  </span>
                 </span>
-                {r.excerpt}
-              </span>
-            </button>
-          ))
-        ))}
+              </button>
+            ))
+          )}
+        </>
+      )}
     </Sheet>
   );
 }

@@ -389,6 +389,21 @@
 .tapzone--next {
   inset-inline-end: 0;
 }
+/* With a mouse, a drag across the page is a text selection, so nothing may
+   sit on top of the words — a button there swallows the drag and the reader
+   ends up "selecting" the page-turn zone instead of the sentence. On a fine
+   pointer the zones drop behind the page box and still catch clicks in the
+   gutter beside it; ReaderPage also treats a plain click near either edge of
+   the column as a page turn, so nothing is lost. On touch they stay on top:
+   tapping is how a page is turned there, and text is selected by long-press. */
+@media (pointer: fine) {
+  .tapzone {
+    z-index: 0;
+  }
+  .reader-pages {
+    z-index: 1;
+  }
+}
 
 .slider {
   appearance: none;
@@ -553,6 +568,16 @@
   text-decoration: underline 2px;
   text-underline-offset: 5px;
   text-decoration-color: color-mix(in srgb, var(--rd-link) 70%, transparent);
+}
+
+/* Where a search landed. Warmer and stronger than a reader's own highlight,
+   because it is an answer to a question they just asked rather than something
+   they made — and it goes away on its own. */
+::highlight(rp-found) {
+  background-color: color-mix(in srgb, var(--rd-link) 26%, transparent);
+  text-decoration: underline 2px;
+  text-underline-offset: 5px;
+  text-decoration-color: var(--rd-link);
 }
 
 ::highlight(rp-handoff) {

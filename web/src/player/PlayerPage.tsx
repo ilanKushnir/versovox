@@ -25,6 +25,7 @@ import {
 } from '../components/icons';
 import { formatDuration, formatPct } from '../lib/format';
 import { ambientColorFromImage } from '../lib/ambient';
+import { loadPlayback, savePlayback, setBookSpeed, speedFor, syncPlayback } from './prefs';
 
 const SPEEDS = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 const SKIP_CHOICES = [10, 15, 30, 45, 60];
@@ -44,27 +45,6 @@ interface SkipPrefs {
   fwd: number;
 }
 
-function loadSkip(): SkipPrefs {
-  try {
-    const raw = JSON.parse(localStorage.getItem('rp-skip') ?? '');
-    if (SKIP_CHOICES.includes(raw.back) && SKIP_CHOICES.includes(raw.fwd)) return raw;
-  } catch {
-    /* defaults */
-  }
-  return { back: 15, fwd: 30 };
-}
-
-/** Per-book speed override, falling back to the global default. */
-function loadSpeed(bookId: string): number {
-  try {
-    const perBook = Number(localStorage.getItem(`rp-speed:${bookId}`));
-    if (perBook > 0) return perBook;
-    return Number(localStorage.getItem('rp-speed')) || 1;
-  } catch {
-    return 1;
-  }
-}
-
 export function PlayerPage() {
   const { id = '' } = useParams();
   const [searchParams] = useSearchParams();
@@ -78,8 +58,11 @@ export function PlayerPage() {
   const [positionMs, setPositionMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
-  const [speed, setSpeed] = useState(() => loadSpeed(id));
-  const [skip, setSkip] = useState<SkipPrefs>(loadSkip);
+  const [speed, setSpeed] = useState(() => speedFor(loadPlayback(), id));
+  const [skip, setSkip] = useState<SkipPrefs>(() => {
+    const p = loadPlayback();
+    return { back: p.skipBack, fwd: p.skipForward };
+  });
   const [sheet, setSheet] = useState<SheetKind>('none');
   const [sleepUntil, setSleepUntil] = useState<number | null>(null);
   const [sleepChapterEnd, setSleepChapterEnd] = useState(false);
@@ -309,21 +292,32 @@ export function PlayerPage() {
     if (!el) return;
     el.playbackRate = speed;
     el.preservesPitch = true;
-    try {
-      localStorage.setItem('rp-speed', String(speed));
-      localStorage.setItem(`rp-speed:${id}`, String(speed));
-    } catch {
-      /* private mode */
-    }
+    // Remembered against this book, and synced: a rate chosen for a narrator
+    // is about the narrator, so it should be waiting on the phone too.
+    setBookSpeed(id, speed);
   }, [speed, id]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('rp-skip', JSON.stringify(skip));
-    } catch {
-      /* private mode */
-    }
+    const p = loadPlayback();
+    savePlayback({ ...p, skipBack: skip.back, skipForward: skip.fwd });
   }, [skip]);
+
+  /**
+   * Pick up playback settings changed on another device, once, on open.
+   * Applied only where this session has not already made a choice of its own —
+   * a rate the listener just set here must not be undone by a slower answer.
+   */
+  useEffect(() => {
+    let alive = true;
+    void syncPlayback().then((p) => {
+      if (!alive) return;
+      setSkip({ back: p.skipBack, fwd: p.skipForward });
+      setSpeed(speedFor(p, id));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
 
   // Sleep countdown needs a clock even while paused/scrubbing.
   useEffect(() => {
