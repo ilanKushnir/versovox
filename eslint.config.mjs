@@ -5,8 +5,6 @@ export default tseslint.config(
     ignores: [
       '**/dist/**',
       '**/node_modules/**',
-      // Agent worktrees are full checkouts of this repo; linting them makes
-      // typescript-eslint see two candidate project roots and give up.
       '.claude/**',
       'fixtures/**',
       'qa-output/**',

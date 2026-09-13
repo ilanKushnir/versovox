@@ -20,7 +20,6 @@ qa-output/
 *.tsbuildinfo
 .playwright-mcp/
 
-# Local Claude Code launch config
 .claude/
 
 # iCloud Drive conflict copies ("file 2.ts") — never source of truth

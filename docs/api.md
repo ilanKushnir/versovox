@@ -215,6 +215,7 @@ rank without pushing the visible numbers along.
 | POST   | `/api/pairs/:id/align`                           | curator; queue this pair → `{jobId, queued}`                |
 | POST   | `/api/pairs/align-many`                          | curator; `{pairIds: []}` → `{queued, skipped}`              |
 | POST   | `/api/pairs/:id/resolve`                         | `{from: Locator}` → `{to, resolution}` — the two-way switch |
+| GET    | `/api/pairs/:id/segments/:spineIdx`              | one chapter's timings — what read-along reads               |
 
 Each pair reports its `language` as three values rather than one, because the
 useful thing to show is not just the answer but where it came from: `override`
