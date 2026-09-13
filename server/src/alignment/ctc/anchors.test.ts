@@ -239,6 +239,58 @@ describe('matchChars', () => {
     expect(timings[5 + 5]!.score).toBe(0);
   });
 
+  it('covers a chapter-break pause in the doubt it reports', () => {
+    // The failure this pins down: interpolating between two anchors assumes a
+    // constant reading rate, so a pause adds seconds without adding
+    // characters and every sentence in the span is placed early by up to the
+    // whole pause. Measuring the doubt as the distance to the nearer anchor
+    // missed it entirely — a sentence a moment after a fifteen-second break
+    // sits beside an anchor, so it reported almost no doubt while being
+    // fifteen seconds out. `startMs - uncertaintyMs` is where a switch lands;
+    // if that is AFTER the reader, they are shown text they have not reached.
+    const CHARS = 3000;
+    const SENTENCE = 100;
+    // The pause sits just BEFORE the trailing anchors, which is the shape
+    // that breaks: the sentences right before it are placed late by nearly
+    // the whole pause while sitting close to an anchor, so a doubt measured
+    // as "distance to the nearer anchor" reports almost none.
+    const PAUSE_AT = 2550;
+    const PAUSE_MS = 15_000;
+    const text = randomText(CHARS, 21);
+    const book = sentencesOf(text, SENTENCE);
+    const trueMs = (charPos: number) =>
+      HEAD_MS + charPos * MS_PER_CHAR + (charPos >= PAUSE_AT ? PAUSE_MS : 0);
+
+    // Narrated in full, with a break in the middle...
+    const full = [...text].map((c, i) => ({ c, ms: trueMs(i) }));
+    // ...but only sampled at each end, which is what sparse probing leaves
+    // behind and why the middle has to be interpolated at all.
+    const heard = full.filter((_, i) => i < 400 || i >= CHARS - 400);
+
+    const { timings } = matchChars(book, heard, {
+      gapChars: CHARS,
+      audioMs: trueMs(CHARS - 1) + MS_PER_CHAR,
+    });
+
+    const placed = timings.filter((t) => !t.gap);
+    expect(placed.length).toBeGreaterThan(20);
+    const late = placed.filter((t) => {
+      const truth = trueMs((t.index - book[0]!.index) * SENTENCE);
+      // Landing early is a nuisance; landing late is a spoiler.
+      return t.startMs - t.uncertaintyMs > truth;
+    });
+    expect(late).toEqual([]);
+
+    // And the doubt has to be real, not merely large enough: a sentence in
+    // the interpolated span must not claim to be exactly placed.
+    const inSpan = placed.filter((t) => {
+      const at = (t.index - book[0]!.index) * SENTENCE;
+      return at > 600 && at < PAUSE_AT;
+    });
+    expect(inSpan.length).toBeGreaterThan(5);
+    expect(Math.min(...inSpan.map((t) => t.uncertaintyMs))).toBeGreaterThan(PAUSE_MS * 0.5);
+  });
+
   it('refuses empty input on either side', () => {
     const book = sentencesOf(randomText(1000, 13), 100);
 

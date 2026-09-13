@@ -13,7 +13,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module && module.exports) module.exports = api;
-  if (root) root.vxAuth = api;
+  if (root) root.rpAuth = api;
 })(typeof self !== 'undefined' ? self : globalThis, function () {
   /**
    * @param {Object} opts

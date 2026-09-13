@@ -3,7 +3,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module && module.exports) module.exports = api;
-  if (root) root.vxRange = api;
+  if (root) root.rpRange = api;
 })(typeof self !== 'undefined' ? self : globalThis, function () {
   /**
    * Parse an HTTP Range header against a resource of `size` bytes.

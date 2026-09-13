@@ -1022,7 +1022,13 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
     const aligner = resolveAligner(config.modelsDir);
     if (!aligner) throw new ModelMissingError();
 
-    jobProgress(db, job.id, job.lease_token, 0.18, 'Listening to the narration');
+    // Listening is very nearly the whole job — minutes of it against seconds
+    // of everything else — so it gets very nearly the whole bar. The old 0.18
+    // floor meant the bar showed a fifth done before the model had heard a
+    // second, and the client's remaining-time estimate divides elapsed by
+    // progress: a fifth of the bar for none of the time told the reader the
+    // book would be finished in about half the time it actually takes.
+    jobProgress(db, job.id, job.lease_token, 0.03, 'Listening to the narration');
     const alignStartedAt = Date.now();
     const controller = new AbortController();
     const stopOnLostLease = setInterval(() => {
@@ -1043,7 +1049,7 @@ export async function runAlign(ctx: AppContext, job: JobRow, guard: LeaseGuard):
         plan: planFor(settings.alignPrecision) ?? undefined,
         signal: controller.signal,
         onProgress: (f: number, detail: string) =>
-          jobProgress(db, job.id, job.lease_token, 0.18 + 0.72 * f, detail),
+          jobProgress(db, job.id, job.lease_token, 0.03 + 0.93 * f, detail),
       });
     } catch (err) {
       if (err instanceof AlignmentRefusedError) {

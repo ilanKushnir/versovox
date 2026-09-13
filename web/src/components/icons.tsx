@@ -271,6 +271,14 @@ export const IconSwitch = (p: P) => (
   </I>
 );
 /** A tag, for the genres a library already carries. */
+/** The notes and marks collected out of every book. */
+export const IconNotes = (p: P) => (
+  <I {...p}>
+    <path d="M5.5 3.5h8.6L18.5 8v12.5h-13z" />
+    <path d="M14 3.6V8h4.4" />
+    <path d="M8.4 12.2h6.5M8.4 15.8h4.4" />
+  </I>
+);
 export const IconTag = (p: P) => (
   <I {...p}>
     <path d="M4.5 11.3V5.2a.7.7 0 0 1 .7-.7h6.1c.2 0 .4.1.5.2l7 7a.7.7 0 0 1 0 1l-6.1 6.1a.7.7 0 0 1-1 0l-7-7a.7.7 0 0 1-.2-.5z" />

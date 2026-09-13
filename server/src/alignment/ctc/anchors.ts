@@ -245,6 +245,29 @@ export function matchChars(
         )
       : 0;
 
+  /**
+   * How fast this narrator actually reads, measured robustly.
+   *
+   * Not the average above: that is total time over total characters, so every
+   * pause in the book is folded into it. A book with a fifteen-second break
+   * between chapters reports a rate that already "expects" those breaks, and
+   * then no individual span looks unusual — which is precisely how a pause
+   * hides. The median across consecutive anchor pairs is immune: a pause
+   * inflates the one span that contains it and leaves the other several
+   * hundred alone.
+   */
+  const readingMsPerChar = (() => {
+    const rates: number[] = [];
+    for (let i = 1; i < anchorBook.length; i++) {
+      const chars = anchorBook[i]! - anchorBook[i - 1]!;
+      const ms = anchorMs[i]! - anchorMs[i - 1]!;
+      if (chars > 0 && ms > 0) rates.push(ms / chars);
+    }
+    if (rates.length === 0) return msPerChar;
+    rates.sort((a, b) => a - b);
+    return rates[rates.length >> 1]!;
+  })();
+
   // --- 4 + 5. interpolate, then gate on anchor distance ---
   const timings: SentenceTiming[] = [];
   let floorMs = 0;
@@ -270,12 +293,21 @@ export function matchChars(
     // Measured on the interpolated timing, not the floored one: the floor only
     // ever moves a start later, and a start pushed later is exactly the case
     // the reader must be protected from.
-    const reach = anchorTimeDistance(anchorMs, anchorBook, span.start, dist, msPerChar);
-    // Between two anchors the timing is an interpolation and only the drift in
-    // reading rate is in doubt. Outside them it is not an interpolation at all
-    // — it is the edge anchor's time, held, while the narration kept going —
-    // so the whole extrapolated distance is the error.
-    const doubt = reach.clamped ? reach.ms : uncertaintyRate * reach.ms;
+    const reach = anchorTimeDistance(
+      anchorMs,
+      anchorBook,
+      span.start,
+      dist,
+      msPerChar,
+      readingMsPerChar,
+      uncertaintyRate,
+    );
+    // Inside the anchored range `reach.ms` is already the whole doubt — rate
+    // drift plus whatever time the span cannot account for. Outside it, the
+    // timing is not an interpolation at all: it is the edge anchor's time,
+    // held, while the narration kept going, so the entire extrapolated
+    // distance is the error.
+    const doubt = reach.ms;
     timings.push({
       index: book[i]!.index,
       startMs,
@@ -363,6 +395,9 @@ function anchorTimeDistance(
   pos: number,
   charDist: number,
   msPerChar: number,
+  /** The narrator's own rate, median-measured, with pauses excluded. */
+  readingMsPerChar: number,
+  rate: number,
 ): { ms: number; clamped: boolean } {
   const last = anchorBook.length - 1;
   if (last < 0) return { ms: 0, clamped: false };
@@ -382,7 +417,27 @@ function anchorTimeDistance(
   const m1 = anchorMs[hi]!;
   const f = (pos - b0) / Math.max(1, b1 - b0);
   const ms = m0 + f * (m1 - m0);
-  return { ms: Math.max(0, Math.min(ms - m0, m1 - ms)), clamped: false };
+
+  // Two independent things can be wrong inside an unverified span, and the
+  // doubt is their sum.
+  //
+  // The first is drift in reading rate, which grows with distance from a
+  // verified point — that is the `rate` term below.
+  //
+  // The second is time the narrator spent NOT reading: a pause at a chapter
+  // break, a silence, a musical sting. Interpolating at a constant rate
+  // spreads that time evenly across the span, so a pause displaces EVERY
+  // position in the span by up to its own length — including positions that
+  // sit right next to an anchor. Measuring only the distance to the nearer
+  // anchor missed this completely: a fifteen-second chapter break placed the
+  // sentence after it fifteen seconds early while reporting a couple of
+  // hundred milliseconds of doubt, and the switch landed past the reader.
+  //
+  // The span's unexplained time bounds that displacement: whatever the span
+  // lasted, less what its characters should have taken to read.
+  const drift = rate * Math.max(0, Math.min(ms - m0, m1 - ms));
+  const slack = Math.max(0, m1 - m0 - (b1 - b0) * readingMsPerChar);
+  return { ms: drift + slack, clamped: false };
 }
 
 /** Characters from `pos` to the closest anchor, or Infinity when there are none. */

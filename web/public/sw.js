@@ -44,7 +44,7 @@ let cacheOwnedByViewer = true;
    so deliberate airplane-mode reading continues to work (a device that is
    already offline learns about revocation only on reconnect — documented
    in docs/security.md). */
-const authGate = self.vxAuth.createAuthGate({
+const authGate = self.rpAuth.createAuthGate({
   fetchFn: async () => {
     const res = await fetch('/api/auth/me', {
       credentials: 'same-origin',
@@ -315,7 +315,7 @@ function isCatchAllHtml(url, res) {
  */
 async function serveTrack(req, url) {
   const cache = await caches.open(OFFLINE_CACHE);
-  const metaRes = await cache.match(self.vxRange.metaKey(url.pathname));
+  const metaRes = await cache.match(self.rpRange.metaKey(url.pathname));
   if (!metaRes) return fetch(req);
   if (!(await allowCachedPrivate())) return fetch(req);
   const meta = await metaRes.json(); // { size, chunkSize, contentType }
@@ -325,7 +325,7 @@ async function serveTrack(req, url) {
   let end = meta.size - 1;
   let status = 200;
   if (rangeHeader) {
-    const parsed = self.vxRange.parseRangeHeader(rangeHeader, meta.size);
+    const parsed = self.rpRange.parseRangeHeader(rangeHeader, meta.size);
     if (parsed === null) {
       return new Response(null, {
         status: 416,
@@ -339,7 +339,7 @@ async function serveTrack(req, url) {
     }
   }
 
-  const span = self.vxRange.chunkSpan(start, end, meta.chunkSize);
+  const span = self.rpRange.chunkSpan(start, end, meta.chunkSize);
   // Prove every chunk this response promises is present before promising
   // it. A damaged package (an interrupted download, a chunk evicted under
   // storage pressure) must fall through to the network rather than hand the
@@ -347,7 +347,7 @@ async function serveTrack(req, url) {
   // only as a generic decode error.
   const chunks = [];
   for (let i = span.first; i <= span.last; i++) {
-    const chunkRes = await cache.match(self.vxRange.chunkKey(url.pathname, i));
+    const chunkRes = await cache.match(self.rpRange.chunkKey(url.pathname, i));
     if (!chunkRes) return fetch(req);
     chunks.push(chunkRes);
   }
@@ -369,7 +369,7 @@ async function serveTrack(req, url) {
         controller.error(new Error(`unreadable offline chunk ${idx} for ${pathname}`));
         return;
       }
-      const bounds = self.vxRange.sliceWithin(idx, chunkSize, buf.length, start, end);
+      const bounds = self.rpRange.sliceWithin(idx, chunkSize, buf.length, start, end);
       controller.enqueue(buf.subarray(bounds.from, bounds.to));
       idx += 1;
     },

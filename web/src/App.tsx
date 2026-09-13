@@ -13,7 +13,14 @@ import { ShelvesProvider, useShelves } from './state/shelves';
 import { FacetsProvider } from './state/facets';
 import { Drawer, Sheet, ToastProvider } from './components/ui';
 import { Sidebar } from './components/Sidebar';
-import { IconLibrary, IconLink, IconSettings, IconShelf, ReadPortMark } from './components/icons';
+import {
+  IconLibrary,
+  IconLink,
+  IconNotes,
+  IconSettings,
+  IconShelf,
+  ReadPortMark,
+} from './components/icons';
 import { startProgressLifecycle } from './progress/engine';
 import { LoginPage } from './pages/AuthPages';
 import { SetupWizard } from './pages/SetupWizard';
@@ -145,6 +152,9 @@ function Shell() {
       <NavLink to="/" end>
         <IconLibrary size={18} /> Library
       </NavLink>
+      <NavLink to="/notes">
+        <IconNotes size={18} /> Notes
+      </NavLink>
       <NavLink to="/pairs">
         <IconLink size={18} /> Pairing
       </NavLink>
@@ -186,6 +196,18 @@ function Shell() {
       {overlay && !immersive && <ShelfOverlay onClose={() => setOverlay(false)} />}
       {!immersive && (
         <nav className="tabbar" aria-label="Primary">
+          {/* Shelves is a button rather than a link because it opens the same
+              overlay the header button does. On a phone the rail is not on
+              screen, so without this the whole sidebar — shelves, the reading
+              list, browsing by genre — has no way in. */}
+          <button
+            type="button"
+            className="tabbar__shelves"
+            onClick={() => setOverlay(true)}
+            aria-haspopup="dialog"
+          >
+            <IconShelf size={18} /> Shelves
+          </button>
           {nav}
         </nav>
       )}

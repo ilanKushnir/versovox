@@ -261,13 +261,17 @@ async function listenSparsely(
     const grid = gridWindows(audioMs, plan);
     const budget = Math.floor(grid.length * Math.max(0, plan.refineBudget));
 
-    // The bar counts probes, not rounds. Every probe costs about the same, so
-    // a bar that is linear in probes is linear in time — and a linear bar is
-    // the difference between an honest "twelve minutes left" and a number that
-    // reads eight when the answer is thirteen. `planned` grows when a
-    // refinement round is scheduled, which slows the bar down but never sends
-    // it backwards.
-    let planned = grid.length;
+    // The bar counts probes, not rounds: every probe costs about the same, so
+    // a bar linear in probes is linear in time.
+    //
+    // The refinement budget is counted from the start, before a single round
+    // is scheduled. Counting only the grid put the bar at 97% with up to 60%
+    // of the probes still to come, and then dragged it BACKWARDS each time a
+    // round was added — which is precisely the shape that makes a thirteen
+    // minute alignment announce eight. Planning for the worst case means the
+    // bar can only move forward, and a book that needs little refinement
+    // finishes early instead of late, which is the direction to be wrong in.
+    const planned = grid.length + budget;
     let finished = 0;
     const report = () => {
       const f = planned > 0 ? Math.min(1, finished / planned) : 0;
@@ -297,12 +301,15 @@ async function listenSparsely(
       const covered = runs.map((r) => r.window);
       const extra = refineWindows(match.anchors, covered, audioMs, plan, budget - spent);
       if (extra.length === 0) break;
-      planned += extra.length;
       await decodeRound(extra);
       spent += extra.length;
       match = matchChars(book, assembleProbes(runs), { audioMs });
     }
 
+    // Refinement is done, whether or not it used its whole budget. Closing the
+    // gap here is the one forward jump the bar is allowed.
+    finished = planned;
+    report();
     req.onProgress?.(0.97, 'Matching the narration to the text');
     return {
       match,

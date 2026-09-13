@@ -209,13 +209,13 @@ Everything ReadPort owns is in the `/data` volume (the `/cache` and
 ```bash
 # Backup (container can stay up; SQLite is WAL with a single writer host)
 docker compose stop readport   # optional but recommended for a clean copy
-docker run --rm -v readport_vx-data:/data -v "$PWD":/backup alpine \
+docker run --rm -v readport_rp-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/readport-data-$(date +%F).tar.gz -C /data .
 docker compose start readport
 
 # Restore
 docker compose down
-docker run --rm -v readport_vx-data:/data -v "$PWD":/backup alpine \
+docker run --rm -v readport_rp-data:/data -v "$PWD":/backup alpine \
   sh -c "rm -rf /data/* && tar xzf /backup/readport-data-YYYY-MM-DD.tar.gz -C /data"
 docker compose up -d
 ```

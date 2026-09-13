@@ -395,7 +395,8 @@ select.input {
   -webkit-backdrop-filter: blur(12px);
   border-block-start: 1px solid var(--rp-border);
 }
-.tabbar a {
+.tabbar a,
+.tabbar__shelves {
   display: flex;
   flex-direction: column;
   align-items: center;
